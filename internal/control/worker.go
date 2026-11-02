@@ -1,0 +1,125 @@
+package control
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/KeepS13/HQIP/internal/provision"
+	"github.com/KeepS13/HQIP/internal/store"
+)
+
+func (s *Server) signal() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+func (s *Server) RunWorker(ctx context.Context) error {
+	if err := s.Store.RecoverJobs(); err != nil {
+		return err
+	}
+	_ = s.Store.Maintenance()
+	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
+	defer stopMaintenance()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-maintenanceCtx.Done():
+				return
+			case <-ticker.C:
+				_ = s.Store.Maintenance()
+			}
+		}
+	}()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		job, err := s.Store.NextJob()
+		if err == nil {
+			s.runJob(ctx, job)
+			continue
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-s.wake:
+		case <-ticker.C:
+		}
+	}
+}
+func (s *Server) runJob(parent context.Context, job store.Job) {
+	node, err := s.Store.Node(job.NodeID)
+	if err != nil {
+		s.Store.FinishJob(job, false)
+		return
+	}
+	password, token, probe, err := s.Store.NodeSecrets(node.ID)
+	if err != nil {
+		_ = s.Store.SetStatus(node.ID, "error", "读取节点凭据失败，请检查主密钥", node.SharedHost)
+		s.Store.FinishJob(job, false)
+		return
+	}
+	if job.Kind == "install" && password == "" {
+		_ = s.Store.SetStatus(node.ID, "error", "SSH 密码已过期，请重新输入密码并重试", node.SharedHost)
+		_ = s.Store.Event(node.ID, "error", "SSH 密码已过期，请重新输入密码并重试")
+		s.Store.FinishJob(job, false)
+		return
+	}
+	redact := func(message string) string {
+		for _, secret := range []string{password, token, probe} {
+			if secret != "" {
+				message = strings.ReplaceAll(message, secret, "[已隐藏]")
+			}
+		}
+		return message
+	}
+	log := func(stage, message string) { _ = s.Store.Event(node.ID, stage, redact(message)) }
+	ctx, cancel := context.WithTimeout(parent, 15*time.Minute)
+	defer cancel()
+	input := provision.Input{Node: node, Password: password, AgentToken: token, ProbePassword: probe}
+	var output provision.Result
+	if job.Kind == "install" {
+		_ = s.Store.SetStatus(node.ID, "installing", "正在通过 SSH 安装节点", node.SharedHost)
+		output, err = s.runner.Install(ctx, input, log, func(fingerprint string) error { return s.Store.Pin(node.ID, fingerprint) })
+	} else {
+		_ = s.Store.SetStatus(node.ID, "verifying", "正在验证代理连接", node.SharedHost)
+		output, err = s.runner.Verify(ctx, input, log)
+	}
+	if parent.Err() != nil {
+		return
+	} // The durable running job is requeued after restart.
+	if err != nil {
+		message := "部署或验证失败：" + redact(err.Error())
+		_ = s.Store.SetStatus(node.ID, "error", message, output.SharedHost || node.SharedHost)
+		log("error", message)
+		s.Store.FinishJob(job, false)
+		return
+	}
+	if job.Kind == "install" {
+		s.Store.ClearSSHPassword(node.ID)
+	}
+	status, message := "error", "代理验证未通过，请检查端口及网络"
+	if output.SharedHost || node.SharedHost {
+		status = "awaiting_external"
+		message = "本机代理验证通过，等待从用户电脑验证 UDP 和出口 IP"
+	} else if output.Verified {
+		status = "ready"
+		message = "代理连通性验证通过"
+	}
+	if output.Message != "" {
+		message = redact(output.Message)
+	}
+	_ = s.Store.SetStatus(node.ID, status, message, output.SharedHost || node.SharedHost)
+	log(status, message)
+	s.Store.FinishJob(job, output.Verified || output.SharedHost || node.SharedHost)
+}

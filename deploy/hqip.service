@@ -1,0 +1,24 @@
+[Unit]
+Description=HQIP VPN management
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hqip
+Group=hqip
+EnvironmentFile=/etc/hqip/control.env
+ExecStart=/opt/hqip/hqip serve --data-dir /var/lib/hqip --listen 127.0.0.1:8080 --public-url ${HQIP_PUBLIC_URL} --artifact-dir /opt/hqip/artifacts
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hqip
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+LogNamespace=hqip
+
+[Install]
+WantedBy=multi-user.target
