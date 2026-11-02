@@ -71,10 +71,9 @@ func Open(dataDir, baseURL string) (*Store, error) {
 			return nil, err
 		}
 	}
-	var version string
-	if err = db.QueryRow("SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil || version != "1" {
+	if err = migrate(db); err != nil {
 		db.Close()
-		return nil, errors.New("数据库版本不受此程序支持，请使用匹配版本恢复")
+		return nil, err
 	}
 	if err = os.Chmod(filepath.Join(dataDir, "hqip.db"), 0600); err != nil {
 		db.Close()
@@ -154,6 +153,7 @@ func (s *Store) Maintenance() error {
 	}{
 		{"UPDATE nodes SET password='',password_expires=0 WHERE password_expires>0 AND password_expires<?", now.Unix()},
 		{"DELETE FROM sessions WHERE expires<?", now.Unix()},
+		{"DELETE FROM spent_refresh WHERE expires<?", now.Unix()},
 		{"DELETE FROM minute WHERE start<?", now.AddDate(0, 0, -7).Unix()},
 		{"DELETE FROM hourly WHERE start<?", now.AddDate(0, 0, -90).Unix()},
 		{"DELETE FROM daily WHERE start<?", DayStart(now.AddDate(0, -13, 0))},
@@ -214,6 +214,15 @@ func (s *Store) ReconcileRestore() error {
 		return err
 	}
 	if _, err = tx.Exec("DELETE FROM sessions"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE client_sessions SET revoked=1"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE device_config SET revision=MAX(revision+1,?)", s.Now().UnixMilli()); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE removals SET immediate=1 WHERE status NOT IN ('revoked','cancelled')"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("UPDATE nodes SET password='',password_expires=0 WHERE password_expires>0 AND password_expires<=?", s.Now().Unix()); err != nil {

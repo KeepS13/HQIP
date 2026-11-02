@@ -52,6 +52,7 @@ import {
   useToast,
 } from "../components";
 import type { Device, DeviceDetail, Overview } from "../types";
+import { DeviceClients } from "./DeviceClients";
 
 export function AddDevice({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState(""),
@@ -96,7 +97,8 @@ export function AddDevice({ onClose }: { onClose: () => void }) {
           />
         </Field>
         <Notice>
-          创建后会生成独立订阅链接，包含全部验证通过的节点。建议一台设备使用一个订阅。
+          创建后请在设备详情中分配可用节点。Windows
+          客户端使用独立设备账号登录，Clash 使用专属订阅链接。
         </Notice>
         <ErrorNotice message={error} />
         <div className="modal-actions">
@@ -179,7 +181,7 @@ export function Devices() {
         </span>
         <div>
           <strong>一台设备，一个专属订阅</strong>
-          <p>独立连接凭据，可随时停用或轮换。订阅支持 Clash / Mihomo。</p>
+          <p>Windows 客户端独立登录，也可使用 Clash / Mihomo 订阅。</p>
         </div>
         <Link to="/guide">
           查看连接指南 <ArrowRight size={15} />
@@ -371,7 +373,11 @@ export function DevicePage() {
     return <ErrorNotice message={error} retry={() => void refresh()} />;
   const { device, nodes } = data,
     unknown = (nodes || []).some((n) => !onlineKnown(n)),
-    ready = (nodes || []).filter((n) => n.status === "ready"),
+    ready = (nodes || []).filter(
+      (n) =>
+        n.status === "ready" &&
+        (!data.assignment || data.assignment.nodeIds.includes(n.id)),
+    ),
     month = device.monthUpload + device.monthDownload;
   return (
     <>
@@ -447,6 +453,7 @@ export function DevicePage() {
           }
         />
       </div>
+      <DeviceClients detail={data} refresh={refresh} />
       <Panel
         title="专属订阅链接"
         subtitle="支持 Clash Verge Rev 等使用 Mihomo 核心的客户端"
@@ -500,7 +507,7 @@ export function DevicePage() {
       </Panel>
       {!ready.length && (
         <Notice tone="warning">
-          目前还没有通过验证的节点。先完成节点部署和真实代理验证，再更新客户端订阅。
+          目前没有已分配且通过验证的节点。请先完成节点部署、真实代理验证与设备分配，再更新客户端配置。
         </Notice>
       )}
       <TrafficChart

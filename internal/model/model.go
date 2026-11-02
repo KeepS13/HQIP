@@ -27,6 +27,8 @@ type Node struct {
 	Message           string     `json:"message"`
 	HostKey           string     `json:"hostKey"`
 	SharedHost        bool       `json:"sharedHost"`
+	ControlOnNode     bool       `json:"controlOnNode"`
+	ACMEViaCaddy      bool       `json:"acmeViaCaddy"`
 	CreatedAt         time.Time  `json:"createdAt"`
 	LastSeen          *time.Time `json:"lastSeen"`
 	Metrics           Metrics    `json:"metrics"`
@@ -57,9 +59,19 @@ type Device struct {
 }
 
 type AgentDevice struct {
-	ID       string `json:"id"`
-	Password string `json:"password"`
-	Enabled  bool   `json:"enabled"`
+	ID                 string `json:"id"`
+	Password           string `json:"password"`
+	Enabled            bool   `json:"enabled"`
+	RemovalID          string `json:"removalId,omitempty"`
+	RevokeAfterSeconds int    `json:"revokeAfterSeconds,omitempty"`
+}
+
+// Deadline is chosen once by the node on first receipt and survives restarts.
+type AgentRemovalStatus struct {
+	ID       string    `json:"id"`
+	DeviceID string    `json:"deviceId"`
+	Status   string    `json:"status"`
+	Deadline time.Time `json:"deadline"`
 }
 
 type AgentDesired struct {
@@ -78,14 +90,16 @@ type UsageBucket struct {
 }
 
 type AgentReport struct {
-	At               time.Time      `json:"at"`
-	Revision         int64          `json:"revision"`
-	Metrics          Metrics        `json:"metrics"`
-	CoreHealthy      bool           `json:"coreHealthy"`
-	Online           map[string]int `json:"online"`
-	Daily            []UsageBucket  `json:"daily"`
-	Minutes          []UsageBucket  `json:"minutes"`
-	HistoryCompacted bool           `json:"historyCompacted"`
+	At               time.Time            `json:"at"`
+	Revision         int64                `json:"revision"`
+	Metrics          Metrics              `json:"metrics"`
+	CoreHealthy      bool                 `json:"coreHealthy"`
+	Online           map[string]int       `json:"online"`
+	Daily            []UsageBucket        `json:"daily"`
+	Minutes          []UsageBucket        `json:"minutes"`
+	HistoryCompacted bool                 `json:"historyCompacted"`
+	Removals         []AgentRemovalStatus `json:"removals,omitempty"`
+	Warnings         []string             `json:"warnings,omitempty"`
 }
 
 type AgentConfig struct {

@@ -32,6 +32,25 @@ func newDevice(t *testing.T, s *Store, name string) model.Device {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodes, err := s.Nodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, n := range nodes {
+		ids = append(ids, n.ID)
+	}
+	defaultID := ""
+	if len(ids) > 0 {
+		defaultID = ids[0]
+	}
+	a, err := s.Assignment(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Assign(d.ID, ids, defaultID, a.Revision); err != nil {
+		t.Fatal(err)
+	}
 	return d
 }
 func report(t *testing.T, s *Store, n model.Node, d model.Device, at time.Time, up, down int64) {

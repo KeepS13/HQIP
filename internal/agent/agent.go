@@ -39,6 +39,10 @@ type cachedState struct {
 	AppliedRevision int64                        `json:"appliedRevision"`
 	Credentials     map[string]cachedCredential  `json:"credentials"`
 	Pending         map[string]pendingRevocation `json:"pending"`
+	Removals        map[string]cachedRemoval     `json:"removals"`
+	DeniedHashes    map[string]bool              `json:"deniedHashes"`
+	LastRestart     int64                        `json:"lastRestart"`
+	Warning         string                       `json:"warning,omitempty"`
 }
 
 type liveState struct {
@@ -60,7 +64,9 @@ type Agent struct {
 	liveMu        sync.RWMutex
 	live          liveState
 	metrics       systemMetrics
+	sampleMu      sync.Mutex
 	generation    func(context.Context) (string, error)
+	restartCore   func(context.Context) error
 	now           func() time.Time
 	drainGrace    time.Duration
 	revokeWake    chan struct{}
@@ -100,6 +106,7 @@ func New(cfg model.AgentConfig, logger *slog.Logger) (*Agent, error) {
 		now: time.Now, drainGrace: 2 * time.Second, revokeWake: make(chan struct{}, 1),
 	}
 	a.generation = a.systemdGeneration
+	a.restartCore = a.systemdRestart
 	return a, nil
 }
 
@@ -205,7 +212,7 @@ func (a *Agent) authenticate(w http.ResponseWriter, r *http.Request) {
 	}{}
 	a.cacheMu.RLock()
 	for id, credential := range a.cache.Credentials {
-		if _, denied := a.cache.Pending[id]; denied || !credential.Enabled {
+		if _, denied := a.cache.Pending[id]; denied || !credential.Enabled || credentialDenied(a.cache, credential.Hash, a.now()) {
 			continue
 		}
 		if subtle.ConstantTimeCompare([]byte(hash), []byte(credential.Hash)) == 1 {
@@ -231,7 +238,7 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 	credentials := make(map[string]cachedCredential, len(desired.Devices))
 	seenHashes := make(map[string]bool, len(desired.Devices))
 	for _, device := range desired.Devices {
-		if len(device.ID) == 0 || len(device.ID) > 128 || len(device.Password) < 16 || len(device.Password) > 1024 {
+		if len(device.ID) == 0 || len(device.ID) > 128 || len(device.Password) < 16 || len(device.Password) > 1024 || len(device.RemovalID) > 128 || device.RevokeAfterSeconds < 0 || device.RevokeAfterSeconds > 60 {
 			return errors.New("控制服务返回无效设备凭据")
 		}
 		hash := passwordHash(device.Password)
@@ -247,27 +254,51 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 		return nil
 	}
 	replay := desired.Revision-a.cache.DesiredRevision > 1
-	next := cachedState{
-		DesiredRevision: desired.Revision, AppliedRevision: a.cache.AppliedRevision,
-		Credentials: credentials, Pending: make(map[string]pendingRevocation),
-	}
-	for id, pending := range a.cache.Pending {
-		next.Pending[id] = pending
+	next := cloneCache(a.cache)
+	next.DesiredRevision, next.Credentials = desired.Revision, credentials
+	now := a.now()
+	for _, device := range desired.Devices {
+		if device.RemovalID == "" {
+			continue
+		}
+		hash := credentials[device.ID].Hash
+		removal, exists := next.Removals[device.RemovalID]
+		if exists && (removal.DeviceID != device.ID || removal.Hash != hash) {
+			return errors.New("撤销指令标识不可重复用于其他凭据")
+		}
+		if !exists {
+			// Every removal has a maximum 60-second local grace, regardless of
+			// later control revisions. Ordinary credentials have no expiration.
+			seconds := device.RevokeAfterSeconds
+			if seconds == 0 && device.Enabled {
+				seconds = 60
+			}
+			removal = cachedRemoval{DeviceID: device.ID, Hash: hash, Deadline: now.Add(time.Duration(seconds) * time.Second)}
+		}
+		if !device.Enabled && removal.Deadline.After(now) {
+			removal.Deadline = now
+		}
+		next.Removals[device.RemovalID] = removal
 	}
 	for id, old := range a.cache.Credentials {
 		current, exists := credentials[id]
 		if old.Enabled && (!exists || !current.Enabled || current.Hash != old.Hash) {
-			next.Pending[id] = pendingRevocation{Since: a.now().UnixNano()}
+			next.DeniedHashes[old.Hash] = true
+			beginRevoke(&next, id, now)
 		}
 	}
-	if len(next.Pending) == 0 {
-		next.AppliedRevision = desired.Revision
+	for id, credential := range next.Credentials {
+		if !credential.Enabled && !next.DeniedHashes[credential.Hash] {
+			next.DeniedHashes[credential.Hash] = true
+			beginRevoke(&next, id, now)
+		}
 	}
+	expireRemovals(&next, now)
+	advanceApplied(&next)
 	if err := a.ledger.saveCache(next); err != nil {
-		// Fail closed for newly revoked credentials even if local storage is full.
-		for id, pending := range next.Pending {
-			a.cache.Pending[id] = pending
-		}
+		// No grant is installed on disk failure. Removals still fail closed in
+		// memory; their revision is not acknowledged until persistence succeeds.
+		a.cache.Pending, a.cache.Removals, a.cache.DeniedHashes = next.Pending, next.Removals, next.DeniedHashes
 		return err
 	}
 	a.cache = next
@@ -337,6 +368,8 @@ func (a *Agent) statsJSON(ctx context.Context, method, path string, body any, ou
 }
 
 func (a *Agent) sample(ctx context.Context) error {
+	a.sampleMu.Lock()
+	defer a.sampleMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 900*time.Millisecond)
 	defer cancel()
 	generation, err := a.generation(ctx)
@@ -467,6 +500,10 @@ func (a *Agent) sync(ctx context.Context) error {
 	}
 	a.cacheMu.RLock()
 	report.Revision = a.cache.AppliedRevision
+	report.Removals = removalStatuses(a.cache)
+	if a.cache.Warning != "" {
+		report.Warnings = []string{a.cache.Warning}
+	}
 	a.cacheMu.RUnlock()
 	a.liveMu.RLock()
 	report.Metrics = a.live.Metrics
@@ -508,22 +545,28 @@ func (a *Agent) syncLoop(ctx context.Context) {
 }
 
 func (a *Agent) drainRevocations(ctx context.Context) error {
-	a.cacheMu.RLock()
+	a.cacheMu.Lock()
+	next := cloneCache(a.cache)
+	if expireRemovals(&next, a.now()) {
+		if err := a.ledger.saveCache(next); err != nil {
+			a.cache.Pending, a.cache.DeniedHashes = next.Pending, next.DeniedHashes
+			a.cacheMu.Unlock()
+			return err
+		}
+		a.cache = next
+	}
 	revision := a.cache.DesiredRevision
 	pending := make(map[string]pendingRevocation, len(a.cache.Pending))
 	for id, value := range a.cache.Pending {
 		pending[id] = value
 	}
-	a.cacheMu.RUnlock()
+	a.cacheMu.Unlock()
 	if len(pending) == 0 {
 		return nil
 	}
 	var online map[string]int
 	if err := a.statsJSON(ctx, http.MethodGet, "/online", nil, &online); err != nil || online == nil {
-		if err != nil {
-			return err
-		}
-		return errors.New("无法确认被撤销设备已离线")
+		return a.forceDrainIfOverdue(ctx, pending, errors.New("无法确认被撤销设备已离线"))
 	}
 	var kick []string
 	now := a.now()
@@ -539,26 +582,25 @@ func (a *Agent) drainRevocations(ctx context.Context) error {
 	if len(kick) > 0 {
 		sort.Strings(kick)
 		if err := a.statsJSON(ctx, http.MethodPost, "/kick", kick, nil); err != nil {
-			return err
+			return a.forceDrainIfOverdue(ctx, pending, err)
 		}
+	}
+	if len(kick) > 0 && overdue(pending, now) {
+		return a.forceDrainIfOverdue(ctx, pending, errors.New("持续踢出后仍有旧会话"))
 	}
 	a.cacheMu.Lock()
 	defer a.cacheMu.Unlock()
 	if a.cache.DesiredRevision != revision {
 		return nil
 	}
-	next := cachedState{
-		DesiredRevision: a.cache.DesiredRevision, AppliedRevision: a.cache.AppliedRevision,
-		Credentials: a.cache.Credentials, Pending: pending,
-	}
+	next = cloneCache(a.cache)
+	next.Pending = pending
 	for id, value := range next.Pending {
 		if value.ZeroSince != 0 && now.Sub(time.Unix(0, value.ZeroSince)) >= a.drainGrace && now.Sub(time.Unix(0, value.Since)) >= a.drainGrace {
-			delete(next.Pending, id)
+			finishRevoke(&next, id, now)
 		}
 	}
-	if len(next.Pending) == 0 {
-		next.AppliedRevision = next.DesiredRevision
-	}
+	advanceApplied(&next)
 	if err := a.ledger.saveCache(next); err != nil {
 		return err
 	}

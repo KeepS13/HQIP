@@ -39,5 +39,11 @@ https://__DOMAIN__ {
         Referrer-Policy no-referrer
         -Server
     }
-    reverse_proxy 127.0.0.1:8080
+    @hqipPublic path /api/v1/client/* /api/v1/agents/* /sub/* /healthz
+    handle @hqipPublic {
+        reverse_proxy 127.0.0.1:8081
+    }
+    handle {
+        respond "Not Found" 404
+    }
 }

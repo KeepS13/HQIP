@@ -36,8 +36,9 @@ type Input struct {
 	Password, AgentToken, ProbePassword string
 }
 type Result struct {
-	SharedHost, Verified bool
-	ExitIP, Message      string
+	SharedHost, Verified        bool
+	ControlOnNode, ACMEViaCaddy bool
+	ExitIP, Message             string
 }
 type LogFunc func(stage, message string)
 type PinFunc func(fingerprint string) error
@@ -266,8 +267,9 @@ command -v ss >/dev/null
 		return res, errors.New("可用磁盘不足 256 MiB")
 	}
 	localID, _ := os.ReadFile("/etc/machine-id")
-	res.SharedHost = strings.TrimSpace(string(localID)) != "" && strings.TrimSpace(string(localID)) == lines[3]
-	if res.SharedHost && base.Hostname() != in.Node.Domain {
+	res.ControlOnNode, res.ACMEViaCaddy = deploymentTopology(in.Node, string(localID), lines[3], runtime.GOOS)
+	res.SharedHost = res.ACMEViaCaddy
+	if res.ControlOnNode && base.Hostname() != in.Node.Domain {
 		return res, errors.New("同机节点请使用控制台域名，以保证 ACME 验证路由正确")
 	}
 	check := fmt.Sprintf(`set -eu
@@ -278,11 +280,11 @@ else
  for p in 18081 18082; do test -z "$(ss -H -ltn "sport = :$p")" || { echo local-port-conflict; exit 1; }; done
 fi
 `, shellQuote(in.Node.ID), in.Node.Port)
-	if !res.SharedHost {
+	if !res.ACMEViaCaddy {
 		check += `test -z "$(ss -H -ltn 'sport = :80')" || test -f /etc/hqip-node/owner || { echo http-port-conflict; exit 1; }
 `
 	} else {
-		check += `test -f /etc/hqip/Caddyfile || { echo missing-shared-caddy; exit 1; }
+		check += `test -f /etc/hqip/Caddyfile && grep -Fq '127.0.0.1:18080' /etc/hqip/Caddyfile && grep -Fq '/.well-known/acme-challenge/' /etc/hqip/Caddyfile || { echo missing-shared-caddy-route; exit 1; }
 `
 	}
 	out, err = rm.run(ctx, check, nil)
@@ -321,7 +323,7 @@ fi
 	}
 	ac := model.AgentConfig{ControlURL: strings.TrimRight(r.options.ControlURL, "/"), NodeID: in.Node.ID, Token: in.AgentToken, Listen: "127.0.0.1:18081", StatePath: "/var/lib/hqip-agent/state.db", StatsURL: "http://127.0.0.1:18082", StatsSecret: statsSecret, HysteriaService: "hqip-hysteria.service"}
 	agentJSON, _ := json.MarshalIndent(ac, "", "  ")
-	hyYAML, err := serverConfig(in.Node, res.SharedHost, statsSecret)
+	hyYAML, err := serverConfig(in.Node, res.ACMEViaCaddy, statsSecret)
 	if err != nil {
 		return res, err
 	}
@@ -354,6 +356,7 @@ systemctl restart hqip-hysteria.service
 	}
 	log("verify", "等待证书签发和节点鉴权同步，然后验证实际代理连接")
 	var lastErr error
+	in.Node.ControlOnNode, in.Node.ACMEViaCaddy, in.Node.SharedHost = res.ControlOnNode, res.ACMEViaCaddy, res.SharedHost
 	for attempt := 0; attempt < 18; attempt++ {
 		if err = wait(ctx, 5*time.Second); err != nil {
 			return res, err
@@ -362,8 +365,8 @@ systemctl restart hqip-hysteria.service
 		vr, e := r.Verify(verifyCtx, Input{Node: in.Node, ProbePassword: in.ProbePassword}, log)
 		cancel()
 		if e == nil {
-			vr.SharedHost = res.SharedHost
-			if res.SharedHost {
+			vr.SharedHost, vr.ControlOnNode, vr.ACMEViaCaddy = res.SharedHost, res.ControlOnNode, res.ACMEViaCaddy
+			if res.ControlOnNode {
 				vr.Verified = false
 				vr.Message = "节点已安装并通过本机代理验证，等待外部 Mihomo 验证"
 			}
@@ -374,10 +377,10 @@ systemctl restart hqip-hysteria.service
 	return res, fmt.Errorf("组件已安装，但代理验证失败：%w", lastErr)
 }
 
-func serverConfig(n model.Node, shared bool, statsSecret string) ([]byte, error) {
+func serverConfig(n model.Node, acmeViaCaddy bool, statsSecret string) ([]byte, error) {
 	listenHost := "0.0.0.0"
 	port := 80
-	if shared {
+	if acmeViaCaddy {
 		listenHost = "127.0.0.1"
 		port = 18080
 	}
@@ -394,14 +397,16 @@ func serverConfig(n model.Node, shared bool, statsSecret string) ([]byte, error)
 }
 
 func (r *Runner) Verify(ctx context.Context, in Input, log LogFunc) (Result, error) {
-	res := Result{SharedHost: in.Node.SharedHost}
+	controlOnNode := in.Node.ControlOnNode && runtime.GOOS == "linux"
+	res := Result{SharedHost: in.Node.SharedHost, ControlOnNode: controlOnNode, ACMEViaCaddy: in.Node.ACMEViaCaddy || in.Node.SharedHost}
 	if in.ProbePassword == "" {
 		return res, errors.New("缺少专用探测凭据")
 	}
-	if runtime.GOOS != "linux" {
-		return res, errors.New("自动探测在 Linux 控制服务器执行；本机可使用外部 Mihomo 验证脚本")
+	artifactName, err := probeArtifact(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return res, err
 	}
-	binary, err := r.artifact("hysteria-linux-" + runtime.GOARCH)
+	binary, err := r.artifact(artifactName)
 	if err != nil {
 		return res, err
 	}
@@ -410,7 +415,7 @@ func (r *Runner) Verify(ctx context.Context, in Input, log LogFunc) (Result, err
 		return res, err
 	}
 	defer os.RemoveAll(dir)
-	binPath := filepath.Join(dir, "hysteria")
+	binPath := filepath.Join(dir, artifactName)
 	if err = os.WriteFile(binPath, binary, 0700); err != nil {
 		return res, err
 	}
@@ -428,6 +433,7 @@ func (r *Runner) Verify(ctx context.Context, in Input, log LogFunc) (Result, err
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(childCtx, binPath, "client", "--config", configPath, "--log-level", "error")
+	hideProbeCommand(cmd)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err = cmd.Start(); err != nil {
@@ -472,7 +478,7 @@ func (r *Runner) Verify(ctx context.Context, in Input, log LogFunc) (Result, err
 			return res, fmt.Errorf("出口 IP %s 与登记公网 IP 不一致", ip)
 		}
 		res.ExitIP = ip
-		res.Verified = !in.Node.SharedHost
+		res.Verified = !res.ControlOnNode
 		res.Message = "TLS、UDP 代理连接与出口 IP 已验证"
 		return res, nil
 	}

@@ -23,4 +23,43 @@ jobs:
       - run: npm --prefix web run build
       - run: go vet ./...
       - run: go test -race ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install paramiko
+      - run: python -m unittest discover -s scripts -p "test_*.py"
       - run: python3 scripts/build.py --skip-web --skip-download
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build
+      - run: npm --prefix desktop/frontend ci
+      - run: npm --prefix desktop/frontend run build
+      - run: go vet ./...
+      - run: go test ./...
+      - run: New-Item -ItemType Directory -Force dist | Out-Null
+        shell: pwsh
+      - run: go build -trimpath -o dist/hqip-windows-amd64.exe ./cmd/hqip
+      - run: go vet ./...
+        working-directory: desktop
+      - run: go test ./...
+        working-directory: desktop
+      - run: python scripts/build_desktop.py --skip-web

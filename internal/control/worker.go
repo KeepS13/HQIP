@@ -108,8 +108,9 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	if job.Kind == "install" {
 		s.Store.ClearSSHPassword(node.ID)
 	}
+	_ = s.Store.SetTopology(node.ID, output.ControlOnNode, output.ACMEViaCaddy)
 	status, message := "error", "代理验证未通过，请检查端口及网络"
-	if output.SharedHost || node.SharedHost {
+	if output.ControlOnNode {
 		status = "awaiting_external"
 		message = "本机代理验证通过，等待从用户电脑验证 UDP 和出口 IP"
 	} else if output.Verified {
@@ -119,7 +120,7 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	if output.Message != "" {
 		message = redact(output.Message)
 	}
-	_ = s.Store.SetStatus(node.ID, status, message, output.SharedHost || node.SharedHost)
+	_ = s.Store.SetStatus(node.ID, status, message, output.ACMEViaCaddy)
 	log(status, message)
-	s.Store.FinishJob(job, output.Verified || output.SharedHost || node.SharedHost)
+	s.Store.FinishJob(job, output.Verified || output.ControlOnNode)
 }

@@ -99,6 +99,16 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 	if _, err = tx.Exec("UPDATE nodes SET applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
 		return err
 	}
+	if err = s.recordRemovals(tx, nodeID, r.Removals); err != nil {
+		return err
+	}
+	if len(r.Warnings) > 0 {
+		// Agent messages can contain runtime diagnostics; persist a bounded,
+		// non-secret notice rather than arbitrary remote text in audit logs.
+		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "agent-warning:"+nodeID, "节点 Agent 报告撤销处理告警，请检查节点日志"); err != nil {
+			return err
+		}
+	}
 	if r.HistoryCompacted {
 		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "history:"+nodeID, fmt.Sprint(now.Unix())); err != nil {
 			return err
@@ -191,6 +201,10 @@ func (s *Store) Alerts(nodes []model.Node) []Alert {
 		var gap string
 		if s.DB.QueryRow("SELECT value FROM metadata WHERE key=?", "history:"+n.ID).Scan(&gap) == nil {
 			alerts = append(alerts, Alert{"warning", n.Name + " 曾压缩离线上报队列，部分详细历史可能不完整", n.ID})
+		}
+		var agentWarning string
+		if s.DB.QueryRow("SELECT value FROM metadata WHERE key=?", "agent-warning:"+n.ID).Scan(&agentWarning) == nil {
+			alerts = append(alerts, Alert{"warning", n.Name + "：" + agentWarning, n.ID})
 		}
 	}
 	return alerts

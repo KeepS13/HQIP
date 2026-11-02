@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +53,8 @@ func serve(args []string) error {
 	f := flag.NewFlagSet("serve", flag.ContinueOnError)
 	dir := f.String("data-dir", "/var/lib/hqip", "数据目录")
 	listen := f.String("listen", "127.0.0.1:8080", "监听地址")
+	publicListen := f.String("public-listen", "127.0.0.1:8081", "仅客户端及 Agent API 监听地址")
+	adminOrigin := f.String("admin-origin", "http://127.0.0.1:8080", "本地管理员页面地址")
 	public := f.String("public-url", "", "公网 HTTPS 地址")
 	artifacts := f.String("artifact-dir", "/opt/hqip/artifacts", "节点安装文件目录")
 	if err := f.Parse(args); err != nil {
@@ -64,6 +67,16 @@ func serve(args []string) error {
 	if u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1" {
 		return errors.New("公网网站必须使用 HTTPS")
 	}
+	adminURL, e := url.Parse(*adminOrigin)
+	if e != nil || adminURL.User != nil || adminURL.RawQuery != "" || adminURL.Fragment != "" || (adminURL.Path != "" && adminURL.Path != "/") || adminURL.Scheme != "http" || adminURL.Hostname() != "127.0.0.1" {
+		return errors.New("--admin-origin 必须为本地 http://127.0.0.1:端口")
+	}
+	for _, address := range []string{*listen, *publicListen} {
+		host, _, e := net.SplitHostPort(address)
+		if e != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+			return errors.New("两个监听地址必须使用回环 IP，公网访问只能通过 SSH 隧道")
+		}
+	}
 	db, err := store.Open(*dir, strings.TrimRight(*public, "/"))
 	if err != nil {
 		return err
@@ -72,25 +85,50 @@ func serve(args []string) error {
 	if _, _, _, err = db.Admin(); err != nil {
 		return errors.New("请先运行 hqip init-admin 初始化管理员")
 	}
-	s := control.New(db, control.Options{PublicURL: strings.TrimRight(*public, "/"), ArtifactDir: *artifacts, Assets: web.Assets()})
+	if _, err = db.Rules(); err != nil {
+		return err
+	}
+	s := control.New(db, control.Options{PublicURL: strings.TrimRight(*public, "/"), AdminOrigin: strings.TrimRight(*adminOrigin, "/"), ArtifactDir: *artifacts, Assets: web.Assets()})
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	server := &http.Server{Addr: *listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
-	errCh := make(chan error, 2)
+	adminListener, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	defer adminListener.Close()
+	publicListener, err := net.Listen("tcp", *publicListen)
+	if err != nil {
+		return err
+	}
+	defer publicListener.Close()
+	server := &http.Server{Addr: *listen, Handler: s.AdminHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	publicServer := &http.Server{Addr: *publicListen, Handler: s.PublicHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	errCh := make(chan error, 3)
 	go func() { errCh <- s.RunWorker(ctx) }()
-	go func() { log.Printf("HQIP 控制服务正在监听 %s", *listen); errCh <- server.ListenAndServe() }()
+	go func() {
+		log.Printf("HQIP 本地管理服务正在监听 %s", *listen)
+		errCh <- server.Serve(adminListener)
+	}()
+	go func() {
+		log.Printf("HQIP 客户端及 Agent API 正在监听 %s", *publicListen)
+		errCh <- publicServer.Serve(publicListener)
+	}()
 	select {
 	case <-ctx.Done():
 	case err = <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			cancel()
+			_ = server.Close()
+			_ = publicServer.Close()
 			return err
 		}
 	}
 	cancel()
 	shutdown, done := context.WithTimeout(context.Background(), 15*time.Second)
 	defer done()
-	return server.Shutdown(shutdown)
+	adminErr := server.Shutdown(shutdown)
+	publicErr := publicServer.Shutdown(shutdown)
+	return errors.Join(adminErr, publicErr)
 }
 func initAdmin(args []string) error {
 	f := flag.NewFlagSet("init-admin", flag.ContinueOnError)

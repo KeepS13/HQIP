@@ -40,24 +40,7 @@ func (s *Store) CreateNode(n model.Node, password string) (model.Node, error) {
 	if _, err = tx.Exec("INSERT INTO nodes(id,config,password,password_expires,agent_hash,agent_secret) VALUES(?,?,?,?,?,?)", n.ID, jsonString(n), pass, s.Now().Add(24*time.Hour).Unix(), secure.Hash(agent), agentEnc); err != nil {
 		return n, err
 	}
-	rows, err := tx.Query("SELECT id FROM devices")
-	if err != nil {
-		return n, err
-	}
 	ids := []string{ProbeID(n.ID)}
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
-			return n, err
-		}
-		ids = append(ids, id)
-	}
-	if err = rows.Err(); err != nil {
-		rows.Close()
-		return n, err
-	}
-	rows.Close()
 	for _, id := range ids {
 		enc, e := s.Vault.Encrypt(secure.Token())
 		if e != nil {
@@ -178,6 +161,11 @@ func (s *Store) SetStatus(id, status, message string, shared bool) error {
 	}
 	return nil
 }
+
+func (s *Store) SetTopology(id string, controlOnNode, acmeViaCaddy bool) error {
+	_, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.controlOnNode',json(?),'$.acmeViaCaddy',json(?),'$.sharedHost',json(?)) WHERE id=?", jsonString(controlOnNode), jsonString(acmeViaCaddy), jsonString(acmeViaCaddy), id)
+	return err
+}
 func (s *Store) Pin(id, fingerprint string) error {
 	if fingerprint == "" {
 		return errors.New("SSH 主机指纹不能为空")
@@ -248,7 +236,13 @@ func (s *Store) Desired(id string) (model.AgentDesired, error) {
 	if err != nil {
 		return result, notFound(err)
 	}
-	rows, err := s.DB.Query("SELECT c.device_id,c.password,COALESCE(d.enabled,1) FROM credentials c LEFT JOIN devices d ON d.id=c.device_id WHERE c.node_id=? ORDER BY c.device_id", id)
+	rows, err := s.DB.Query(`SELECT c.device_id,c.password,
+CASE WHEN d.id IS NULL THEN 1 WHEN d.enabled=0 THEN 0 WHEN a.node_id IS NOT NULL THEN 1 WHEN r.id IS NOT NULL AND r.immediate=0 AND r.status!='revoked' THEN 1 ELSE 0 END,
+COALESCE(r.id,''),CASE WHEN r.id IS NOT NULL AND r.immediate=0 AND r.status!='revoked' THEN 60 ELSE 0 END
+FROM credentials c LEFT JOIN devices d ON d.id=c.device_id
+LEFT JOIN assignments a ON a.device_id=c.device_id AND a.node_id=c.node_id
+LEFT JOIN removals r ON r.id=(SELECT rr.id FROM removals rr WHERE rr.device_id=c.device_id AND rr.node_id=c.node_id AND rr.status!='cancelled' ORDER BY rr.created_at DESC,rr.rowid DESC LIMIT 1) AND a.node_id IS NULL
+WHERE c.node_id=? ORDER BY c.device_id`, id)
 	if err != nil {
 		return result, err
 	}
@@ -256,7 +250,7 @@ func (s *Store) Desired(id string) (model.AgentDesired, error) {
 	for rows.Next() {
 		var d model.AgentDevice
 		var enc string
-		if err = rows.Scan(&d.ID, &enc, &d.Enabled); err != nil {
+		if err = rows.Scan(&d.ID, &enc, &d.Enabled, &d.RemovalID, &d.RevokeAfterSeconds); err != nil {
 			return result, err
 		}
 		d.Password, err = s.Vault.Decrypt(enc)

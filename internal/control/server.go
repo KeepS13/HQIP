@@ -23,9 +23,9 @@ type Installer interface {
 	Verify(context.Context, provision.Input, provision.LogFunc) (provision.Result, error)
 }
 type Options struct {
-	PublicURL, ArtifactDir string
-	Assets                 fs.FS
-	Installer              Installer
+	PublicURL, AdminOrigin, ArtifactDir string
+	Assets                              fs.FS
+	Installer                           Installer
 }
 type Server struct {
 	Store     *store.Store
@@ -38,6 +38,9 @@ type Server struct {
 }
 
 func New(s *store.Store, opts Options) *Server {
+	if opts.AdminOrigin == "" {
+		opts.AdminOrigin = opts.PublicURL
+	}
 	runner := opts.Installer
 	if runner == nil {
 		runner = provision.New(provision.Options{ControlURL: opts.PublicURL, ArtifactDir: opts.ArtifactDir})
@@ -46,6 +49,10 @@ func New(s *store.Store, opts Options) *Server {
 }
 
 func (s *Server) Handler() http.Handler {
+	return s.AdminHandler()
+}
+
+func (s *Server) AdminHandler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]bool{"ok": true}) })
 	m.HandleFunc("GET /api/v1/session", s.session)
@@ -62,21 +69,43 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/v1/nodes/{id}/events":                 s.events,
 		"GET /api/v1/devices":                           s.listDevices, "POST /api/v1/devices": s.createDevice,
 		"GET /api/v1/devices/{id}": s.deviceDetail, "PATCH /api/v1/devices/{id}": s.updateDevice,
-		"POST /api/v1/devices/{id}/rotate": s.rotateDevice,
+		"POST /api/v1/devices/{id}/rotate":         s.rotateDevice,
+		"POST /api/v1/devices/{id}/client-account": s.clientAccount,
+		"PATCH /api/v1/devices/{id}/assignment":    s.assignment,
+		"GET /api/v1/rules":                        s.getRules, "PUT /api/v1/rules": s.putRules, "GET /api/v1/rules/export": s.exportRules,
 	} {
 		m.Handle(pattern, s.auth(handler, false))
 	}
+	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
+	m.HandleFunc("/", s.static)
+	return s.headers(m, s.opts.AdminOrigin)
+}
+
+// PublicHandler deliberately has no administrator route or SPA fallback.
+// It remains safe even if the reverse proxy forwards an unexpected URL.
+func (s *Server) PublicHandler() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]bool{"ok": true}) })
 	m.HandleFunc("GET /api/v1/agents/config", s.agentConfig)
 	m.HandleFunc("POST /api/v1/agents/report", s.agentReport)
 	m.HandleFunc("GET /sub/{token}", s.subscription)
-	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
-	m.HandleFunc("/", s.static)
+	m.HandleFunc("POST /api/v1/client/login", s.clientLogin)
+	m.HandleFunc("POST /api/v1/client/refresh", s.clientRefresh)
+	m.HandleFunc("POST /api/v1/client/logout", s.clientLogout)
+	m.HandleFunc("GET /api/v1/client/profile", s.clientProfile)
+	m.HandleFunc("POST /api/v1/client/status", s.clientStatus)
+	m.HandleFunc("GET /api/v1/client/rules/{hash}", s.clientRules)
+	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
+	return s.headers(m, s.opts.PublicURL)
+}
+
+func (s *Server) headers(m http.Handler, origin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-		if strings.HasPrefix(s.opts.PublicURL, "https://") {
+		if strings.HasPrefix(origin, "https://") {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/sub/") {
@@ -99,7 +128,11 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		fail(w, 415, "请使用 JSON 请求格式")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
+	limit := int64(4 << 20)
+	if r.URL.Path == "/api/v1/rules" {
+		limit = 9 << 20
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
@@ -131,7 +164,7 @@ func cookieToken(r *http.Request) string {
 	return c.Value
 }
 func (s *Server) setCookie(w http.ResponseWriter, token string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{Name: "hqip_session", Value: token, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(s.opts.PublicURL, "https://"), SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+	http.SetCookie(w, &http.Cookie{Name: "hqip_session", Value: token, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(s.opts.AdminOrigin, "https://"), SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
 func (s *Server) sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
@@ -139,7 +172,7 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 		return true
 	}
 	u, e := url.Parse(origin)
-	p, e2 := url.Parse(s.opts.PublicURL)
+	p, e2 := url.Parse(s.opts.AdminOrigin)
 	return e == nil && e2 == nil && u.Scheme == p.Scheme && u.Host == p.Host
 }
 

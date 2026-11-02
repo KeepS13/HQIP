@@ -1,0 +1,368 @@
+package client
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/KeepS13/HQIP/internal/rules"
+)
+
+// Platform owns machine changes; the engine never changes the system proxy
+// during candidate validation.
+type Platform interface {
+	SecureDir(string) error
+	Protect([]byte) ([]byte, error)
+	Unprotect([]byte) ([]byte, error)
+	Prepare(*exec.Cmd)
+	Attach(*exec.Cmd) (io.Closer, error)
+	EnableProxy(int) error
+	RestoreProxy() error
+	StartTUN(context.Context, []byte) (func() error, error)
+}
+type Engine interface {
+	Apply(context.Context, Profile, rules.Bundle, string, string, bool, string) error
+	Stop() error
+	Alive() bool
+}
+type Core struct {
+	mu                       sync.Mutex
+	Path, Dir                string
+	Platform                 Platform
+	process                  *exec.Cmd
+	done                     chan struct{}
+	job                      io.Closer
+	cancel                   context.CancelFunc
+	tunStop                  func() error
+	port, apiPort, probePort int
+	secret                   string
+	lastProfile              Profile
+}
+
+func portString(p int) string { return strconv.Itoa(p) }
+func freePort() (int, error) {
+	l, e := net.Listen("tcp", "127.0.0.1:0")
+	if e != nil {
+		return 0, e
+	}
+	p := l.Addr().(*net.TCPAddr).Port
+	e = l.Close()
+	return p, e
+}
+func randomID() string { b := make([]byte, 24); _, _ = rand.Read(b); return hex.EncodeToString(b) }
+func (c *Core) verifyBinary() error {
+	b, e := os.ReadFile(c.Path)
+	if e != nil {
+		return errors.New("未找到配套 sing-box 内核")
+	}
+	h := sha256.Sum256(b)
+	if hex.EncodeToString(h[:]) != CoreSHA256 {
+		return errors.New("sing-box 校验失败，拒绝运行修改过的内核")
+	}
+	return nil
+}
+func (c *Core) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, c.Path, args...)
+	c.Platform.Prepare(cmd)
+	return cmd
+}
+func (c *Core) Check(ctx context.Context, b []byte, path string) error {
+	if e := os.WriteFile(path, b, 0600); e != nil {
+		return e
+	}
+	cmd := c.command(ctx, "check", "-c", path)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if e := cmd.Run(); e != nil {
+		return errors.New("内核配置校验失败，请检查规则与节点参数")
+	}
+	return nil
+}
+func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, mode string, tun bool, server string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e := c.verifyBinary(); e != nil {
+		return e
+	}
+	if e := c.Platform.SecureDir(c.Dir); e != nil {
+		return e
+	}
+	geo := ""
+	if len(b.GeoIPCN.CIDRs) > 0 {
+		source, e := b.GeoIPSource()
+		if e != nil {
+			return e
+		}
+		src := filepath.Join(c.Dir, "geoip-cn.json")
+		geo = filepath.Join(c.Dir, "geoip-cn.srs")
+		if e = os.WriteFile(src, source, 0600); e != nil {
+			return e
+		}
+		cmd := c.command(ctx, "rule-set", "compile", "--output", geo, src)
+		if e = cmd.Run(); e != nil {
+			return errors.New("中国 IP 规则编译失败")
+		}
+	}
+	port, e := freePort()
+	if e != nil {
+		return e
+	}
+	apiPort, e := freePort()
+	if e != nil {
+		return e
+	}
+	secret := randomID()
+	probePort, e := freePort()
+	if e != nil {
+		return e
+	}
+	expectedIP := ""
+	for _, n := range p.Nodes {
+		if n.ID == selected {
+			expectedIP = n.PublicIP
+		}
+	}
+	opts := ConfigOptions{Profile: p, Bundle: b, Selected: selected, Mode: "global", MixedPort: port, ProbePort: probePort, APIPort: apiPort, APISecret: secret, GeoPath: geo, ServerURL: server}
+	data, e := GenerateConfig(opts)
+	if e != nil {
+		return e
+	}
+	candidate := filepath.Join(c.Dir, "candidate.json")
+	if e = c.Check(ctx, data, candidate); e != nil {
+		return e
+	}
+	probeCtx, probeCancel := context.WithCancel(ctx)
+	probe := c.command(probeCtx, "run", "-c", candidate)
+	if e = probe.Start(); e != nil {
+		probeCancel()
+		return errors.New("无法启动候选内核")
+	}
+	job, e := c.Platform.Attach(probe)
+	if e != nil {
+		_ = probe.Process.Kill()
+		_ = probe.Wait()
+		probeCancel()
+		return e
+	}
+	done := make(chan struct{})
+	go func() { _ = probe.Wait(); close(done) }()
+	e = Probe(ctx, probePort, expectedIP)
+	probeCancel()
+	if job != nil {
+		_ = job.Close()
+	}
+	<-done
+	if e != nil {
+		_ = os.Remove(candidate)
+		return e
+	}
+	if e = ctx.Err(); e != nil {
+		return e
+	}
+	// The old route is stopped only after the candidate has passed the probe.
+	_ = c.stopLocked()
+	opts.TUN = tun
+	opts.Mode = mode
+	data, e = GenerateConfig(opts)
+	if e != nil {
+		return e
+	}
+	path := filepath.Join(c.Dir, "active.json")
+	if e = c.Check(ctx, data, path); e != nil {
+		return e
+	}
+	if tun {
+		stop, e := c.Platform.StartTUN(ctx, data)
+		if e != nil {
+			return e
+		}
+		c.tunStop = stop
+		c.port = port
+		c.probePort = probePort
+		c.apiPort = apiPort
+		c.secret = secret
+		if e = Probe(ctx, probePort, expectedIP); e != nil {
+			_ = c.stopLocked()
+			return e
+		}
+		c.lastProfile = p
+		return nil
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
+	c.process = c.command(runCtx, "run", "-c", path)
+	if e = c.process.Start(); e != nil {
+		cancel()
+		c.process = nil
+		return errors.New("内核启动失败")
+	}
+	c.job, e = c.Platform.Attach(c.process)
+	if e != nil {
+		_ = c.process.Process.Kill()
+		_ = c.process.Wait()
+		c.process = nil
+		cancel()
+		return e
+	}
+	c.done = make(chan struct{})
+	proc := c.process
+	done = c.done
+	go func() { _ = proc.Wait(); close(done) }()
+	c.port = port
+	c.probePort = probePort
+	c.apiPort = apiPort
+	c.secret = secret
+	if e = Probe(ctx, probePort, expectedIP); e != nil {
+		_ = c.stopLocked()
+		return e
+	}
+	if e = ctx.Err(); e != nil {
+		_ = c.stopLocked()
+		return e
+	}
+	if e = c.Platform.EnableProxy(port); e != nil {
+		_ = c.stopLocked()
+		return e
+	}
+	c.lastProfile = p
+	return nil
+}
+func (c *Core) Stop() error { c.mu.Lock(); defer c.mu.Unlock(); return c.stopLocked() }
+func (c *Core) stopLocked() error {
+	err := c.Platform.RestoreProxy()
+	if c.tunStop != nil {
+		if e := c.tunStop(); err == nil {
+			err = e
+		}
+		c.tunStop = nil
+	}
+	if c.cancel != nil {
+		c.cancel()
+		c.cancel = nil
+	}
+	if c.job != nil {
+		_ = c.job.Close()
+		c.job = nil
+	}
+	if c.done != nil {
+		select {
+		case <-c.done:
+		case <-time.After(5 * time.Second):
+			if c.process != nil {
+				_ = c.process.Process.Kill()
+			}
+		}
+		c.done = nil
+	}
+	c.process = nil
+	c.port = 0
+	_ = os.Remove(filepath.Join(c.Dir, "active.json"))
+	_ = os.Remove(filepath.Join(c.Dir, "candidate.json"))
+	return err
+}
+func (c *Core) Alive() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tunStop != nil {
+		conn, e := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", portString(c.port)), time.Second)
+		if e == nil {
+			conn.Close()
+		}
+		return e == nil
+	}
+	if c.done == nil {
+		return false
+	}
+	select {
+	case <-c.done:
+		return false
+	default:
+		return true
+	}
+}
+func Probe(ctx context.Context, port int, expectedIP ...string) error {
+	u, _ := url.Parse("http://127.0.0.1:" + portString(port))
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyURL(u)
+	defer transport.CloseIdleConnections()
+	h := &http.Client{Transport: transport, Timeout: 12 * time.Second}
+	for i := 0; i < 30; i++ {
+		conn, e := net.DialTimeout("tcp", u.Host, 100*time.Millisecond)
+		if e == nil {
+			conn.Close()
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://www.cloudflare.com/cdn-cgi/trace", nil)
+	resp, e := h.Do(req)
+	if e != nil {
+		return errors.New("目标节点代理连接失败，已停止代理；不会回退旧节点")
+	}
+	defer resp.Body.Close()
+	data, e := io.ReadAll(io.LimitReader(resp.Body, 32768))
+	if e != nil || resp.StatusCode != 200 || !bytes.Contains(data, []byte("ip=")) {
+		return errors.New("目标节点 HTTPS/出口验证失败")
+	}
+	if len(expectedIP) > 0 && expectedIP[0] != "" {
+		found := ""
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "ip=") {
+				found = strings.TrimPrefix(line, "ip=")
+			}
+		}
+		if net.ParseIP(found) == nil || !net.ParseIP(found).Equal(net.ParseIP(expectedIP[0])) {
+			return errors.New("出口 IP 与目标节点不一致，已停止代理")
+		}
+	}
+	return nil
+}
+func (c *Core) Select(ctx context.Context, id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.port == 0 {
+		return errors.New("内核未连接")
+	}
+	body, _ := json.Marshal(map[string]string{"name": "node-" + id})
+	req, _ := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("http://127.0.0.1:%d/proxies/proxy", c.apiPort), bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+c.secret)
+	req.Header.Set("Content-Type", "application/json")
+	h := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 5 * time.Second}
+	res, e := h.Do(req)
+	if e != nil {
+		return e
+	}
+	res.Body.Close()
+	if res.StatusCode != 204 {
+		return errors.New("节点切换失败")
+	}
+	expectedIP := ""
+	for _, n := range c.lastProfile.Nodes {
+		if n.ID == id {
+			expectedIP = n.PublicIP
+			break
+		}
+	}
+	return Probe(ctx, c.probePort, expectedIP)
+}

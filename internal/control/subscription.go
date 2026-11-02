@@ -20,7 +20,7 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "订阅不存在或已撤销")
 		return
 	}
-	nodes, err := s.Store.Nodes()
+	nodes, err := s.Store.AssignedNodes(device.ID, true)
 	if err != nil {
 		fail(w, 503, "暂时无法生成订阅")
 		return
@@ -97,7 +97,7 @@ func (s *Server) clashConfig(device model.Device, nodes []model.Node) ([]byte, e
 		names = append(names, name)
 		proxies = append(proxies, map[string]any{"name": name, "type": "hysteria2", "server": n.Domain, "port": n.Port, "password": password, "sni": n.Domain, "skip-cert-verify": false})
 	}
-	selectNames := append([]string{"自动测速"}, names...)
+	selectNames := append(append([]string{}, names...), "自动测速")
 	config := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": false,
 		"profile":      map[string]bool{"store-selected": true},
@@ -106,5 +106,14 @@ func (s *Server) clashConfig(device model.Device, nodes []model.Node) ([]byte, e
 		"proxy-groups": []map[string]any{{"name": "节点选择", "type": "select", "proxies": selectNames}, {"name": "自动测速", "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50}},
 		"rules":        []string{"DOMAIN-SUFFIX,local,DIRECT", "DOMAIN-SUFFIX,lan,DIRECT", "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve", "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve", "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve", "IP-CIDR6,::1/128,DIRECT,no-resolve", "IP-CIDR6,fc00::/7,DIRECT,no-resolve", "IP-CIDR6,fe80::/10,DIRECT,no-resolve", "MATCH,节点选择"},
 	}
+	version, err := s.Store.Rules()
+	if err != nil {
+		return nil, err
+	}
+	routeRules, err := version.Bundle.ClashRules("节点选择", "DIRECT")
+	if err != nil {
+		return nil, err
+	}
+	config["rules"] = routeRules
 	return yaml.Marshal(config)
 }

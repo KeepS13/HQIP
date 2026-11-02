@@ -324,7 +324,7 @@ export function Guide() {
       <PageHeader
         eyebrow="QUICK START"
         title="连接指南"
-        description="三步连接你的私人网络，开始使用独立设备订阅。"
+        description="添加节点、分配设备，再通过 Windows 客户端或 Clash 连接。"
       />
       <div className="guide-steps">
         <Panel title="01 · 添加服务器" subtitle="准备好可通过 SSH 连接的服务器">
@@ -343,36 +343,41 @@ export function Guide() {
             添加节点 <ArrowRight size={15} />
           </Link>
         </Panel>
-        <Panel title="02 · 创建设备订阅" subtitle="电脑、手机分别创建一台设备">
+        <Panel
+          title="02 · 创建设备并分配节点"
+          subtitle="电脑、手机分别创建一台登记设备"
+        >
           <span className="guide-icon green">
             <Monitor size={28} />
           </span>
           <p>
-            每台登记设备有独立的订阅链接和节点连接凭据。打开设备详情，复制订阅地址，或者在安装了兼容客户端的电脑上点击「导入
-            Clash」。
+            打开设备详情，选择允许连接的节点和默认节点。Windows
+            客户端需要先初始化设备账号；账号与控制台管理员相互独立。
           </p>
           <p>
-            订阅会包含全部验证通过的可用节点。请妥善保存订阅链接，持有链接的人可以使用你的节点。
+            Clash
+            订阅只包含该设备已分配且验证通过的可用节点。请妥善保存设备密码与订阅链接。
           </p>
           <Link className="text-link" to="/devices?add=1">
             创建设备 <ArrowRight size={15} />
           </Link>
         </Panel>
         <Panel
-          title="03 · 在 Clash 中连接"
-          subtitle="使用支持 Hysteria 2 的 Mihomo 客户端"
+          title="03 · 登录客户端，开始连接"
+          subtitle="HQIP Windows 客户端，或兼容的 Mihomo 客户端"
         >
           <span className="guide-icon blue">
             <CloudDownload size={28} />
           </span>
           <p>
-            打开 Clash Verge Rev 等 Mihomo
-            客户端，在「订阅」页面粘贴链接并导入。更新订阅后，在代理中选择节点，并开启系统代理或虚拟网卡模式。
+            在 HQIP Windows
+            客户端填写控制台地址和设备账号，登录后获取节点与规则。选择规则分流或全局代理，按需开启
+            TUN。手动断开后，配置刷新不会自动重连。
           </p>
           <p>
-            首次连接需要客户端所处网络支持
-            UDP。无法连接时，先检查节点验证状态、服务器防火墙与本地网络的 UDP
-            连通性。
+            使用 Clash
+            时，在「订阅」中导入设备链接，再选择节点。两种客户端都需要当前网络支持
+            UDP；TUN 通常需要管理员权限。
           </p>
           <a
             className="text-link"

@@ -6,6 +6,7 @@ Credentials JSON: {url,username,password}. No credentials are printed.
 """
 from __future__ import annotations
 import argparse, http.cookiejar, json, os, pathlib, secrets, socket, subprocess, tempfile, time, urllib.error, urllib.parse, urllib.request
+import shutil
 import yaml
 
 class API:
@@ -41,9 +42,15 @@ def free_port():
         return listener.getsockname()[1]
 
 class Mihomo:
-    def __init__(self, binary, config_text):
+    def __init__(self, binary, config_text, data_dir=None):
         self.directory = tempfile.TemporaryDirectory(prefix="hqip-mihomo-")
         folder = pathlib.Path(self.directory.name)
+        if data_dir:
+            source_dir = pathlib.Path(data_dir)
+            for name in ("Country.mmdb", "geoip.metadb", "geoip.dat", "ASN.mmdb"):
+                source = source_dir / name
+                if source.is_file():
+                    shutil.copyfile(source, folder / name)
         self.port = free_port()
         self.controller = free_port()
         self.secret = secrets.token_urlsafe(24)
@@ -117,13 +124,14 @@ def main():
     parser.add_argument("--device", required=True)
     parser.add_argument("--mihomo", required=True)
     parser.add_argument("--management-proxy", help="Optional existing HTTP proxy for management API only")
+    parser.add_argument("--mihomo-data", help="Optional local directory with Mihomo GeoIP databases, avoiding external bootstrap downloads")
     args = parser.parse_args()
     api = API(json.loads(pathlib.Path(args.credentials).read_text(encoding="utf-8-sig")), args.management_proxy)
     api.login()
     node = api.request(f"/api/v1/nodes/{args.node}")["node"]
     before = api.request(f"/api/v1/devices/{args.device}")["device"]
     candidate = api.request(f"/api/v1/nodes/{args.node}/verification-config", {"deviceId": args.device})["config"]
-    client = Mihomo(args.mihomo, candidate)
+    client = Mihomo(args.mihomo, candidate, args.mihomo_data)
     try:
         client.select_node(node)
         actual = client.exit_ip()
@@ -147,7 +155,7 @@ def main():
         client.close()
     device = api.request(f"/api/v1/devices/{args.device}")["device"]
     subscription = api.request(device["subscriptionUrl"], raw=True).decode()
-    client = Mihomo(args.mihomo, subscription)
+    client = Mihomo(args.mihomo, subscription, args.mihomo_data)
     try:
         client.select_node(node)
         if client.exit_ip() != node["publicIp"]:

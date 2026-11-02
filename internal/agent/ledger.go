@@ -129,6 +129,12 @@ func (l *ledger) loadCache() (cachedState, error) {
 	if state.Pending == nil {
 		state.Pending = make(map[string]pendingRevocation)
 	}
+	if state.Removals == nil {
+		state.Removals = make(map[string]cachedRemoval)
+	}
+	if state.DeniedHashes == nil {
+		state.DeniedHashes = make(map[string]bool)
+	}
 	return state, nil
 }
 

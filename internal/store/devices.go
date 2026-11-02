@@ -24,20 +24,7 @@ func (s *Store) CreateDevice(name string) (model.Device, error) {
 	if _, err = tx.Exec("INSERT INTO devices(id,name,created_at,token_hash,token_secret) VALUES(?,?,?,?,?)", d.ID, name, s.Now().Unix(), secure.Hash(token), enc); err != nil {
 		return d, err
 	}
-	ids, err := nodeIDs(tx)
-	if err != nil {
-		return d, err
-	}
-	for _, id := range ids {
-		pass, e := s.Vault.Encrypt(secure.Token())
-		if e != nil {
-			return d, e
-		}
-		if _, err = tx.Exec("INSERT INTO credentials(node_id,device_id,password) VALUES(?,?,?)", id, d.ID, pass); err != nil {
-			return d, err
-		}
-	}
-	if _, err = tx.Exec("UPDATE nodes SET desired_revision=desired_revision+1"); err != nil {
+	if _, err = tx.Exec("INSERT INTO device_config(device_id) VALUES(?)", d.ID); err != nil {
 		return d, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -108,7 +95,18 @@ func (s *Store) Device(id string) (model.Device, error) {
 			}
 		}
 	}
-	return d, rows.Err()
+	if err = rows.Err(); err != nil {
+		return d, err
+	}
+	rows.Close()
+	var pending int
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM removals WHERE device_id=? AND status NOT IN ('revoked','cancelled')", id).Scan(&pending); err != nil {
+		return d, err
+	}
+	if pending > 0 {
+		d.PendingSync = true
+	}
+	return d, nil
 }
 func (s *Store) Devices() ([]model.Device, error) {
 	rows, err := s.DB.Query("SELECT id FROM devices ORDER BY created_at DESC,id")
@@ -222,6 +220,20 @@ func (s *Store) UpdateDevice(id string, name *string, enabled *bool, rotate bool
 	if rotate || changed {
 		if _, err = tx.Exec("UPDATE nodes SET desired_revision=desired_revision+1"); err != nil {
 			return d, err
+		}
+		if _, err = tx.Exec("UPDATE device_config SET revision=revision+1 WHERE device_id=?", id); err != nil {
+			return d, err
+		}
+		if _, err = tx.Exec("UPDATE assignments SET required_revision=(SELECT desired_revision FROM nodes WHERE nodes.id=assignments.node_id) WHERE device_id=?", id); err != nil {
+			return d, err
+		}
+		if enabled != nil && !*enabled {
+			if _, err = tx.Exec("UPDATE client_sessions SET revoked=1 WHERE device_id=?", id); err != nil {
+				return d, err
+			}
+			if _, err = tx.Exec("UPDATE removals SET immediate=1 WHERE device_id=? AND status NOT IN ('revoked','cancelled')", id); err != nil {
+				return d, err
+			}
 		}
 	}
 	if err = tx.Commit(); err != nil {

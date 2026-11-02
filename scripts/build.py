@@ -7,6 +7,8 @@ OUT = ROOT / "dist"
 PINNED = {
     "hysteria-linux-amd64": ("https://github.com/HyNetworks/hysteria/releases/download/app/v2.13.0/hysteria-linux-amd64", "907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691"),
     "hysteria-linux-arm64": ("https://github.com/HyNetworks/hysteria/releases/download/app/v2.13.0/hysteria-linux-arm64", "a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677a7"),
+    "hysteria-windows-amd64.exe": ("https://github.com/HyNetworks/hysteria/releases/download/app/v2.13.0/hysteria-windows-amd64.exe", "162ef8fe55dc7ec810dda662908f8e65ec36bd6da39cb87c3bd66184ab68f067"),
+    "hysteria-windows-arm64.exe": ("https://github.com/HyNetworks/hysteria/releases/download/app/v2.13.0/hysteria-windows-arm64.exe", "b22d223025299801cb018cab35120cb8f4f9fe2e73e44b9e60a48963f7dc91e7"),
     "caddy-linux-amd64.tar.gz": ("https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz", "727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b"),
 }
 
@@ -47,6 +49,8 @@ def main():
             env = dict(os.environ, GOOS="linux", GOARCH=arch, CGO_ENABLED="0")
             for command, name in [("hqip", "hqip"), ("hqip-agent", "agent")]:
                 run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"{name}-linux-{arch}"), f"./cmd/{command}"], env=env)
+            env = dict(os.environ, GOOS="windows", GOARCH=arch, CGO_ENABLED="0")
+            run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"hqip-windows-{arch}.exe"), "./cmd/hqip"], env=env)
     if not args.skip_download:
         for name, (url, expected) in PINNED.items():
             download(name, url, expected)
@@ -56,6 +60,7 @@ def main():
                 destination.write(source.read())
     names = [f"{name}-linux-{arch}" for arch in ["amd64", "arm64"] for name in ["hqip", "agent", "hysteria"]]
     names += ["caddy-linux-amd64"]
+    names += [f"{name}-windows-{arch}.exe" for arch in ["amd64", "arm64"] for name in ["hqip", "hysteria"]]
     manifest = {"hysteriaVersion": "2.13.0", "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names if (OUT / name).exists()}}
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print("Release manifest generated.")

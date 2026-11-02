@@ -27,7 +27,42 @@ func newServer(t *testing.T) (*Server, http.Handler) {
 		t.Fatal(err)
 	}
 	server := New(s, Options{PublicURL: s.BaseURL})
-	return server, server.Handler()
+	// Historic behavior tests exercise both isolated surfaces through a test-only
+	// dispatcher. Production never exposes this combined handler.
+	admin, public := server.AdminHandler(), server.PublicHandler()
+	return server, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/sub/") || strings.HasPrefix(r.URL.Path, "/api/v1/agents/") || strings.HasPrefix(r.URL.Path, "/api/v1/client/") {
+			public.ServeHTTP(w, r)
+		} else {
+			admin.ServeHTTP(w, r)
+		}
+	})
+}
+
+func createAssignedDevice(t *testing.T, s *Server, name string) (model.Device, error) {
+	t.Helper()
+	d, err := s.Store.CreateDevice(name)
+	if err != nil {
+		return d, err
+	}
+	nodes, err := s.Store.Nodes()
+	if err != nil {
+		return d, err
+	}
+	ids := []string{}
+	for _, n := range nodes {
+		ids = append(ids, n.ID)
+	}
+	defaultID := ""
+	if len(ids) > 0 {
+		defaultID = ids[0]
+	}
+	a, err := s.Store.Assignment(d.ID)
+	if err != nil {
+		return d, err
+	}
+	_, err = s.Store.Assign(d.ID, ids, defaultID, a.Revision)
+	return d, err
 }
 func request(h http.Handler, method, path string, body any, cookie, csrf string) *httptest.ResponseRecorder {
 	var data []byte
@@ -182,7 +217,7 @@ func TestSubscriptionSeparatesCredentialsAndRevokes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.Store.CreateDevice("电脑")
+	d, err := createAssignedDevice(t, s, "电脑")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,10 +276,10 @@ func (f fakeInstaller) Install(ctx context.Context, in provision.Input, log prov
 		return provision.Result{}, err
 	}
 	log("test", in.Password+" "+in.AgentToken+" "+in.ProbePassword)
-	return provision.Result{SharedHost: f.shared, Verified: !f.shared}, nil
+	return provision.Result{SharedHost: f.shared, ACMEViaCaddy: f.shared, ControlOnNode: f.shared, Verified: !f.shared}, nil
 }
 func (f fakeInstaller) Verify(ctx context.Context, in provision.Input, log provision.LogFunc) (provision.Result, error) {
-	return provision.Result{SharedHost: f.shared, Verified: !f.shared}, nil
+	return provision.Result{SharedHost: f.shared, ACMEViaCaddy: f.shared, ControlOnNode: f.shared, Verified: !f.shared}, nil
 }
 func TestSharedHostWorkerRequiresExternalValidationAndErasesSSHSecret(t *testing.T) {
 	s, h := newServer(t)
@@ -296,8 +331,8 @@ func TestDeviceDetailUsesPerDeviceNodeCounters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, _ := s.Store.CreateDevice("a")
-	b, _ := s.Store.CreateDevice("b")
+	a, _ := createAssignedDevice(t, s, "a")
+	b, _ := createAssignedDevice(t, s, "b")
 	desired, _ := s.Store.Desired(n.ID)
 	err = s.Store.Report(n.ID, model.AgentReport{Revision: desired.Revision, Daily: []model.UsageBucket{{DeviceID: a.ID, Start: store.DayStart(time.Now()), Upload: 7}, {DeviceID: b.ID, Start: store.DayStart(time.Now()), Upload: 1000}}})
 	if err != nil {
@@ -323,7 +358,7 @@ func TestVerificationConfigStaysAdminOnlyUntilReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.Store.CreateDevice("verification")
+	d, err := createAssignedDevice(t, s, "verification")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,3 +15,7 @@ coverage.out
 *.exe
 __pycache__/
 *.pyc
+desktop/frontend/node_modules/
+desktop/frontend/dist/
+desktop/frontend/*.tsbuildinfo
+desktop/*.exe

@@ -179,7 +179,27 @@ func (s *Server) deviceDetail(w http.ResponseWriter, r *http.Request) {
 		nodes[i].TotalUpload = tu
 		nodes[i].TotalDownload = td
 	}
-	reply(w, 200, map[string]any{"device": d, "traffic": traffic, "nodes": nodes})
+	assignment, err := s.Store.Assignment(id)
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	account, err := s.Store.ClientAccount(id)
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	sessions, err := s.Store.ClientSessions(id)
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	removals, err := s.Store.Removals(id)
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	reply(w, 200, map[string]any{"device": d, "traffic": traffic, "nodes": nodes, "assignment": assignment, "clientAccount": account, "sessions": sessions, "removals": removals})
 }
 func (s *Server) updateNode(w http.ResponseWriter, r *http.Request) {
 	n, err := s.Store.Node(r.PathValue("id"))
