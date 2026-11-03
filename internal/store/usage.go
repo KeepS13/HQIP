@@ -195,9 +195,10 @@ func (s *Store) Traffic(nodeID, deviceID, period string) ([]model.TrafficPoint, 
 }
 
 type Alert struct {
-	Level   string `json:"level"`
-	Message string `json:"message"`
-	NodeID  string `json:"nodeId,omitempty"`
+	Level    string `json:"level"`
+	Message  string `json:"message"`
+	NodeID   string `json:"nodeId,omitempty"`
+	ServerID string `json:"serverId,omitempty"`
 }
 
 func (s *Store) Alerts(nodes []model.Node) []Alert {
@@ -206,27 +207,27 @@ func (s *Store) Alerts(nodes []model.Node) []Alert {
 		if n.MonthlyQuotaBytes != nil && *n.MonthlyQuotaBytes > 0 {
 			ratio := float64(n.MonthUpload+n.MonthDownload) / float64(*n.MonthlyQuotaBytes)
 			if ratio >= 1 {
-				alerts = append(alerts, Alert{"danger", n.Name + " 本月代理流量已达到额度，连接保持正常", n.ID})
+				alerts = append(alerts, Alert{Level: "danger", Message: n.Name + " 本月代理流量已达到额度，连接保持正常", NodeID: n.ID})
 			} else if ratio >= .8 {
-				alerts = append(alerts, Alert{"warning", n.Name + " 本月代理流量已达到额度的 80%", n.ID})
+				alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " 本月代理流量已达到额度的 80%", NodeID: n.ID})
 			}
 		}
 		if n.LastSeen != nil && s.Now().Sub(*n.LastSeen) > 30*time.Second {
-			alerts = append(alerts, Alert{"warning", n.Name + " 心跳超过 30 秒未更新，在线情况未知", n.ID})
+			alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " 心跳超过 30 秒未更新，在线情况未知", NodeID: n.ID})
 		}
-		if n.Metrics.DiskTotal > 0 && (n.Metrics.DiskUsed >= n.Metrics.DiskTotal || n.Metrics.DiskTotal-n.Metrics.DiskUsed < 512*1024*1024) {
-			alerts = append(alerts, Alert{"warning", n.Name + " 可用磁盘不足 512 MiB", n.ID})
+		if n.ServerID == "" && n.Metrics.DiskTotal > 0 && (n.Metrics.DiskUsed >= n.Metrics.DiskTotal || n.Metrics.DiskTotal-n.Metrics.DiskUsed < 512*1024*1024) {
+			alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " 可用磁盘不足 512 MiB", NodeID: n.ID})
 		}
 		if n.DesiredRevision > n.AppliedRevision {
-			alerts = append(alerts, Alert{"info", n.Name + " 的设备配置待同步", n.ID})
+			alerts = append(alerts, Alert{Level: "info", Message: n.Name + " 的设备配置待同步", NodeID: n.ID})
 		}
 		var gap string
 		if s.DB.QueryRow("SELECT value FROM metadata WHERE key=?", "history:"+n.ID).Scan(&gap) == nil {
-			alerts = append(alerts, Alert{"warning", n.Name + " 曾压缩离线上报队列，部分详细历史可能不完整", n.ID})
+			alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " 曾压缩离线上报队列，部分详细历史可能不完整", NodeID: n.ID})
 		}
 		var agentWarning string
 		if s.DB.QueryRow("SELECT value FROM metadata WHERE key=?", "agent-warning:"+n.ID).Scan(&agentWarning) == nil {
-			alerts = append(alerts, Alert{"warning", n.Name + "：" + agentWarning, n.ID})
+			alerts = append(alerts, Alert{Level: "warning", Message: n.Name + "：" + agentWarning, NodeID: n.ID})
 		}
 	}
 	return alerts

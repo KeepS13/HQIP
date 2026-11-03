@@ -3,20 +3,42 @@ package model
 import "time"
 
 type Server struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	SSHHost      string          `json:"sshHost"`
-	SSHPort      int             `json:"sshPort"`
-	SSHUser      string          `json:"sshUser"`
-	HostKey      string          `json:"hostKey"`
-	MachineID    string          `json:"machineId"`
-	Platform     string          `json:"platform"`
-	Architecture string          `json:"architecture"`
-	Revision     int64           `json:"revision"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	LastSeen     *time.Time      `json:"lastSeen,omitempty"`
-	Metrics      Metrics         `json:"metrics"`
-	Addresses    []ServerAddress `json:"addresses"`
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	SSHHost             string          `json:"sshHost"`
+	SSHPort             int             `json:"sshPort"`
+	SSHUser             string          `json:"sshUser"`
+	HostKey             string          `json:"hostKey"`
+	MachineID           string          `json:"machineId"`
+	Platform            string          `json:"platform"`
+	Architecture        string          `json:"architecture"`
+	BandwidthMbps       *float64        `json:"bandwidthMbps"`
+	MonthlyQuotaBytes   *int64          `json:"monthlyQuotaBytes"`
+	Revision            int64           `json:"revision"`
+	CreatedAt           time.Time       `json:"createdAt"`
+	LastSeen            *time.Time      `json:"lastSeen,omitempty"`
+	Metrics             Metrics         `json:"metrics"`
+	Addresses           []ServerAddress `json:"addresses"`
+	NodeCount           int             `json:"nodeCount"`
+	IPCount             int             `json:"ipCount"`
+	MonthUpload         int64           `json:"monthUpload"`
+	MonthDownload       int64           `json:"monthDownload"`
+	TotalUpload         int64           `json:"totalUpload"`
+	TotalDownload       int64           `json:"totalDownload"`
+	ExpectedNodes       int             `json:"expectedNodes"`
+	ReportingNodes      int             `json:"reportingNodes"`
+	RatesStatus         string          `json:"ratesStatus"`
+	MetricsFresh        bool            `json:"metricsFresh"`
+	MetricsSourceNodeID string          `json:"metricsSourceNodeId"`
+	MetricsReportedAt   *time.Time      `json:"metricsReportedAt"`
+}
+
+// UsageTotals are device proxy bytes from the durable ledger, excluding probes.
+type UsageTotals struct {
+	MonthUpload   int64 `json:"monthUpload"`
+	MonthDownload int64 `json:"monthDownload"`
+	TotalUpload   int64 `json:"totalUpload"`
+	TotalDownload int64 `json:"totalDownload"`
 }
 
 type ServerAddress struct {

@@ -18,7 +18,10 @@ func (s *Store) ControllerID() (string, error) {
 }
 
 func validServer(v model.Server) error {
-	if strings.TrimSpace(v.Name) == "" || len(v.Name) > 100 || strings.TrimSpace(v.SSHHost) == "" || len(v.SSHHost) > 253 || strings.ContainsAny(v.SSHHost, "\r\n\x00 /\\") || v.SSHPort < 1 || v.SSHPort > 65535 || v.SSHUser == "" || strings.ContainsAny(v.SSHUser, "\r\n\x00 /\\") {
+	if err := validServerSettings(v.Name, nil, nil); err != nil {
+		return err
+	}
+	if strings.TrimSpace(v.SSHHost) == "" || len(v.SSHHost) > 253 || strings.ContainsAny(v.SSHHost, "\r\n\x00 /\\") || v.SSHPort < 1 || v.SSHPort > 65535 || v.SSHUser == "" || strings.ContainsAny(v.SSHUser, "\r\n\x00 /\\") {
 		return errors.New("服务器名称或 SSH 连接参数无效")
 	}
 	return nil
@@ -33,10 +36,17 @@ func (s *Store) CreateServer(v model.Server) (model.Server, error) {
 	if err := validServer(v); err != nil {
 		return v, err
 	}
+	if err := validServerSettings(v.Name, v.BandwidthMbps, v.MonthlyQuotaBytes); err != nil {
+		return v, err
+	}
 	v.ID = NewID()
 	v.Revision = 1
 	v.CreatedAt = s.Now().UTC()
 	v.Addresses = []model.ServerAddress{}
+	config, err := serverConfigJSON(v)
+	if err != nil {
+		return v, err
+	}
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return v, err
@@ -52,7 +62,7 @@ func (s *Store) CreateServer(v model.Server) (model.Server, error) {
 			return v, errors.New("该主机已经登记，请在已有服务器中管理 IP")
 		}
 	}
-	_, err = tx.Exec("INSERT INTO servers(id,config) VALUES(?,?)", v.ID, jsonString(v))
+	_, err = tx.Exec("INSERT INTO servers(id,config) VALUES(?,?)", v.ID, config)
 	if err != nil {
 		return v, err
 	}
@@ -78,19 +88,8 @@ func (s *Store) Server(id string) (model.Server, error) {
 	if err != nil {
 		return v, err
 	}
-	// Host metrics are a single newest report, never summed across IP nodes.
-	var seen int64
-	var metrics string
-	err = s.DB.QueryRow("SELECT last_seen,metrics FROM nodes WHERE json_extract(config,'$.serverId')=? AND lifecycle!='deleted' ORDER BY last_seen DESC LIMIT 1", id).Scan(&seen, &metrics)
-	if err != nil && err != sql.ErrNoRows {
-		return v, err
-	}
-	if seen > 0 {
-		at := time.Unix(seen, 0).UTC()
-		v.LastSeen = &at
-		_ = json.Unmarshal([]byte(metrics), &v.Metrics)
-	}
-	return v, nil
+	err = s.serverMonitoring(&v)
+	return v, err
 }
 func (s *Store) Servers() ([]model.Server, error) {
 	rows, err := s.DB.Query("SELECT id FROM servers WHERE deleted_at=0 ORDER BY json_extract(config,'$.createdAt') DESC,id")
@@ -147,10 +146,14 @@ func (s *Store) UpdateServer(v model.Server, expected int64) (model.Server, erro
 	}
 	v.CreatedAt = old.CreatedAt
 	v.Revision = rev + 1
-	v.Addresses = nil
-	v.Metrics = model.Metrics{}
-	v.LastSeen = nil
-	if _, err = tx.Exec("UPDATE servers SET config=?,revision=? WHERE id=?", jsonString(v), v.Revision, v.ID); err != nil {
+	// SSH edits must preserve the independently managed capacity settings.
+	v.BandwidthMbps = old.BandwidthMbps
+	v.MonthlyQuotaBytes = old.MonthlyQuotaBytes
+	config, err := serverConfigJSON(v)
+	if err != nil {
+		return v, err
+	}
+	if _, err = tx.Exec("UPDATE servers SET config=?,revision=? WHERE id=?", config, v.Revision, v.ID); err != nil {
 		return v, err
 	}
 	if _, err = tx.Exec("UPDATE nodes SET config=json_set(config,'$.sshHost',?,'$.sshPort',?,'$.sshUser',?,'$.hostKey',?,'$.machineId',?) WHERE json_extract(config,'$.serverId')=? AND lifecycle!='deleted'", v.SSHHost, v.SSHPort, v.SSHUser, v.HostKey, v.MachineID, v.ID); err != nil {

@@ -14,13 +14,23 @@ export default function TrafficChart({
   points = [],
   title = "代理流量趋势",
   subtitle = "上传 + 下载 · 按北京时间统计",
+  period,
+  onPeriodChange,
+  loading = false,
+  error = "",
 }: {
   points: TrafficPoint[];
   title?: string;
   subtitle?: string;
+  period?: "24h" | "7d";
+  onPeriodChange?: (period: "24h" | "7d") => void;
+  loading?: boolean;
+  error?: string;
 }) {
-  const [range, setRange] = useState("24h"),
+  const [localRange, setLocalRange] = useState<"24h" | "7d">("24h"),
     id = useId().replace(/:/g, "");
+  const range = period || localRange;
+  const setRange = (next: "24h" | "7d") => onPeriodChange ? onPeriodChange(next) : setLocalRange(next);
   const cutoff = Date.now() / 1000 - (range === "24h" ? 86400 : 604800),
     data = (points || [])
       .filter((p) => p.at >= cutoff)
@@ -46,6 +56,7 @@ export default function TrafficChart({
         </div>
       }
     >
+      {error && <p className="chart-state" role="status">{points.length ? "刷新失败，显示上次成功数据（已过期）" : "流量数据暂不可用，请稍后重试"}</p>}
       <div className="chart-legend">
         <span>
           <i className="legend-down" />
@@ -57,7 +68,7 @@ export default function TrafficChart({
         </span>
       </div>
       <div className="traffic-chart">
-        {data.length ? (
+        {loading ? <div className="chart-empty" role="status"><span>正在加载{range === "7d" ? " 7 天" : " 24 小时"}流量…</span></div> : data.length ? (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
               data={data}
@@ -136,8 +147,8 @@ export default function TrafficChart({
         ) : (
           <div className="chart-empty">
             <div className="chart-empty-line" />
-            <span>尚无流量数据</span>
-            <small>设备连接并产生流量后，趋势会显示在这里</small>
+            <span>{error ? "流量数据未知" : "尚无流量数据"}</span>
+            <small>{error ? "获取成功后将自动更新" : "设备连接并产生流量后，趋势会显示在这里"}</small>
           </div>
         )}
       </div>

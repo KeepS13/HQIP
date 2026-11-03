@@ -18,7 +18,7 @@ The first administrator login has `mustChangePassword=true`; only session, passw
 - `POST /api/v1/login` `{username,password}` → session object
 - `POST /api/v1/logout` → `{ok:true}`
 - `POST /api/v1/password` `{currentPassword,newPassword}` → `{ok:true}`
-- `GET /api/v1/overview` → `{nodes:Node[],devices:Device[],traffic:TrafficPoint[],alerts:{level:string,message:string,nodeId?:string}[],serverTime:string}`
+- `GET /api/v1/overview` → `{nodes:Node[],devices:Device[],traffic:TrafficPoint[],usage:UsageTotals,alerts:{level:string,message:string,nodeId?:string,serverId?:string}[],serverTime:string}`。`usage` 从计量账本汇总，包含已删除节点/设备的历史贡献，不通过可见节点列表求和。
 - `GET /api/v1/nodes` → `Node[]`; `POST` accepts `{name,serverId,addressId,dnsMode,zoneId?,domain?,port?,bandwidthMbps,monthlyQuotaBytes,password}`; returns Node (202). `dnsMode` 为 `manual/cloudflare`，自动域名可省略 `domain`；手工域名必须有效并指向所选 IP。SSH 与公网 IP 从服务器/IP 清单解析。新界面使用服务器模型；旧直接 SSH 字段仅为兼容路径。
 - `GET /api/v1/nodes/{id}` → `{node:Node,events:TaskEvent[],traffic:TrafficPoint[],devices:Device[]}`. Each returned device's monthly/lifetime counters, `online`, `instances` and `pendingSync` are scoped to this node; identity and subscription URL remain device-wide.
 - `POST /api/v1/nodes/{id}/retry` `{password,takeover?,preflightFingerprint?,certificateMode?,zoneId?}` → Node (202)。显式证书切换保存为待部署任务选项；安装成功才提交节点当前模式。失败及回滚不宣称新模式已应用。
@@ -54,10 +54,12 @@ Node status: `pending`, `installing`, `verifying`, `awaiting_external`, `ready`,
 
 | 请求 | 输入与结果 |
 | --- | --- |
-| `GET /api/v1/servers` | `Server[]`，每台服务器包含 IP 清单及最近一份主机指标 |
-| `POST /api/v1/servers` | `{name,sshHost,sshPort?,sshUser?,password}` → 已通过 SSH 检查的 Server（201），不安装节点 |
-| `GET /api/v1/servers/{id}` | `{server,addresses,nodes}` |
+| `GET /api/v1/servers` | `Server[]`，包含 IP 清单、独立额度、计量汇总、有效节点速率合计及一份主机指标 |
+| `POST /api/v1/servers` | `{name,sshHost,sshPort?,sshUser?,password,bandwidthMbps?,monthlyQuotaBytes?}` → 已通过 SSH 检查的 Server（201），不安装节点；缺省额度为无限 |
+| `GET /api/v1/servers/{id}` | `{server,addresses,nodes,nodeUsage}`，`nodeUsage` 包含已删除节点，`nodes` 仅保留未完成删除的节点 |
 | `PATCH /api/v1/servers/{id}` | 完整服务器表单加 `expectedRevision`，重新验证 SSH 指纹及 machine-id |
+| `PATCH /api/v1/servers/{id}/settings` | `{name,bandwidthMbps,monthlyQuotaBytes,expectedRevision}` → Server；两项额度必须明确提交，`null` 为无限；不调用 SSH，不改节点配置。过期版本返回 409 |
+| `GET /api/v1/servers/{id}/traffic?period=24h\|7d` | `TrafficPoint[]`，24h 为分钟桶，7d 为小时桶；缺省 24h，其他值返回 400 |
 | `DELETE /api/v1/servers/{id}` | `{expectedRevision}`，仅允许全部节点清理完成的服务器 |
 | `GET /api/v1/servers/{id}/addresses` | `ServerAddress[]` |
 | `POST /api/v1/servers/{id}/addresses` | `{publicIp}` → `{id,serverId,ip,createdAt,nodeIds}`（201） |
@@ -70,6 +72,8 @@ Node status: `pending`, `installing`, `verifying`, `awaiting_external`, `ready`,
 | `DELETE /api/v1/devices/{id}` | 无请求体 → 已撤销会话及订阅的 Device（202） |
 
 节点删除必须为预览中的每个受影响设备提交其分配版本；设备默认节点被删除且仍有授权节点时必须显式选择替代，不能静默取第一项。版本冲突返回 409，无任何部分分配更新。删除操作幂等。进行中的安装先取消，已经写入当前控制中心 owner 的部分安装继续承担远端清理义务。
+
+`Server` 的监控字段：`nodeCount/ipCount`、`monthUpload/monthDownload/totalUpload/totalDownload`、`expectedNodes/reportingNodes`、`ratesStatus`（`none/complete/partial/unknown`）、`metricsFresh`、`metricsSourceNodeId`、`metricsReportedAt`。`metrics` 内速率为有效节点合计，CPU/内存/磁盘只取最新有效的一份；`lastSeen` 为最近报告，不等于资源采样时间。用量为字节，速率为字节/秒；页面转换 Mbps 并分别展示双向占用率。`UsageTotals` 包含上述四项流量字段。详细口径见 [服务器监控](monitoring.md)。
 
 `Node` 增加 `serverId,addressId,machineId,authPort,statsPort,installationVersion,certificateMode,dnsMode,zoneId,managed,lifecycle,revision,deletedAt,capabilities,retirement,certificate`。`Server` 提供 SSH 信息和主机身份；`ServerAddress.ip` 为选定公网 IPv4，`nodeIds` 是尚未清理的引用。`Device.lifecycle` 为 `active/revoking/deleted`。常规列表保留未完成的停止或撤销项，完成后隐藏；按 ID 仍可读历史。计量凭据映射不随删除丢失。缺少设备记录的凭据不会被视为探测账户，只有准确的 `__probe_<nodeId>` 可用于探测。
 

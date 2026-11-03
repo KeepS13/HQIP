@@ -20,6 +20,7 @@ export interface Node {
   revision: number;
   lifecycle: string;
   managed: boolean;
+  retirement?: { stopped: boolean };
   dnsMode: string;
   certificateMode: string;
   installationVersion: number;
@@ -80,6 +81,21 @@ export interface ManagedServer {
   createdAt: string;
   lastSeen?: string | null;
   metrics: Metrics;
+  bandwidthMbps: number | null;
+  monthlyQuotaBytes: number | null;
+  monthUpload: number;
+  monthDownload: number;
+  totalUpload: number;
+  totalDownload: number;
+  nodeCount: number;
+  ipCount: number;
+  expectedNodes: number;
+  reportingNodes: number;
+  ratesStatus: "none" | "complete" | "partial" | "unknown";
+  metricsFresh: boolean;
+  metricsSourceNodeId: string;
+  metricsReportedAt?: string | null;
+  addresses?: ServerAddress[];
 }
 export interface ServerAddress {
   id: string;
@@ -135,7 +151,8 @@ export interface Overview {
   nodes: Node[];
   devices: Device[];
   traffic: TrafficPoint[];
-  alerts: { level: string; message: string; nodeId?: string }[];
+  alerts: { level: string; message: string; nodeId?: string; serverId?: string }[];
+  usage: { monthUpload: number; monthDownload: number; totalUpload: number; totalDownload: number };
   serverTime: string;
 }
 export interface NodeDetail {

@@ -26,6 +26,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { api, usePolling } from "../api";
+import QuotaFields from "../QuotaFields";
 import {
   Badge,
   Breadcrumb,
@@ -43,7 +44,6 @@ import {
   Rate,
   RefreshButton,
   StatCard,
-  Toggle,
   TrafficChart,
   bytes,
   date,
@@ -54,85 +54,7 @@ import {
 import { DeployNode, DeleteNode, RetireNode, DeletedNodeNotice } from "./NodeActions";
 import type { Node, NodeDetail, TaskEvent, ManagedServer, ServerAddress, CloudflareSettings, CloudflareZone } from "../types";
 
-function QuotaFields({
-  bandwidth,
-  setBandwidth,
-  quota,
-  setQuota,
-  unit,
-  setUnit,
-}: {
-  bandwidth: string;
-  setBandwidth: (v: string) => void;
-  quota: string;
-  setQuota: (v: string) => void;
-  unit: string;
-  setUnit: (v: string) => void;
-}) {
-  return (
-    <div className="form-grid">
-      <div className="quota-field">
-        <div className="quota-field-heading">
-          <span>带宽容量</span>
-          <Toggle
-            label="无限"
-            checked={bandwidth === ""}
-            onChange={(v) => setBandwidth(v ? "" : "100")}
-          />
-        </div>
-        <div className="input-addon">
-          <input
-            aria-label="带宽容量 Mbps"
-            type="number"
-            min="0.1"
-            step="any"
-            max="10000000"
-            disabled={bandwidth === ""}
-            required={bandwidth !== ""}
-            value={bandwidth}
-            onChange={(e) => setBandwidth(e.target.value)}
-            placeholder={bandwidth === "" ? "无限制" : "100"}
-          />
-          <span>Mbps</span>
-        </div>
-      </div>
-      <div className="quota-field">
-        <div className="quota-field-heading">
-          <span>每月流量额度</span>
-          <Toggle
-            label="无限"
-            checked={quota === ""}
-            onChange={(v) => setQuota(v ? "" : "1000")}
-          />
-        </div>
-        <div className="input-addon">
-          <input
-            aria-label="每月流量额度"
-            type="number"
-            min="0.001"
-            max="1000000000"
-            step="any"
-            disabled={quota === ""}
-            required={quota !== ""}
-            value={quota}
-            onChange={(e) => setQuota(e.target.value)}
-            placeholder={quota === "" ? "无限制" : "1000"}
-          />
-          <select
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            aria-label="流量单位"
-            disabled={quota === ""}
-          >
-            <option value="GB">GB</option>
-            <option value="TB">TB</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  );
-}
-export function AddNode({ onClose }: { onClose: () => void }) {
+function AddNode({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate(); const [params] = useSearchParams();
   const servers = usePolling<ManagedServer[]>("/servers"), settings = usePolling<CloudflareSettings>("/settings/cloudflare");
   const [serverId, setServerId] = useState(params.get("server") || "");

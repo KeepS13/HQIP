@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -18,6 +19,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { usePolling } from "../api";
+import { expectsNodeReport, hasNodeReport } from "../monitoring";
 import {
   Empty,
   ErrorNotice,
@@ -38,21 +40,27 @@ import {
 import type { Overview } from "../types";
 
 export function Dashboard() {
-  const { data, error, loading, refresh } = usePolling<Overview>("/overview");
+  const [period, setPeriod] = useState<"24h" | "7d">("24h");
+  const { data, error, loading, refresh } = usePolling<Overview>(`/overview?period=${period}`);
   if (loading) return <Loading />;
   if (!data)
     return <ErrorNotice message={error} retry={() => void refresh()} />;
   const nodes = data.nodes || [],
     devices = data.devices || [],
-    live = nodes.filter((n) => fresh(n)),
+    expected = nodes.filter(expectsNodeReport),
+    live = expected.filter(hasNodeReport),
     ready = nodes.filter(
       (n) => n.status === "ready" && fresh(n) && n.coreHealthy,
     ),
     upload = live.reduce((v, n) => v + n.metrics.uploadRate, 0),
     download = live.reduce((v, n) => v + n.metrics.downloadRate, 0),
-    month = nodes.reduce((v, n) => v + n.monthDownload + n.monthUpload, 0),
+    monthUpload = data.usage.monthUpload,
+    monthDownload = data.usage.monthDownload,
+    month = monthUpload + monthDownload,
     online = devices.filter((d) => d.enabled && d.online).length,
-    unknown = nodes.some((n) => !onlineKnown(n)),
+    unknown = !!error || nodes.some((n) => !onlineKnown(n)),
+    rateUnknown = !!error || live.length === 0,
+    ratePartial = live.length > 0 && live.length < expected.length,
     instances = live.filter(onlineKnown).reduce((v, n) => v + n.instances, 0);
   return (
     <>
@@ -70,7 +78,7 @@ export function Dashboard() {
           </>
         }
       />
-      <ErrorNotice message={error} retry={() => void refresh()} />
+      <ErrorNotice message={error ? `${error}；以下保留上次成功数据，已过期。` : ""} retry={() => void refresh()} />
       <div className="overview-banner">
         <div className="banner-mark">
           <Globe2 size={28} strokeWidth={1.4} />
@@ -113,10 +121,10 @@ export function Dashboard() {
           hint={
             <>
               <ArrowUp size={12} />
-              {bytes(nodes.reduce((v, n) => v + n.monthUpload, 0))}
+              {bytes(monthUpload)}
               <span className="hint-separator" />
               <ArrowDown size={12} />
-              {bytes(nodes.reduce((v, n) => v + n.monthDownload, 0))}
+              {bytes(monthDownload)}
             </>
           }
         />
@@ -133,21 +141,21 @@ export function Dashboard() {
           }
         />
         <StatCard
-          label="实时下载速率"
-          value={bytes(download).split(" ")[0]}
-          unit={`${bytes(download).split(" ")[1]}/s`}
+          label="实时下载速率（含探测）"
+          value={rateUnknown ? "—" : `${ratePartial ? "≥ " : ""}${(download * 8 / 1e6).toFixed(2)}`}
+          unit="Mbps"
           icon={ArrowDown}
           color="amber"
           hint={
             <>
               <ArrowUp size={12} />
-              上传 {bytes(upload)}/s{unknown ? " · 仅含心跳正常节点" : ""}
+              {rateUnknown ? "当前速率未知" : `上传 ${(upload * 8 / 1e6).toFixed(2)} Mbps${ratePartial ? " · 仅已知节点下限" : ""}`}
             </>
           }
         />
       </div>
       <div className="overview-middle">
-        <TrafficChart points={data.traffic} />
+        <TrafficChart points={data.traffic} subtitle="上传 + 下载 · 保留已删除节点历史 · 不含探测" period={period} onPeriodChange={setPeriod} error={error} />
         <Panel title="网络概况" subtitle="当前连接状态">
           <div className="health-visual">
             <div className={`health-ring ${ready.length ? "is-live" : ""}`}>
@@ -228,7 +236,7 @@ export function Dashboard() {
                       <NodeBadge node={n} />
                     </td>
                     <td>
-                      {fresh(n) ? (
+                      {!error && hasNodeReport(n) ? (
                         <Rate
                           upload={n.metrics.uploadRate}
                           download={n.metrics.downloadRate}
@@ -245,7 +253,7 @@ export function Dashboard() {
                       />
                     </td>
                     <td>
-                      {onlineKnown(n) ? (
+                      {!error && onlineKnown(n) ? (
                         <span>
                           {n.onlineDevices}
                           <span className="muted"> 台</span>
@@ -292,7 +300,7 @@ export function Dashboard() {
               >
                 <Info size={17} />
                 <span>{alert.message}</span>
-                {alert.nodeId && (
+                {alert.serverId ? <Link to={`/servers/${alert.serverId}`}>查看服务器 <ArrowRight size={14} /></Link> : alert.nodeId && (
                   <Link to={`/nodes/${alert.nodeId}`}>
                     查看节点 <ArrowRight size={14} />
                   </Link>

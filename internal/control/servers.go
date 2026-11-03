@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -19,19 +20,23 @@ type serverInspector interface {
 }
 
 type serverForm struct {
-	Name             string `json:"name"`
-	SSHHost          string `json:"sshHost"`
-	SSHPort          int    `json:"sshPort"`
-	SSHUser          string `json:"sshUser"`
-	Password         string `json:"password"`
-	ExpectedRevision int64  `json:"expectedRevision"`
+	Name              string   `json:"name"`
+	SSHHost           string   `json:"sshHost"`
+	SSHPort           int      `json:"sshPort"`
+	SSHUser           string   `json:"sshUser"`
+	Password          string   `json:"password"`
+	ExpectedRevision  int64    `json:"expectedRevision"`
+	BandwidthMbps     *float64 `json:"bandwidthMbps"`
+	MonthlyQuotaBytes *int64   `json:"monthlyQuotaBytes"`
 }
 
 func (s *Server) registerServerRoutes(m *http.ServeMux) {
 	for pattern, handler := range map[string]http.HandlerFunc{
 		"GET /api/v1/servers": s.listServers, "POST /api/v1/servers": s.createServer,
 		"GET /api/v1/servers/{id}": s.serverDetail, "PATCH /api/v1/servers/{id}": s.updateServer, "DELETE /api/v1/servers/{id}": s.deleteServer,
-		"GET /api/v1/servers/{id}/addresses": s.listAddresses, "POST /api/v1/servers/{id}/addresses": s.createAddress, "DELETE /api/v1/servers/{id}/addresses/{address}": s.deleteAddress,
+		"PATCH /api/v1/servers/{id}/settings": s.updateServerSettings,
+		"GET /api/v1/servers/{id}/traffic":    s.serverTraffic,
+		"GET /api/v1/servers/{id}/addresses":  s.listAddresses, "POST /api/v1/servers/{id}/addresses": s.createAddress, "DELETE /api/v1/servers/{id}/addresses/{address}": s.deleteAddress,
 		"POST /api/v1/nodes/{id}/preflight": s.nodePreflight, "POST /api/v1/nodes/{id}/takeover": s.retryNode,
 		"GET /api/v1/nodes/{id}/delete-preview": s.nodeDeletePreview, "DELETE /api/v1/nodes/{id}": s.deleteNode,
 		"POST /api/v1/nodes/{id}/retire": s.retireNode, "DELETE /api/v1/devices/{id}": s.deleteDevice,
@@ -69,6 +74,9 @@ func (f *serverForm) validate() error {
 	}
 	if len(f.Password) < 1 || len(f.Password) > 1024 {
 		return errors.New("请填写本次验证使用的 SSH 密码")
+	}
+	if !validQuota(f.BandwidthMbps, f.MonthlyQuotaBytes) {
+		return errors.New("带宽和流量额度必须为正数；无限请填写 null")
 	}
 	return nil
 }
@@ -122,6 +130,7 @@ func (s *Server) createServer(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	checked.BandwidthMbps, checked.MonthlyQuotaBytes = f.BandwidthMbps, f.MonthlyQuotaBytes
 	v, err := s.Store.CreateServer(checked)
 	if err != nil {
 		managementError(w, err)
@@ -170,18 +179,65 @@ func (s *Server) serverDetail(w http.ResponseWriter, r *http.Request) {
 		result(w, nil, err)
 		return
 	}
-	nodes, err := s.Store.Nodes()
+	nodes, err := s.Store.ServerNodeUsage(server.ID)
 	if err != nil {
 		result(w, nil, err)
 		return
 	}
 	filtered := []model.Node{}
 	for _, n := range nodes {
-		if n.ServerID == server.ID {
+		if n.Lifecycle != "deleted" {
 			filtered = append(filtered, n)
 		}
 	}
-	reply(w, 200, map[string]any{"server": server, "addresses": addresses, "nodes": filtered})
+	reply(w, 200, map[string]any{"server": server, "addresses": addresses, "nodes": filtered, "nodeUsage": nodes})
+}
+
+// Settings never call SSH or mutate node configuration. Both nullable quotas
+// must be explicit so a missing form field cannot silently reset a capacity.
+func (s *Server) updateServerSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name              string          `json:"name"`
+		BandwidthMbps     json.RawMessage `json:"bandwidthMbps"`
+		MonthlyQuotaBytes json.RawMessage `json:"monthlyQuotaBytes"`
+		ExpectedRevision  int64           `json:"expectedRevision"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	var bandwidth *float64
+	var quota *int64
+	if !validName(name) || body.ExpectedRevision < 1 ||
+		len(body.BandwidthMbps) == 0 || len(body.MonthlyQuotaBytes) == 0 ||
+		json.Unmarshal(body.BandwidthMbps, &bandwidth) != nil ||
+		json.Unmarshal(body.MonthlyQuotaBytes, &quota) != nil || !validQuota(bandwidth, quota) {
+		fail(w, 400, "请填写有效名称、版本及正数额度；无限请填写 null")
+		return
+	}
+	v, err := s.Store.UpdateServerSettings(r.PathValue("id"), name, bandwidth, quota, body.ExpectedRevision)
+	if errors.Is(err, store.ErrConflict) {
+		fail(w, 409, "服务器设置已被修改，请刷新后重试")
+		return
+	}
+	result(w, v, err)
+}
+
+func (s *Server) serverTraffic(w http.ResponseWriter, r *http.Request) {
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "24h"
+	}
+	if period != "24h" && period != "7d" {
+		fail(w, 400, "请选择最近 24 小时或 7 天")
+		return
+	}
+	if _, err := s.Store.Server(r.PathValue("id")); err != nil {
+		result(w, nil, err)
+		return
+	}
+	points, err := s.Store.ServerTraffic(r.PathValue("id"), period)
+	result(w, points, err)
 }
 func (s *Server) deleteServer(w http.ResponseWriter, r *http.Request) {
 	var b struct {

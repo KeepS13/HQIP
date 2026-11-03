@@ -568,6 +568,10 @@ export function TrafficChart(props: {
   points: TrafficPoint[];
   title?: string;
   subtitle?: string;
+  period?: "24h" | "7d";
+  onPeriodChange?: (period: "24h" | "7d") => void;
+  loading?: boolean;
+  error?: string;
 }) {
   return (
     <Suspense
