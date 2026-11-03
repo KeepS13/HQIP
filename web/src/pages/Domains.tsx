@@ -30,7 +30,7 @@ export function Domains() {
       <form className="form-stack settings-form" onSubmit={save}>
         <Field label={data?.configured ? "替换 Custom API Token（留空保留）" : "Custom API Token"} hint="权限：所选域名的 Zone:Read 与 DNS:Edit。Token 保存后不可查看。"><input type="password" autoComplete="new-password" required={!data?.configured} value={token} onChange={e => { setToken(e.target.value); setZones([]); }} placeholder={data?.configured ? "已加密保存；输入新 Token 可替换" : "在 Cloudflare 创建受限 Token"} /></Field>
         <div><Button type="button" variant="secondary" icon={ShieldCheck} busy={busy} onClick={() => void verify()}>验证 Token 并读取域名</Button></div>
-        <p className="field-hint">此处验证 Token 状态及域名读取权限；DNS:Edit 写权限在首次创建节点记录时校验。</p>
+        <p className="table-small muted">此处验证 Token 状态及域名读取权限；DNS:Edit 写权限在首次创建节点记录时校验。</p>
         <div className="form-grid"><Field label="默认域名"><select required value={zoneId} onChange={e => setZoneId(e.target.value)}><option value="">请选择域名</option>{data?.defaultZoneId && !zones.some(z => z.id === data.defaultZoneId) && <option value={data.defaultZoneId}>{data.defaultZoneName || data.defaultZoneId}</option>}{zones.map(z => <option key={z.id} value={z.id} disabled={z.status !== "active"}>{z.name}{z.status !== "active" ? "（尚未激活）" : ""}</option>)}</select></Field><Field label="证书联系邮箱"><input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="用于 ACME 证书账号" /></Field></div>
         <Notice>节点域名采用“仅 DNS”记录，直接指向对应 IP。证书使用 DNS 验证，不要求节点开放 TCP 80。Token 不会发送到节点，也不会修改其他网站的 DNS。</Notice>
         <ErrorNotice message={actionError} /><div className="modal-actions"><Button type="submit" icon={Save} busy={busy} disabled={!zoneId}>保存设置</Button></div>

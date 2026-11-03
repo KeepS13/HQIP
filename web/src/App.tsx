@@ -350,6 +350,8 @@ export default function App() {
     titles[location.pathname] ||
     (location.pathname.startsWith("/nodes/")
       ? "节点详情"
+      : location.pathname.startsWith("/servers/")
+        ? "服务器详情"
       : location.pathname.startsWith("/devices/")
         ? "设备详情"
         : "控制台");

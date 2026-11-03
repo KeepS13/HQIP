@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Plus, Server, Trash2, Settings2, Globe2, Clock3 } from "lucide-react";
 import { api, usePolling } from "../api";
-import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Panel, RefreshButton, Resource, bytes, date, useToast } from "../components";
+import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, bytes, date, useToast } from "../components";
 import type { ManagedServer, ServerAddress, Node } from "../types";
 
 function ServerForm({ server, onClose, onSaved }: { server?: ManagedServer; onClose: () => void; onSaved: (server: ManagedServer) => void }) {
@@ -75,7 +75,7 @@ export function ServerPage() {
       </> : <Empty icon={Server} title="等待主机指标" description="部署节点并收到 Agent 心跳后显示 CPU、内存和磁盘；不会累计多个 IP 节点的重复指标。" />}
     </Panel>
     <Panel title="公网 IP" subtitle="一个 IP 对应一个独立节点；入口和出口使用同一地址" action={<Button icon={Plus} onClick={() => { setActionError(""); setAdd(true); }}>添加 IP</Button>}>
-      {addresses.length ? <div className="table-scroll"><table><thead><tr><th>公网 IPv4</th><th>节点</th><th>操作</th></tr></thead><tbody>{addresses.map(a => { const n = nodes.find(n => n.addressId === a.id && n.lifecycle !== "deleted"); return <tr key={a.id}><td className="mono">{a.ip}</td><td>{n ? <Link to={`/nodes/${n.id}`}>{n.name} · {n.status}</Link> : <span className="muted">未部署</span>}</td><td><div className="row-actions">{n ? <Link className="button button-secondary" to={`/nodes/${n.id}`}>管理节点</Link> : <Link className="button button-primary" to={`/nodes?add=1&server=${server.id}&address=${a.id}`}>部署节点</Link>}<Button variant="ghost" icon={Trash2} disabled={!!n} onClick={() => { setActionError(""); setRemove(a); }}>删除 IP</Button></div></td></tr>; })}</tbody></table></div> : <Empty icon={Globe2} title="暂无公网 IP" description="添加已经配置到服务器网卡上的公网 IPv4，再选择域名部署节点。" />}
+      {addresses.length ? <div className="table-scroll"><table><thead><tr><th>公网 IPv4</th><th>节点</th><th>操作</th></tr></thead><tbody>{addresses.map(a => { const n = nodes.find(n => n.addressId === a.id && n.lifecycle !== "deleted"); return <tr key={a.id}><td className="mono">{a.ip}</td><td>{n ? <div><Link to={`/nodes/${n.id}`}>{n.name}</Link><div className="table-small"><NodeBadge node={n} /></div></div> : <span className="muted">未部署</span>}</td><td><div className="row-actions">{n ? <Link className="button button-secondary" to={`/nodes/${n.id}`}>管理节点</Link> : <Link className="button button-primary" to={`/nodes?add=1&server=${server.id}&address=${a.id}`}>部署节点</Link>}<Button variant="ghost" icon={Trash2} disabled={!!n} onClick={() => { setActionError(""); setRemove(a); }}>删除 IP</Button></div></td></tr>; })}</tbody></table></div> : <Empty icon={Globe2} title="暂无公网 IP" description="添加已经配置到服务器网卡上的公网 IPv4，再选择域名部署节点。" />}
     </Panel>
     <Notice>删除节点只停止对应 IP 的实例。删除 IP 清单不会解绑网卡或释放厂商 IP；有节点或清理任务的 IP 必须先完成节点删除。</Notice>
     <Panel title="主机身份"><dl className="details-list"><div><dt>SSH 指纹</dt><dd className="mono break-all">{server.hostKey || "尚未固定"}</dd></div><div><dt>系统</dt><dd>{server.platform} · {server.architecture}</dd></div><div><dt>独立节点数</dt><dd>{nodes.filter(n => n.lifecycle !== "deleted").length}</dd></div></dl></Panel>
