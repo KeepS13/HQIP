@@ -14,7 +14,6 @@ import {
   ChevronRight,
   Clock3,
   Globe2,
-  KeyRound,
   LoaderCircle,
   Monitor,
   Plus,
@@ -23,6 +22,7 @@ import {
   Settings2,
   ShieldCheck,
   Terminal,
+  Trash2,
   Wifi,
 } from "lucide-react";
 import { api, usePolling } from "../api";
@@ -42,7 +42,6 @@ import {
   Panel,
   Rate,
   RefreshButton,
-  Resource,
   StatCard,
   Toggle,
   TrafficChart,
@@ -52,7 +51,8 @@ import {
   onlineKnown,
   useToast,
 } from "../components";
-import type { Node, NodeDetail, TaskEvent } from "../types";
+import { DeployNode, DeleteNode, RetireNode, DeletedNodeNotice } from "./NodeActions";
+import type { Node, NodeDetail, TaskEvent, ManagedServer, ServerAddress, CloudflareSettings, CloudflareZone } from "../types";
 
 function QuotaFields({
   bandwidth,
@@ -133,182 +133,38 @@ function QuotaFields({
   );
 }
 export function AddNode({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({
-      name: "",
-      sshHost: "",
-      publicIp: "",
-      domain: "",
-      sshUser: "root",
-      sshPort: "22",
-      port: "443",
-      password: "",
-    }),
-    [bandwidth, setBandwidth] = useState(""),
-    [quota, setQuota] = useState(""),
-    [unit, setUnit] = useState("GB"),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const change = (key: keyof typeof form, value: string) =>
-    setForm((p) => ({ ...p, [key]: value }));
+  const navigate = useNavigate(); const [params] = useSearchParams();
+  const servers = usePolling<ManagedServer[]>("/servers"), settings = usePolling<CloudflareSettings>("/settings/cloudflare");
+  const [serverId, setServerId] = useState(params.get("server") || "");
+  const [addresses, setAddresses] = useState<ServerAddress[]>([]), [zones, setZones] = useState<CloudflareZone[]>([]);
+  const [form, setForm] = useState({ name: "", addressId: params.get("address") || "", domain: "", port: "443", password: "", zoneId: "", dnsMode: "" });
+  const [bandwidth, setBandwidth] = useState(""), [quota, setQuota] = useState(""), [unit, setUnit] = useState("GB"), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const change = (key: keyof typeof form, value: string) => setForm(p => ({ ...p, [key]: value }));
+  useEffect(() => { if (!serverId) { setAddresses([]); return; } let alive = true; setAddresses([]); api<ServerAddress[]>(`/servers/${serverId}/addresses`).then(a => { if (alive) setAddresses(a); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [serverId]);
+  useEffect(() => { if (settings.data && !form.dnsMode) setForm(p => ({ ...p, dnsMode: settings.data!.configured ? "cloudflare" : "manual", zoneId: settings.data!.defaultZoneId })); }, [settings.data, form.dnsMode]);
+  useEffect(() => { if (!settings.data?.configured) return; let alive = true; api<{zones: CloudflareZone[]}>("/settings/cloudflare/zones").then(r => { if (alive) setZones(r.zones); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [settings.data?.configured]);
   async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
+    e.preventDefault(); setBusy(true); setError("");
     try {
-      const node = await api<Node>("/nodes", "POST", {
-        ...form,
-        name: form.name.trim(),
-        sshHost: form.sshHost.trim(),
-        publicIp: form.publicIp.trim(),
-        domain: form.domain.trim().toLowerCase(),
-        sshUser: form.sshUser.trim(),
-        sshPort: Number(form.sshPort),
-        port: Number(form.port),
-        bandwidthMbps: bandwidth === "" ? null : Number(bandwidth),
-        monthlyQuotaBytes:
-          quota === ""
-            ? null
-            : Math.round(Number(quota) * (unit === "GB" ? 1e9 : 1e12)),
-      });
-      setForm((p) => ({ ...p, password: "" }));
-      onClose();
-      navigate(`/nodes/${node.id}`);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+      const node = await api<Node>("/nodes", "POST", { name: form.name.trim(), serverId, addressId: form.addressId, domain: form.dnsMode === "manual" ? form.domain.trim().toLowerCase() : "", dnsMode: form.dnsMode, zoneId: form.zoneId, port: Number(form.port), password: form.password, bandwidthMbps: bandwidth === "" ? null : Number(bandwidth), monthlyQuotaBytes: quota === "" ? null : Math.round(Number(quota) * (unit === "GB" ? 1e9 : 1e12)) });
+      setForm(p => ({ ...p, password: "" })); onClose(); navigate(`/nodes/${node.id}`);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return (
-    <Modal
-      title="添加新节点"
-      description="填写服务器信息，HQIP 将通过 SSH 自动完成部署。"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-      wide
-    >
-      <form onSubmit={submit} className="form-stack">
-        <div className="form-section-label">
-          <Server size={15} /> 基本信息
-        </div>
-        <Field label="节点名称">
-          <input
-            required
-            maxLength={80}
-            value={form.name}
-            onChange={(e) => change("name", e.target.value)}
-            placeholder="例如：香港 · 私人节点"
-          />
-        </Field>
-        <div className="form-grid">
-          <Field label="服务器公网 IPv4" hint="客户端连接的出口地址">
-            <input
-              required
-              value={form.publicIp}
-              onChange={(e) => change("publicIp", e.target.value)}
-              placeholder="例如：203.0.113.10"
-              inputMode="decimal"
-            />
-          </Field>
-          <Field label="节点域名" hint="A 记录需要直接解析到上面的公网 IP">
-            <input
-              required
-              value={form.domain}
-              pattern="[^/ :]+[.][^/ :]+"
-              onChange={(e) => change("domain", e.target.value)}
-              placeholder="node.example.com"
-              autoCapitalize="none"
-            />
-          </Field>
-        </div>
-        <div className="form-section-label">
-          <KeyRound size={15} /> SSH 连接
-        </div>
-        <div className="form-grid form-grid-wide">
-          <Field label="SSH 地址" hint="可与公网 IP 相同，或使用独立管理地址">
-            <input
-              required
-              value={form.sshHost}
-              onChange={(e) => change("sshHost", e.target.value)}
-              placeholder={form.publicIp || "服务器 IP 或主机名"}
-              autoCapitalize="none"
-            />
-          </Field>
-          <Field label="SSH 端口">
-            <input
-              type="number"
-              min="1"
-              max="65535"
-              required
-              value={form.sshPort}
-              onChange={(e) => change("sshPort", e.target.value)}
-            />
-          </Field>
-        </div>
-        <div className="form-grid">
-          <Field label="SSH 用户">
-            <input
-              required
-              value={form.sshUser}
-              onChange={(e) => change("sshUser", e.target.value)}
-              autoComplete="off"
-            />
-          </Field>
-          <Field label="SSH 密码">
-            <input
-              type="password"
-              required
-              value={form.password}
-              onChange={(e) => change("password", e.target.value)}
-              autoComplete="new-password"
-              placeholder="仅用于本次部署"
-            />
-          </Field>
-        </div>
-        <div className="form-section-label">
-          <Activity size={15} /> 容量与端口
-        </div>
-        <QuotaFields
-          {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }}
-        />
-        <Field
-          label="Hysteria UDP 端口"
-          hint="默认 443；请确保云安全组和服务器防火墙允许此 UDP 端口。"
-        >
-          <input
-            className="short-input"
-            type="number"
-            required
-            min="1"
-            max="65535"
-            value={form.port}
-            onChange={(e) => change("port", e.target.value)}
-          />
-        </Field>
-        <Notice>
-          带宽与流量仅记录和提醒，不会限速或断网。SSH
-          密码在部署期间加密保存，成功后删除；支持 Ubuntu 22.04 / 24.04 与
-          Debian 12。
-        </Notice>
-        <ErrorNotice message={error} />
-        <div className="modal-actions">
-          <Button
-            variant="secondary"
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-          >
-            取消
-          </Button>
-          <Button type="submit" busy={busy} icon={Plus}>
-            添加并部署
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
+  return <Modal title="添加 IP 节点" description="选择服务器和已绑定的 IP，为其部署独立 Hysteria 2 实例。" wide onClose={() => { if (!busy) onClose(); }}>
+    <form onSubmit={submit} className="form-stack">
+      <Field label="节点名称"><input required maxLength={80} value={form.name} onChange={e => change("name", e.target.value)} placeholder="例如：香港 · IP 1" /></Field>
+      <ErrorNotice message={servers.error} />
+      <div className="form-grid"><Field label="服务器"><select required value={serverId} onChange={e => { setServerId(e.target.value); change("addressId", ""); }}><option value="">选择服务器</option>{servers.data?.map(s => <option key={s.id} value={s.id}>{s.name} · {s.sshHost}</option>)}</select></Field><Field label="公网 IP" hint="入口和出口均使用此地址"><select required value={form.addressId} onChange={e => change("addressId", e.target.value)}><option value="">选择已登记的 IP</option>{addresses.map(a => <option key={a.id} value={a.id} disabled={!!a.nodeIds?.length}>{a.ip}{a.nodeIds?.length ? "（已部署）" : ""}</option>)}</select></Field></div>
+      <p className="muted">没有可选项？<Link to="/servers">先添加服务器和公网 IP</Link>。</p>
+      <Field label="域名方式"><select value={form.dnsMode || "manual"} onChange={e => change("dnsMode", e.target.value)}><option value="cloudflare" disabled={!settings.data?.configured}>Cloudflare 自动分配</option><option value="manual">使用已有域名</option></select></Field>
+      {form.dnsMode === "cloudflare" ? <Field label="Cloudflare 域名" hint="自动创建独立子域名和仅 DNS 的 A 记录"><select required value={form.zoneId} onChange={e => change("zoneId", e.target.value)}><option value="">选择域名</option>{settings.data?.defaultZoneId && !zones.some(z => z.id === settings.data!.defaultZoneId) && <option value={settings.data.defaultZoneId}>{settings.data.defaultZoneName}</option>}{zones.map(z => <option value={z.id} key={z.id} disabled={z.status !== "active"}>{z.name}</option>)}</select></Field> : <Field label="已有节点域名" hint="A 记录需指向所选 IP；HTTP 证书验证需要此 IP 的 TCP 80 可用"><input required value={form.domain} pattern="[^/ :]+[.][^/ :]+" onChange={e => change("domain", e.target.value)} placeholder="node.example.com" autoCapitalize="none" /></Field>}
+      {!settings.data?.configured && <p className="muted"><Link to="/domains">配置 Cloudflare Token</Link> 后可自动分配域名。</p>}
+      <div className="form-grid"><Field label="本次部署的 SSH 密码"><input type="password" required autoComplete="new-password" value={form.password} onChange={e => change("password", e.target.value)} /></Field><Field label="Hysteria UDP 端口"><input type="number" required min={1} max={65535} value={form.port} onChange={e => change("port", e.target.value)} /></Field></div>
+      <QuotaFields {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }} />
+      <Notice>每个 IP 的节点、设备授权和流量独立管理。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。带宽和流量额度只作提醒。</Notice>
+      <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy} icon={Plus}>添加并部署</Button></div>
+    </form>
+  </Modal>;
 }
 
 export function Nodes() {
@@ -332,7 +188,7 @@ export function Nodes() {
       <PageHeader
         eyebrow="NODE MANAGEMENT"
         title="节点管理"
-        description="自动部署、安全连接，集中管理每一台服务器。"
+        description="按公网 IP 独立部署、分配和管理节点。"
         actions={
           <>
             <RefreshButton refresh={refresh} />
@@ -429,7 +285,7 @@ export function Nodes() {
             description={
               search
                 ? "试试其他名称、域名或 IP。"
-                : "填写服务器 SSH 信息，自动安装 Hysteria 2 并连接到控制台。"
+                : "先登记服务器与公网 IP，再选择域名部署独立 Hysteria 2 节点。"
             }
             action={
               !search && (
@@ -533,65 +389,8 @@ function EditNode({
     </Modal>
   );
 }
-function RetryNode({
-  node,
-  onClose,
-  refresh,
-}: {
-  node: Node;
-  onClose: () => void;
-  refresh: () => Promise<void>;
-}) {
-  const [password, setPassword] = useState(""),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  return (
-    <Modal
-      title="重新部署节点"
-      description="请重新输入 SSH 密码，部署将保留当前节点身份并重试。"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form
-        className="form-stack"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError("");
-          try {
-            await api(`/nodes/${node.id}/retry`, "POST", { password });
-            setPassword("");
-            await refresh();
-            onClose();
-          } catch (e) {
-            setError((e as Error).message);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <Field label={`${node.sshUser}@${node.sshHost}:${node.sshPort} 的密码`}>
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </Field>
-        <ErrorNotice message={error} />
-        <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            取消
-          </Button>
-          <Button busy={busy} type="submit">
-            重新部署
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
+function RetryNode(props: { node: Node; onClose: () => void; refresh: () => Promise<void> }) {
+  return <DeployNode {...props} />;
 }
 
 const stageLabels: Record<string, string> = {
@@ -693,6 +492,8 @@ export function NodePage() {
   const { id } = useParams(),
     { data, error, loading, refresh } = usePolling<NodeDetail>(`/nodes/${id}`),
     [edit, setEdit] = useState(false),
+    [remove, setRemove] = useState(false),
+    [retire, setRetire] = useState(false),
     [retry, setRetry] = useState(false),
     [verifying, setVerifying] = useState(false);
   const toast = useToast();
@@ -726,14 +527,17 @@ export function NodePage() {
         actions={
           <>
             <NodeBadge node={node} />
+            {node.lifecycle === "active" && ["ready", "awaiting_external"].includes(node.status) && <Button variant="secondary" icon={Terminal} onClick={() => setRetry(true)}>重新部署 / 证书方式</Button>}
+            {node.lifecycle === "active" && <Button variant="danger" icon={Trash2} onClick={() => setRemove(true)}>删除节点</Button>}
             <Button
               variant="secondary"
               icon={Settings2}
+              disabled={node.lifecycle !== "active"}
               onClick={() => setEdit(true)}
             >
               编辑设置
             </Button>
-            {node.status === "error" ? (
+            {node.lifecycle === "retiring" ? <Button variant="secondary" onClick={() => setRetire(true)}>SSH 清理</Button> : node.lifecycle === "deleted" ? null : node.status === "error" ? (
               <Button onClick={() => setRetry(true)} icon={Terminal}>
                 重试部署
               </Button>
@@ -752,6 +556,8 @@ export function NodePage() {
         }
       />
       <ErrorNotice message={error} />
+      {node.lifecycle === "deleted" && <DeletedNodeNotice node={node} />}
+      {node.lifecycle === "retiring" && <Notice tone="warning">正在撤销授权并等待本节点停止。Agent 失联或版本较旧时，请使用“SSH 清理”；完成前不会将其他节点或此 IP 释放给新部署。</Notice>}
       {node.status === "error" && (
         <ErrorNotice
           message={node.message || "节点部署失败，请查看下方部署日志。"}
@@ -818,35 +624,9 @@ export function NodePage() {
         <TrafficChart points={data.traffic} />
         <Panel
           title="服务器资源"
-          subtitle={live ? "节点实时上报" : "最近一次上报的资源快照"}
+          subtitle="同一 VPS 的 CPU、内存和磁盘由各 IP 节点共享"
         >
-          <div className="resources">
-            <Resource
-              label="CPU"
-              value={metrics.cpuPercent}
-              text={`${metrics.cpuPercent.toFixed(1)}%`}
-            />
-            <Resource
-              label="内存"
-              value={
-                metrics.memoryTotal
-                  ? (metrics.memoryUsed / metrics.memoryTotal) * 100
-                  : 0
-              }
-              text={`${bytes(metrics.memoryUsed)} / ${bytes(metrics.memoryTotal)}`}
-              color="green"
-            />
-            <Resource
-              label="磁盘"
-              value={
-                metrics.diskTotal
-                  ? (metrics.diskUsed / metrics.diskTotal) * 100
-                  : 0
-              }
-              text={`${bytes(metrics.diskUsed)} / ${bytes(metrics.diskTotal)}`}
-              color="blue"
-            />
-          </div>
+          <Link className="button button-secondary" to={`/servers/${node.serverId}`}><Server size={16} />查看服务器资源与 IP 清单<ArrowRight size={16} /></Link>
           <div className="resource-footer">
             <Clock3 size={14} />
             <span>
@@ -860,6 +640,8 @@ export function NodePage() {
       <div className="two-column">
         <Panel title="节点信息" subtitle="连接信息与配置同步状态">
           <dl className="details-list">
+            <div><dt>所属服务器</dt><dd><Link to={`/servers/${node.serverId}`}>查看服务器与 IP 清单</Link></dd></div>
+            <div><dt>证书有效期</dt><dd>{date(node.certificate?.notAfter)}{node.certificate?.error && <span className="muted"> · {node.certificate.error}</span>}</dd></div>
             <div>
               <dt>公网地址</dt>
               <dd className="mono">{node.publicIp}</dd>
@@ -1033,6 +815,8 @@ export function NodePage() {
           />
         )}
       </Panel>
+      {remove && <DeleteNode node={node} onClose={() => setRemove(false)} refresh={refresh} />}
+      {retire && <RetireNode node={node} onClose={() => setRetire(false)} refresh={refresh} />}
       {edit && (
         <EditNode
           node={node}

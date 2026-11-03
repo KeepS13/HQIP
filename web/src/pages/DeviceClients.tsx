@@ -197,6 +197,7 @@ function AssignmentModal({
     [revision, setRevision] = useState(assignment.revision),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const servers = usePolling<import("../types").ManagedServer[]>("/servers");
   const toast = useToast();
   function toggle(id: string) {
     const next = selected.includes(id)
@@ -252,30 +253,14 @@ function AssignmentModal({
     >
       <form className="form-stack" onSubmit={submit}>
         <Notice>
-          选中该设备可使用的节点，再设置默认节点。客户端手动断开后不会因配置更新自动连接；已连接时会按照新的默认节点切换。
+          按 IP 选择该设备可使用的节点，再设置默认节点。同一服务器上的其他 IP 不会自动获得授权。客户端手动断开后不会因配置更新自动连接；已连接时会按照新的默认节点切换。
         </Notice>
         <ErrorNotice message={loadError} retry={() => void reloadNodes()} />
         {loading ? (
           <Loading />
         ) : nodes?.length ? (
           <div className="assignment-options">
-            {nodes.map((node) => (
-              <label
-                className={`assignment-option ${selected.includes(node.id) ? "selected" : ""}`}
-                key={node.id}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.includes(node.id)}
-                  onChange={() => toggle(node.id)}
-                />
-                <span>
-                  <strong>{node.name}</strong>
-                  <small>{node.domain}</small>
-                </span>
-                <NodeBadge node={node} />
-              </label>
-            ))}
+            {[...new Set(nodes.filter(n => n.lifecycle === "active").map(n => n.serverId))].map(serverId => <section key={serverId} className="assignment-server"><h3>{servers.data?.find(s => s.id === serverId)?.name || "服务器"}</h3>{nodes.filter(n => n.serverId === serverId && n.lifecycle === "active").map(node => <label className={`assignment-option ${selected.includes(node.id) ? "selected" : ""}`} key={node.id}><input type="checkbox" checked={selected.includes(node.id)} onChange={() => toggle(node.id)} /><span><strong>{node.name} · {node.publicIp}</strong><small>{node.domain}</small></span><NodeBadge node={node} /></label>)}</section>)}
           </div>
         ) : (
           <Empty
@@ -295,7 +280,7 @@ function AssignmentModal({
               const node = nodes?.find((n) => n.id === id);
               return (
                 <option key={id} value={id}>
-                  {node?.name || id}
+                  {node ? `${node.name} · ${node.publicIp}` : id}
                   {node && node.status !== "ready" ? " · 尚未就绪" : ""}
                 </option>
               );

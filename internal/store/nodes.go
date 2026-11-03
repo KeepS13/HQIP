@@ -16,6 +16,23 @@ func (s *Store) CreateNode(n model.Node, password string) (model.Node, error) {
 	n.Status = "pending"
 	n.Message = "等待部署"
 	n.DesiredRevision = 1
+	n.Revision = 1
+	n.Lifecycle = "active"
+	n.Managed = false
+	n.DeletedAt = nil
+	n.InstallationVersion = 2
+	if n.CertificateMode == "" {
+		n.CertificateMode = "http"
+	}
+	if n.DNSMode == "" {
+		n.DNSMode = "manual"
+	}
+	if n.DNSMode == "cloudflare" {
+		n.CertificateMode = "cloudflare"
+	}
+	if n.CertificateMode != "http" && n.CertificateMode != "cloudflare" || n.DNSMode != "manual" && n.DNSMode != "cloudflare" {
+		return n, errors.New("域名或证书模式无效")
+	}
 	pass, err := s.Vault.Encrypt(password)
 	if err != nil {
 		return n, err
@@ -30,12 +47,15 @@ func (s *Store) CreateNode(n model.Node, password string) (model.Node, error) {
 		return n, err
 	}
 	defer tx.Rollback()
+	if err = s.prepareNode(tx, &n); err != nil {
+		return n, err
+	}
 	var exists int
-	if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE lower(json_extract(config,'$.domain'))=lower(?) OR (json_extract(config,'$.sshHost')=? AND json_extract(config,'$.port')=?)", n.Domain, n.SSHHost, n.Port).Scan(&exists); err != nil {
+	if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE lifecycle!='deleted' AND ((?!='' AND lower(json_extract(config,'$.domain'))=lower(?)) OR (json_extract(config,'$.serverId')=? AND json_extract(config,'$.addressId')=?) OR (lower(json_extract(config,'$.sshHost'))=lower(?) AND json_extract(config,'$.publicIp')=? AND json_extract(config,'$.port')=?))", n.Domain, n.Domain, n.ServerID, n.AddressID, n.SSHHost, n.PublicIP, n.Port).Scan(&exists); err != nil {
 		return n, err
 	}
 	if exists > 0 {
-		return n, errors.New("该域名或服务器端口已添加，请在原节点重试")
+		return n, errors.New("该域名、服务器 IP 或监听端口已添加，请在原节点重试")
 	}
 	if _, err = tx.Exec("INSERT INTO nodes(id,config,password,password_expires,agent_hash,agent_secret) VALUES(?,?,?,?,?,?)", n.ID, jsonString(n), pass, s.Now().Add(24*time.Hour).Unix(), secure.Hash(agent), agentEnc); err != nil {
 		return n, err
@@ -62,11 +82,14 @@ func (s *Store) CreateNode(n model.Node, password string) (model.Node, error) {
 
 func (s *Store) Node(id string) (model.Node, error) {
 	var n model.Node
-	var raw, metrics, online string
-	var last int64
+	var raw, metrics, online, caps, cert string
+	var last, deleted int64
 	var desired, applied int64
 	var healthy bool
-	err := s.DB.QueryRow("SELECT config,desired_revision,applied_revision,last_seen,metrics,online,core_healthy FROM nodes WHERE id=?", id).Scan(&raw, &desired, &applied, &last, &metrics, &online, &healthy)
+	var lifecycle string
+	var revision int64
+	var managed bool
+	err := s.DB.QueryRow("SELECT config,desired_revision,applied_revision,last_seen,metrics,online,core_healthy,lifecycle,revision,managed,deleted_at,capabilities,certificate_status FROM nodes WHERE id=?", id).Scan(&raw, &desired, &applied, &last, &metrics, &online, &healthy, &lifecycle, &revision, &managed, &deleted, &caps, &cert)
 	if err != nil {
 		return n, notFound(err)
 	}
@@ -74,6 +97,27 @@ func (s *Store) Node(id string) (model.Node, error) {
 		return n, err
 	}
 	_ = json.Unmarshal([]byte(metrics), &n.Metrics)
+	n.Lifecycle = lifecycle
+	n.Revision = revision
+	n.Managed = managed
+	n.Capabilities = []string{}
+	_ = json.Unmarshal([]byte(caps), &n.Capabilities)
+	if cert != "{}" {
+		n.Certificate = &model.CertificateStatus{}
+		_ = json.Unmarshal([]byte(cert), n.Certificate)
+	}
+	if deleted > 0 {
+		t := time.Unix(deleted, 0).UTC()
+		n.DeletedAt = &t
+	}
+	var retirement model.RetirementStatus
+	err = s.DB.QueryRow("SELECT id,stopped,final FROM node_retirements WHERE node_id=?", id).Scan(&retirement.ID, &retirement.Stopped, &retirement.Final)
+	if err != nil && err != sql.ErrNoRows {
+		return n, err
+	}
+	if err == nil {
+		n.Retirement = &retirement
+	}
 	n.DesiredRevision = desired
 	n.AppliedRevision = applied
 	n.CoreHealthy = healthy
@@ -108,7 +152,7 @@ func (s *Store) Node(id string) (model.Node, error) {
 }
 
 func (s *Store) Nodes() ([]model.Node, error) {
-	rows, err := s.DB.Query("SELECT id FROM nodes ORDER BY json_extract(config,'$.createdAt') DESC")
+	rows, err := s.DB.Query("SELECT id FROM nodes WHERE lifecycle!='deleted' ORDER BY json_extract(config,'$.createdAt') DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -140,18 +184,18 @@ func (s *Store) Nodes() ([]model.Node, error) {
 func (s *Store) SaveNode(n model.Node) error {
 	// Administrator edits own only these three fields. Never replace a stale
 	// snapshot over a worker's host-key pin or deployment state transition.
-	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.name',?,'$.bandwidthMbps',?,'$.monthlyQuotaBytes',?) WHERE id=?", n.Name, n.BandwidthMbps, n.MonthlyQuotaBytes, n.ID)
+	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.name',?,'$.bandwidthMbps',?,'$.monthlyQuotaBytes',?),revision=revision+1 WHERE id=? AND lifecycle='active' AND revision=?", n.Name, n.BandwidthMbps, n.MonthlyQuotaBytes, n.ID, n.Revision)
 	if err != nil {
 		return err
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		return ErrNotFound
+		return ErrConflict
 	}
 	return nil
 }
 func (s *Store) SetStatus(id, status, message string, shared bool) error {
-	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.status',?,'$.message',?,'$.sharedHost',json(?)) WHERE id=?", status, message, jsonString(shared), id)
+	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.status',?,'$.message',?,'$.sharedHost',json(?)) WHERE id=? AND lifecycle='active'", status, message, jsonString(shared), id)
 	if err != nil {
 		return err
 	}
@@ -163,12 +207,21 @@ func (s *Store) SetStatus(id, status, message string, shared bool) error {
 }
 
 func (s *Store) SetTopology(id string, controlOnNode, acmeViaCaddy bool) error {
-	_, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.controlOnNode',json(?),'$.acmeViaCaddy',json(?),'$.sharedHost',json(?)) WHERE id=?", jsonString(controlOnNode), jsonString(acmeViaCaddy), jsonString(acmeViaCaddy), id)
+	_, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.controlOnNode',json(?),'$.acmeViaCaddy',json(?),'$.sharedHost',json(?)) WHERE id=? AND lifecycle='active'", jsonString(controlOnNode), jsonString(acmeViaCaddy), jsonString(acmeViaCaddy), id)
 	return err
 }
 func (s *Store) Pin(id, fingerprint string) error {
 	if fingerprint == "" {
 		return errors.New("SSH 主机指纹不能为空")
+	}
+	n, err := s.Node(id)
+	if err != nil {
+		return err
+	}
+	if n.ServerID != "" {
+		if err = s.PinServer(n.ServerID, fingerprint, n.MachineID); err != nil {
+			return err
+		}
 	}
 	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.hostKey',?) WHERE id=? AND (COALESCE(json_extract(config,'$.hostKey'),'')='' OR json_extract(config,'$.hostKey')=?)", fingerprint, id, fingerprint)
 	if err != nil {
@@ -185,7 +238,7 @@ func (s *Store) Pin(id, fingerprint string) error {
 }
 
 func (s *Store) ExternalVerified(id string) error {
-	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.status','ready','$.message','外部 Mihomo 验证通过') WHERE id=? AND json_extract(config,'$.status') IN ('awaiting_external','ready')", id)
+	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.status','ready','$.message','外部 Mihomo 验证通过') WHERE id=? AND lifecycle='active' AND json_extract(config,'$.status') IN ('awaiting_external','ready')", id)
 	if err != nil {
 		return err
 	}
@@ -232,17 +285,25 @@ func (s *Store) ResolveAgent(token string) (string, error) {
 func (s *Store) Desired(id string) (model.AgentDesired, error) {
 	var result model.AgentDesired
 	result.Devices = []model.AgentDevice{}
-	err := s.DB.QueryRow("SELECT desired_revision FROM nodes WHERE id=?", id).Scan(&result.Revision)
+	var lifecycle string
+	err := s.DB.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", id).Scan(&result.Revision, &lifecycle)
 	if err != nil {
 		return result, notFound(err)
 	}
+	var retirement model.AgentRetirement
+	err = s.DB.QueryRow("SELECT id,stopped FROM node_retirements WHERE node_id=?", id).Scan(&retirement.ID, &retirement.Finalize)
+	if err == nil {
+		result.Retirement = &retirement
+	} else if err != sql.ErrNoRows {
+		return result, err
+	}
 	rows, err := s.DB.Query(`SELECT c.device_id,c.password,
-CASE WHEN d.id IS NULL THEN 1 WHEN d.enabled=0 THEN 0 WHEN a.node_id IS NOT NULL THEN 1 WHEN r.id IS NOT NULL AND r.immediate=0 AND r.status!='revoked' THEN 1 ELSE 0 END,
+CASE WHEN ?!='active' THEN 0 WHEN c.device_id=? THEN 1 WHEN d.id IS NULL OR d.deleted_at>0 OR d.enabled=0 THEN 0 WHEN a.node_id IS NOT NULL THEN 1 WHEN r.id IS NOT NULL AND r.immediate=0 AND r.status!='revoked' THEN 1 ELSE 0 END,
 COALESCE(r.id,''),CASE WHEN r.id IS NOT NULL AND r.immediate=0 AND r.status!='revoked' THEN 60 ELSE 0 END
 FROM credentials c LEFT JOIN devices d ON d.id=c.device_id
 LEFT JOIN assignments a ON a.device_id=c.device_id AND a.node_id=c.node_id
 LEFT JOIN removals r ON r.id=(SELECT rr.id FROM removals rr WHERE rr.device_id=c.device_id AND rr.node_id=c.node_id AND rr.status!='cancelled' ORDER BY rr.created_at DESC,rr.rowid DESC LIMIT 1) AND a.node_id IS NULL
-WHERE c.node_id=? ORDER BY c.device_id`, id)
+WHERE c.node_id=? ORDER BY c.device_id`, lifecycle, ProbeID(id), id)
 	if err != nil {
 		return result, err
 	}
@@ -259,16 +320,34 @@ WHERE c.node_id=? ORDER BY c.device_id`, id)
 		}
 		result.Devices = append(result.Devices, d)
 	}
-	return result, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return result, err
+	}
+	if lifecycle == "active" {
+		var mode string
+		if err = s.DB.QueryRow("SELECT COALESCE(json_extract(config,'$.certificateMode'),'http') FROM nodes WHERE id=?", id).Scan(&mode); err != nil {
+			return result, err
+		}
+		if mode == "cloudflare" {
+			result.Certificate, err = s.CertificateBundle(id)
+		}
+	}
+	return result, err
 }
 
 type Job struct {
-	ID           int64
-	NodeID, Kind string
+	ID                   int64
+	NodeID, Kind         string
+	Takeover             bool   `json:"takeover,omitempty"`
+	PreflightFingerprint string `json:"preflightFingerprint,omitempty"`
+	CertificateMode      string `json:"certificateMode,omitempty"`
+	ZoneID               string `json:"zoneId,omitempty"`
 }
 
 func (s *Store) RecoverJobs() error {
-	_, err := s.DB.Exec("UPDATE jobs SET state='pending' WHERE state='running'")
+	_, err := s.DB.Exec("UPDATE jobs SET state='pending' WHERE state='running'; UPDATE jobs SET state='cancelled' WHERE state='cancelling'")
 	return err
 }
 func (s *Store) NextJob() (Job, error) {
@@ -278,10 +357,21 @@ func (s *Store) NextJob() (Job, error) {
 		return j, err
 	}
 	defer tx.Rollback()
-	err = tx.QueryRow("SELECT id,node_id,kind FROM jobs WHERE state='pending' ORDER BY id LIMIT 1").Scan(&j.ID, &j.NodeID, &j.Kind)
+	var options string
+	err = tx.QueryRow(`SELECT j.id,j.node_id,j.kind,j.options FROM jobs j JOIN nodes n ON n.id=j.node_id
+WHERE j.state='pending' AND ((n.lifecycle='active' AND j.kind!='retire') OR (n.lifecycle='retiring' AND j.kind='retire'))
+AND NOT EXISTS(SELECT 1 FROM jobs busy JOIN nodes bn ON bn.id=busy.node_id WHERE busy.state IN ('running','cancelling') AND json_extract(bn.config,'$.serverId')=json_extract(n.config,'$.serverId')) ORDER BY j.id LIMIT 1`).Scan(&j.ID, &j.NodeID, &j.Kind, &options)
 	if err != nil {
 		return j, notFound(err)
 	}
+	var opts Job
+	if err = json.Unmarshal([]byte(options), &opts); err != nil {
+		return j, err
+	}
+	j.Takeover = opts.Takeover
+	j.PreflightFingerprint = opts.PreflightFingerprint
+	j.CertificateMode = opts.CertificateMode
+	j.ZoneID = opts.ZoneID
 	if _, err = tx.Exec("UPDATE jobs SET state='running',started_at=? WHERE id=?", s.Now().Unix(), j.ID); err != nil {
 		return j, err
 	}
@@ -292,46 +382,19 @@ func (s *Store) FinishJob(j Job, success bool) {
 	if success {
 		state = "done"
 	}
-	_, _ = s.DB.Exec("UPDATE jobs SET state=? WHERE id=?", state, j.ID)
+	_, _ = s.DB.Exec("UPDATE jobs SET state=CASE WHEN state='cancelling' THEN 'cancelled' ELSE ? END WHERE id=? AND state IN ('running','cancelling')", state, j.ID)
+	// If no owner was ever installed, cancellation has no remote resources to
+	// retire. Managed partial installs remain visible until stopped/cleaned.
+	var abandoned int
+	if s.DB.QueryRow("SELECT COUNT(*) FROM nodes WHERE id=? AND lifecycle='retiring' AND managed=0 AND NOT EXISTS(SELECT 1 FROM jobs WHERE node_id=? AND state IN ('running','cancelling'))", j.NodeID, j.NodeID).Scan(&abandoned) == nil && abandoned == 1 {
+		_ = s.CompleteNodeRetirement(j.NodeID)
+	}
 }
 func (s *Store) Queue(id, kind, password string) (model.Node, error) {
-	n, err := s.Node(id)
-	if err != nil {
-		return n, err
+	if kind != "install" && kind != "verify" {
+		return model.Node{}, errors.New("任务类型无效")
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return n, err
-	}
-	defer tx.Rollback()
-	if kind == "install" {
-		if password == "" {
-			return n, errors.New("重试部署需要重新输入 SSH 密码")
-		}
-		enc, e := s.Vault.Encrypt(password)
-		if e != nil {
-			return n, e
-		}
-		if _, err = tx.Exec("UPDATE nodes SET password=?,password_expires=? WHERE id=?", enc, s.Now().Add(24*time.Hour).Unix(), id); err != nil {
-			return n, err
-		}
-		n.Status = "pending"
-		n.Message = "等待重新部署"
-	} else {
-		n.Status = "verifying"
-		n.Message = "等待连通性验证"
-	}
-	if _, err = tx.Exec("INSERT INTO jobs(node_id,kind,created_at) VALUES(?,?,?)", id, kind, s.Now().Unix()); err != nil {
-		return n, errors.New("节点已有部署或验证任务，请等待当前任务完成")
-	}
-	if _, err = tx.Exec("UPDATE nodes SET config=json_set(config,'$.status',?,'$.message',?) WHERE id=?", n.Status, n.Message, id); err != nil {
-		return n, err
-	}
-	if err = tx.Commit(); err != nil {
-		return n, err
-	}
-	s.Audit("node."+kind, id)
-	return n, nil
+	return s.queueWithOptions(id, kind, password, Job{})
 }
 
 func (s *Store) CheckIntegrity() error {

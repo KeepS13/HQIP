@@ -51,9 +51,9 @@ func nodeIDs(tx *sql.Tx) ([]string, error) {
 }
 func (s *Store) Device(id string) (model.Device, error) {
 	var d model.Device
-	var created int64
+	var created, deleted int64
 	var enc string
-	err := s.DB.QueryRow("SELECT id,name,enabled,created_at,token_secret FROM devices WHERE id=?", id).Scan(&d.ID, &d.Name, &d.Enabled, &created, &enc)
+	err := s.DB.QueryRow("SELECT id,name,enabled,created_at,token_secret,deleted_at FROM devices WHERE id=?", id).Scan(&d.ID, &d.Name, &d.Enabled, &created, &enc, &deleted)
 	if err != nil {
 		return d, notFound(err)
 	}
@@ -63,6 +63,13 @@ func (s *Store) Device(id string) (model.Device, error) {
 		return d, secretError(err)
 	}
 	d.SubscriptionURL = s.BaseURL + "/sub/" + token
+	d.Lifecycle = "active"
+	if deleted > 0 {
+		at := time.Unix(deleted, 0).UTC()
+		d.DeletedAt = &at
+		d.SubscriptionURL = ""
+		d.Lifecycle = "deleted"
+	}
 	err = s.DB.QueryRow("SELECT COALESCE(SUM(upload),0),COALESCE(SUM(download),0) FROM daily WHERE device_id=? AND start>=?", id, MonthStart(s.Now())).Scan(&d.MonthUpload, &d.MonthDownload)
 	if err != nil {
 		return d, err
@@ -71,7 +78,7 @@ func (s *Store) Device(id string) (model.Device, error) {
 	if err != nil {
 		return d, err
 	}
-	rows, err := s.DB.Query("SELECT n.last_seen,n.online,n.desired_revision,n.applied_revision,n.core_healthy FROM nodes n JOIN credentials c ON c.node_id=n.id WHERE c.device_id=?", id)
+	rows, err := s.DB.Query("SELECT n.last_seen,n.online,n.desired_revision,n.applied_revision,n.core_healthy FROM nodes n JOIN credentials c ON c.node_id=n.id WHERE c.device_id=? AND n.lifecycle!='deleted' AND (n.managed=1 OR EXISTS(SELECT 1 FROM jobs j WHERE j.node_id=n.id AND j.state IN ('running','cancelling')))", id)
 	if err != nil {
 		return d, err
 	}
@@ -105,11 +112,14 @@ func (s *Store) Device(id string) (model.Device, error) {
 	}
 	if pending > 0 {
 		d.PendingSync = true
+		if deleted > 0 {
+			d.Lifecycle = "revoking"
+		}
 	}
 	return d, nil
 }
 func (s *Store) Devices() ([]model.Device, error) {
-	rows, err := s.DB.Query("SELECT id FROM devices ORDER BY created_at DESC,id")
+	rows, err := s.DB.Query("SELECT id FROM devices WHERE deleted_at=0 OR EXISTS(SELECT 1 FROM removals r WHERE r.device_id=devices.id AND r.status NOT IN ('revoked','cancelled')) ORDER BY created_at DESC,id")
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +193,13 @@ func (s *Store) UpdateDevice(id string, name *string, enabled *bool, rotate bool
 		return d, err
 	}
 	defer tx.Rollback()
+	var deleted int64
+	if err = tx.QueryRow("SELECT deleted_at FROM devices WHERE id=?", id).Scan(&deleted); err != nil {
+		return d, notFound(err)
+	}
+	if deleted > 0 {
+		return d, ErrNotFound
+	}
 	if name != nil {
 		if _, err = tx.Exec("UPDATE devices SET name=? WHERE id=?", *name, id); err != nil {
 			return d, err
@@ -248,7 +265,7 @@ func (s *Store) UpdateDevice(id string, name *string, enabled *bool, rotate bool
 }
 func (s *Store) SubscriptionDevice(token string) (model.Device, error) {
 	var id string
-	err := s.DB.QueryRow("SELECT id FROM devices WHERE token_hash=? AND enabled=1", secure.Hash(token)).Scan(&id)
+	err := s.DB.QueryRow("SELECT id FROM devices WHERE token_hash=? AND enabled=1 AND deleted_at=0", secure.Hash(token)).Scan(&id)
 	if err != nil {
 		return model.Device{}, notFound(err)
 	}

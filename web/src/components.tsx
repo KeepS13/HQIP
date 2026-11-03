@@ -61,6 +61,8 @@ export function onlineKnown(node: Node) {
   return fresh(node) && node.coreHealthy;
 }
 export function nodeState(node: Node): { text: string; tone: string } {
+  if (node.lifecycle === "retiring") return { text: "待停止 / 清理中", tone: "warning" };
+  if (node.lifecycle === "deleted") return { text: "已删除", tone: "muted" };
   if (node.status === "ready" && !fresh(node))
     return { text: "心跳失联", tone: "warning" };
   if (node.status === "ready" && !node.coreHealthy)

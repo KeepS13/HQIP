@@ -15,6 +15,15 @@ export interface Metrics {
 }
 export interface Node {
   id: string;
+  serverId: string;
+  addressId: string;
+  revision: number;
+  lifecycle: string;
+  managed: boolean;
+  dnsMode: string;
+  certificateMode: string;
+  installationVersion: number;
+  certificate?: { version: number; notAfter: string; error: string };
   name: string;
   sshHost: string;
   sshPort: number;
@@ -43,6 +52,7 @@ export interface Node {
 }
 export interface Device {
   id: string;
+  deletedAt?: string | null;
   name: string;
   enabled: boolean;
   createdAt: string;
@@ -54,6 +64,60 @@ export interface Device {
   online: boolean;
   instances: number;
   pendingSync: boolean;
+}
+
+export interface ManagedServer {
+  id: string;
+  name: string;
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  hostKey: string;
+  machineId: string;
+  platform: string;
+  architecture: string;
+  revision: number;
+  createdAt: string;
+  lastSeen?: string | null;
+  metrics: Metrics;
+}
+export interface ServerAddress {
+  id: string;
+  serverId: string;
+  ip: string;
+  nodeIds: string[];
+}
+export interface CloudflareZone { id: string; name: string; status: string }
+export interface CloudflareSettings {
+  configured: boolean;
+  defaultZoneId: string;
+  defaultZoneName: string;
+  email: string;
+  version: number;
+  updatedAt: string;
+}
+export interface CertificateInfo {
+  nodeId: string;
+  domain: string;
+  issuedVersion: number;
+  appliedVersion: number;
+  notAfter: string;
+  nextAttempt: string;
+  error: string;
+  appliedError: string;
+  expiresInDays: number;
+  warning: string;
+}
+export interface NodePreflight {
+  fingerprint: string;
+  machineId: string;
+  platform: string;
+  architecture: string;
+  boundIps: string[];
+  conflicts: string[];
+  takeoverCandidates: { unit: string; configPath: string; owner?: string }[];
+  canInstall: boolean;
+  canTakeover: boolean;
 }
 export interface TrafficPoint {
   at: number;

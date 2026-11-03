@@ -13,49 +13,67 @@ type Metrics struct {
 }
 
 type Node struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	SSHHost           string     `json:"sshHost"`
-	SSHPort           int        `json:"sshPort"`
-	SSHUser           string     `json:"sshUser"`
-	PublicIP          string     `json:"publicIp"`
-	Domain            string     `json:"domain"`
-	Port              int        `json:"port"`
-	BandwidthMbps     *float64   `json:"bandwidthMbps"`
-	MonthlyQuotaBytes *int64     `json:"monthlyQuotaBytes"`
-	Status            string     `json:"status"`
-	Message           string     `json:"message"`
-	HostKey           string     `json:"hostKey"`
-	SharedHost        bool       `json:"sharedHost"`
-	ControlOnNode     bool       `json:"controlOnNode"`
-	ACMEViaCaddy      bool       `json:"acmeViaCaddy"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	LastSeen          *time.Time `json:"lastSeen"`
-	Metrics           Metrics    `json:"metrics"`
-	MonthUpload       int64      `json:"monthUpload"`
-	MonthDownload     int64      `json:"monthDownload"`
-	TotalUpload       int64      `json:"totalUpload"`
-	TotalDownload     int64      `json:"totalDownload"`
-	OnlineDevices     int        `json:"onlineDevices"`
-	Instances         int        `json:"instances"`
-	DesiredRevision   int64      `json:"desiredRevision"`
-	AppliedRevision   int64      `json:"appliedRevision"`
-	CoreHealthy       bool       `json:"coreHealthy"`
+	ID                  string             `json:"id"`
+	ServerID            string             `json:"serverId"`
+	AddressID           string             `json:"addressId"`
+	MachineID           string             `json:"machineId"`
+	AuthPort            int                `json:"authPort"`
+	StatsPort           int                `json:"statsPort"`
+	InstallationVersion int                `json:"installationVersion"`
+	CertificateMode     string             `json:"certificateMode"`
+	DNSMode             string             `json:"dnsMode"`
+	ZoneID              string             `json:"zoneId,omitempty"`
+	Managed             bool               `json:"managed"`
+	Lifecycle           string             `json:"lifecycle"`
+	Revision            int64              `json:"revision"`
+	DeletedAt           *time.Time         `json:"deletedAt,omitempty"`
+	Capabilities        []string           `json:"capabilities"`
+	Retirement          *RetirementStatus  `json:"retirement,omitempty"`
+	Certificate         *CertificateStatus `json:"certificate,omitempty"`
+	Name                string             `json:"name"`
+	SSHHost             string             `json:"sshHost"`
+	SSHPort             int                `json:"sshPort"`
+	SSHUser             string             `json:"sshUser"`
+	PublicIP            string             `json:"publicIp"`
+	Domain              string             `json:"domain"`
+	Port                int                `json:"port"`
+	BandwidthMbps       *float64           `json:"bandwidthMbps"`
+	MonthlyQuotaBytes   *int64             `json:"monthlyQuotaBytes"`
+	Status              string             `json:"status"`
+	Message             string             `json:"message"`
+	HostKey             string             `json:"hostKey"`
+	SharedHost          bool               `json:"sharedHost"`
+	ControlOnNode       bool               `json:"controlOnNode"`
+	ACMEViaCaddy        bool               `json:"acmeViaCaddy"`
+	CreatedAt           time.Time          `json:"createdAt"`
+	LastSeen            *time.Time         `json:"lastSeen"`
+	Metrics             Metrics            `json:"metrics"`
+	MonthUpload         int64              `json:"monthUpload"`
+	MonthDownload       int64              `json:"monthDownload"`
+	TotalUpload         int64              `json:"totalUpload"`
+	TotalDownload       int64              `json:"totalDownload"`
+	OnlineDevices       int                `json:"onlineDevices"`
+	Instances           int                `json:"instances"`
+	DesiredRevision     int64              `json:"desiredRevision"`
+	AppliedRevision     int64              `json:"appliedRevision"`
+	CoreHealthy         bool               `json:"coreHealthy"`
 }
 
 type Device struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"createdAt"`
-	SubscriptionURL string    `json:"subscriptionUrl,omitempty"`
-	MonthUpload     int64     `json:"monthUpload"`
-	MonthDownload   int64     `json:"monthDownload"`
-	TotalUpload     int64     `json:"totalUpload"`
-	TotalDownload   int64     `json:"totalDownload"`
-	Online          bool      `json:"online"`
-	Instances       int       `json:"instances"`
-	PendingSync     bool      `json:"pendingSync"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Enabled         bool       `json:"enabled"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	SubscriptionURL string     `json:"subscriptionUrl,omitempty"`
+	MonthUpload     int64      `json:"monthUpload"`
+	MonthDownload   int64      `json:"monthDownload"`
+	TotalUpload     int64      `json:"totalUpload"`
+	TotalDownload   int64      `json:"totalDownload"`
+	Online          bool       `json:"online"`
+	Instances       int        `json:"instances"`
+	PendingSync     bool       `json:"pendingSync"`
+	DeletedAt       *time.Time `json:"deletedAt,omitempty"`
+	Lifecycle       string     `json:"lifecycle"`
 }
 
 type AgentDevice struct {
@@ -75,8 +93,10 @@ type AgentRemovalStatus struct {
 }
 
 type AgentDesired struct {
-	Revision int64         `json:"revision"`
-	Devices  []AgentDevice `json:"devices"`
+	Revision    int64              `json:"revision"`
+	Devices     []AgentDevice      `json:"devices"`
+	Retirement  *AgentRetirement   `json:"retirement,omitempty"`
+	Certificate *CertificateBundle `json:"certificate,omitempty"`
 }
 
 // Bucket counters are cumulative for a fixed UTC Unix-second interval start.
@@ -100,6 +120,9 @@ type AgentReport struct {
 	HistoryCompacted bool                 `json:"historyCompacted"`
 	Removals         []AgentRemovalStatus `json:"removals,omitempty"`
 	Warnings         []string             `json:"warnings,omitempty"`
+	Capabilities     []string             `json:"capabilities,omitempty"`
+	Retirement       *RetirementStatus    `json:"retirement,omitempty"`
+	Certificate      *CertificateStatus   `json:"certificate,omitempty"`
 }
 
 type AgentConfig struct {
@@ -111,6 +134,13 @@ type AgentConfig struct {
 	StatsURL        string `json:"statsUrl"`
 	StatsSecret     string `json:"statsSecret"`
 	HysteriaService string `json:"hysteriaService"`
+	NodeDir         string `json:"nodeDir"`
+	Managed         bool   `json:"managed"`
+	Domain          string `json:"domain"`
+	PublicIP        string `json:"publicIp"`
+	AgentService    string `json:"agentService"`
+	CertificateMode string `json:"certificateMode"`
+	ControllerID    string `json:"controllerId"`
 }
 
 type TaskEvent struct {

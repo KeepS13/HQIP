@@ -53,6 +53,13 @@ func (s *Store) Assign(id string, nodeIDs []string, defaultID string, expected i
 		return model.Assignment{}, err
 	}
 	defer tx.Rollback()
+	var active int
+	if err = tx.QueryRow("SELECT COUNT(*) FROM devices WHERE id=? AND deleted_at=0", id).Scan(&active); err != nil {
+		return model.Assignment{}, err
+	}
+	if active != 1 {
+		return model.Assignment{}, ErrNotFound
+	}
 	var revision int64
 	var oldDefault string
 	if err = tx.QueryRow("SELECT revision,default_node_id FROM device_config WHERE device_id=?", id).Scan(&revision, &oldDefault); err != nil {
@@ -85,7 +92,7 @@ func (s *Store) Assign(id string, nodeIDs []string, defaultID string, expected i
 			changed = true
 		}
 		var exists int
-		if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE id=?", n).Scan(&exists); err != nil {
+		if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE id=? AND lifecycle='active'", n).Scan(&exists); err != nil {
 			return model.Assignment{}, err
 		}
 		if exists != 1 {
@@ -157,7 +164,7 @@ func (s *Store) AssignedNodes(id string, readyOnly bool) ([]model.Node, error) {
 		if e != nil {
 			return nil, e
 		}
-		if !readyOnly || n.Status == "ready" {
+		if n.Lifecycle == "active" && (!readyOnly || n.Status == "ready") {
 			result = append(result, n)
 		}
 	}

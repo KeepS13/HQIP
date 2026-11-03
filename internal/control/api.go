@@ -43,6 +43,10 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 type nodeForm struct {
+	ServerID          string   `json:"serverId"`
+	AddressID         string   `json:"addressId"`
+	DNSMode           string   `json:"dnsMode"`
+	ZoneID            string   `json:"zoneId"`
 	Name              string   `json:"name"`
 	SSHHost           string   `json:"sshHost"`
 	SSHPort           int      `json:"sshPort"`
@@ -93,7 +97,10 @@ func (f *nodeForm) validate() error {
 	if ip == nil || ip.To4() == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
 		return errors.New("请填写服务器的公网 IPv4 地址")
 	}
-	if len(f.Domain) > 253 || !domainRE.MatchString(f.Domain) {
+	if f.DNSMode != "" && f.DNSMode != "manual" && f.DNSMode != "cloudflare" {
+		return errors.New("域名模式无效")
+	}
+	if f.DNSMode != "cloudflare" && (len(f.Domain) > 253 || !domainRE.MatchString(f.Domain)) {
 		return errors.New("请填写已解析到服务器的节点域名")
 	}
 	if len(f.Password) < 1 || len(f.Password) > 1024 {
@@ -109,11 +116,42 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &f) {
 		return
 	}
+	var server model.Server
+	if f.ServerID != "" {
+		var err error
+		server, err = s.Store.Server(f.ServerID)
+		if err != nil {
+			managementError(w, err)
+			return
+		}
+		addresses, err := s.Store.Addresses(server.ID)
+		if err != nil {
+			result(w, nil, err)
+			return
+		}
+		found := false
+		for _, address := range addresses {
+			if address.ID == f.AddressID {
+				f.PublicIP = address.IP
+				found = true
+				break
+			}
+		}
+		if !found {
+			fail(w, 400, "请从所选服务器选择已登记的公网 IP")
+			return
+		}
+		f.SSHHost, f.SSHPort, f.SSHUser = server.SSHHost, server.SSHPort, server.SSHUser
+	}
 	if err := f.validate(); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	n, err := s.Store.CreateNode(model.Node{Name: f.Name, SSHHost: f.SSHHost, SSHPort: f.SSHPort, SSHUser: f.SSHUser, PublicIP: f.PublicIP, Domain: f.Domain, Port: f.Port, BandwidthMbps: f.BandwidthMbps, MonthlyQuotaBytes: f.MonthlyQuotaBytes}, f.Password)
+	certificateMode := "http"
+	if f.DNSMode == "cloudflare" {
+		certificateMode = "cloudflare"
+	}
+	n, err := s.Store.CreateNode(model.Node{ServerID: f.ServerID, AddressID: f.AddressID, DNSMode: f.DNSMode, ZoneID: f.ZoneID, CertificateMode: certificateMode, HostKey: server.HostKey, MachineID: server.MachineID, Name: f.Name, SSHHost: f.SSHHost, SSHPort: f.SSHPort, SSHUser: f.SSHUser, PublicIP: f.PublicIP, Domain: f.Domain, Port: f.Port, BandwidthMbps: f.BandwidthMbps, MonthlyQuotaBytes: f.MonthlyQuotaBytes}, f.Password)
 	if err != nil {
 		fail(w, 409, "创建节点失败，域名或服务器端口可能已存在")
 		return
@@ -248,7 +286,11 @@ func (s *Server) updateNode(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) retryNode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Password string `json:"password"`
+		Password             string `json:"password"`
+		Takeover             bool   `json:"takeover"`
+		PreflightFingerprint string `json:"preflightFingerprint"`
+		CertificateMode      string `json:"certificateMode"`
+		ZoneID               string `json:"zoneId"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -257,7 +299,20 @@ func (s *Server) retryNode(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请重新填写 SSH 密码")
 		return
 	}
-	n, err := s.Store.Queue(r.PathValue("id"), "install", body.Password)
+	if strings.HasSuffix(r.URL.Path, "/takeover") {
+		body.Takeover = true
+	}
+	if body.Takeover && body.PreflightFingerprint == "" {
+		fail(w, 400, "请先预检并确认要接管的服务")
+		return
+	}
+	var n model.Node
+	var err error
+	if body.CertificateMode != "" {
+		n, err = s.Store.QueueDeploymentCertificate(r.PathValue("id"), body.Password, body.Takeover, body.PreflightFingerprint, body.CertificateMode, body.ZoneID)
+	} else {
+		n, err = s.Store.QueueDeployment(r.PathValue("id"), body.Password, body.Takeover, body.PreflightFingerprint)
+	}
 	if err != nil {
 		fail(w, 409, err.Error())
 		return

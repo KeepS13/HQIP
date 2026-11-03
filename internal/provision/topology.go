@@ -11,7 +11,10 @@ import (
 // SharedHost is read only as the pre-migration certificate topology hint.
 func deploymentTopology(node model.Node, localID, remoteID, goos string) (controlOnNode, acmeViaCaddy bool) {
 	controlOnNode = goos == "linux" && strings.TrimSpace(localID) != "" && strings.TrimSpace(localID) == strings.TrimSpace(remoteID)
-	acmeViaCaddy = controlOnNode || node.ACMEViaCaddy || node.SharedHost
+	acmeViaCaddy = node.ACMEViaCaddy || node.SharedHost
+	if node.CertificateMode == "cloudflare" {
+		acmeViaCaddy = false
+	}
 	return
 }
 

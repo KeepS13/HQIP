@@ -35,6 +35,7 @@ type Server struct {
 	attempts  map[string][]time.Time
 	authSlots chan struct{}
 	wake      chan struct{}
+	initErr   error
 }
 
 func New(s *store.Store, opts Options) *Server {
@@ -42,10 +43,11 @@ func New(s *store.Store, opts Options) *Server {
 		opts.AdminOrigin = opts.PublicURL
 	}
 	runner := opts.Installer
+	controllerID, initErr := s.ControllerID()
 	if runner == nil {
-		runner = provision.New(provision.Options{ControlURL: opts.PublicURL, ArtifactDir: opts.ArtifactDir})
+		runner = provision.New(provision.Options{ControlURL: opts.PublicURL, ArtifactDir: opts.ArtifactDir, ControllerID: controllerID})
 	}
-	return &Server{Store: s, opts: opts, runner: runner, attempts: map[string][]time.Time{}, authSlots: make(chan struct{}, 2), wake: make(chan struct{}, 1)}
+	return &Server{Store: s, opts: opts, runner: runner, attempts: map[string][]time.Time{}, authSlots: make(chan struct{}, 2), wake: make(chan struct{}, 1), initErr: initErr}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -76,6 +78,8 @@ func (s *Server) AdminHandler() http.Handler {
 	} {
 		m.Handle(pattern, s.auth(handler, false))
 	}
+	s.registerServerRoutes(m)
+	s.registerCloudflareRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	m.HandleFunc("/", s.static)
 	return s.headers(m, s.opts.AdminOrigin)

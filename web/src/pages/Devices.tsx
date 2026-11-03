@@ -26,6 +26,7 @@ import {
   Settings2,
   ShieldCheck,
   Smartphone,
+  Trash2,
 } from "lucide-react";
 import { api, usePolling } from "../api";
 import {
@@ -52,6 +53,7 @@ import {
   useToast,
 } from "../components";
 import type { Device, DeviceDetail, Overview } from "../types";
+import { DeleteDevice } from "./DeleteDevice";
 import { DeviceClients } from "./DeviceClients";
 
 export function AddDevice({ onClose }: { onClose: () => void }) {
@@ -366,7 +368,8 @@ export function DevicePage() {
       `/devices/${id}`,
     ),
     [confirm, setConfirm] = useState<"rotate" | "toggle" | null>(null),
-    [rename, setRename] = useState(false);
+    [rename, setRename] = useState(false),
+    [remove, setRemove] = useState(false);
   const toast = useToast();
   if (loading) return <Loading />;
   if (!data)
@@ -389,9 +392,11 @@ export function DevicePage() {
         actions={
           <>
             <DeviceBadge device={device} unknown={unknown} />
+            {!device.deletedAt && <Button variant="danger" icon={Trash2} onClick={() => setRemove(true)}>删除设备</Button>}
             <Button
               variant="secondary"
               icon={Settings2}
+              disabled={!!device.deletedAt}
               onClick={() => setRename(true)}
             >
               重命名
@@ -399,6 +404,7 @@ export function DevicePage() {
             <Button
               variant={device.enabled ? "secondary" : "primary"}
               icon={device.enabled ? Pause : Play}
+              disabled={!!device.deletedAt}
               onClick={() => setConfirm("toggle")}
             >
               {device.enabled ? "停用设备" : "启用设备"}
@@ -412,7 +418,8 @@ export function DevicePage() {
           设备变更正在同步到节点。失联节点恢复通信后才会应用，在所有节点确认前显示「待同步」。
         </Notice>
       )}
-      {!device.enabled && (
+      {device.deletedAt && <Notice tone="warning">此设备已删除，账号和订阅已失效。{device.pendingSync ? "仍有节点等待撤销确认。" : "节点授权已撤销。"}历史用量保留。</Notice>}
+      {!device.enabled && !device.deletedAt && (
         <Notice tone="warning">
           此设备已停用。订阅与新连接不可用，节点会撤销已有连接；重新启用后可恢复使用。
         </Notice>
@@ -453,7 +460,7 @@ export function DevicePage() {
           }
         />
       </div>
-      <DeviceClients detail={data} refresh={refresh} />
+      {!device.deletedAt && <DeviceClients detail={data} refresh={refresh} />}
       <Panel
         title="专属订阅链接"
         subtitle="支持 Clash Verge Rev 等使用 Mihomo 核心的客户端"
@@ -492,6 +499,7 @@ export function DevicePage() {
             <Button
               variant="ghost"
               icon={RefreshCw}
+              disabled={!!device.deletedAt}
               onClick={() => setConfirm("rotate")}
             >
               轮换订阅与凭据
@@ -603,6 +611,7 @@ export function DevicePage() {
         累计使用 {bytes(device.totalUpload + device.totalDownload)} ·
         登记设备与真实物理设备并不等同。
       </div>
+      {remove && <DeleteDevice device={device} onClose={() => setRemove(false)} refresh={refresh} />}
       {rename && (
         <RenameDevice
           device={device}

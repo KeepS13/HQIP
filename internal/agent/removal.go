@@ -19,6 +19,14 @@ type cachedRemoval struct {
 
 func cloneCache(s cachedState) cachedState {
 	n := s
+	if s.Retirement != nil {
+		copy := *s.Retirement
+		n.Retirement = &copy
+	}
+	if s.Certificate != nil {
+		copy := *s.Certificate
+		n.Certificate = &copy
+	}
 	n.Credentials = make(map[string]cachedCredential, len(s.Credentials))
 	n.Pending = make(map[string]pendingRevocation, len(s.Pending))
 	n.Removals = make(map[string]cachedRemoval, len(s.Removals))

@@ -17,13 +17,14 @@ func migrate(db *sql.DB) error {
 	if err = tx.QueryRow("SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil {
 		return err
 	}
-	if version == "2" {
+	if version == "3" {
 		return tx.Commit()
 	}
-	if version != "1" {
+	if version != "1" && version != "2" {
 		return errors.New("数据库版本不受此程序支持")
 	}
-	_, err = tx.Exec(`
+	if version == "1" {
+		_, err = tx.Exec(`
 CREATE TABLE device_config(device_id TEXT PRIMARY KEY REFERENCES devices(id),default_node_id TEXT NOT NULL DEFAULT '',revision INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE assignments(device_id TEXT NOT NULL REFERENCES devices(id),node_id TEXT NOT NULL REFERENCES nodes(id),required_revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(device_id,node_id));
 CREATE TABLE device_accounts(device_id TEXT PRIMARY KEY REFERENCES devices(id),username TEXT NOT NULL UNIQUE COLLATE NOCASE,password TEXT NOT NULL);
@@ -38,7 +39,11 @@ INSERT INTO device_config(device_id,default_node_id) SELECT d.id,COALESCE((SELEC
 INSERT INTO assignments(device_id,node_id,required_revision) SELECT c.device_id,c.node_id,n.desired_revision FROM credentials c JOIN devices d ON d.id=c.device_id JOIN nodes n ON n.id=c.node_id;
 UPDATE metadata SET value='2' WHERE key='schema_version';
 `)
-	if err != nil {
+		if err != nil {
+			return err
+		}
+	}
+	if err = migrateServers(tx); err != nil {
 		return err
 	}
 	return tx.Commit()

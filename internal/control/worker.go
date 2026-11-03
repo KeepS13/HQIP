@@ -17,12 +17,16 @@ func (s *Server) signal() {
 	}
 }
 func (s *Server) RunWorker(ctx context.Context) error {
+	if s.initErr != nil {
+		return s.initErr
+	}
 	if err := s.Store.RecoverJobs(); err != nil {
 		return err
 	}
 	_ = s.Store.Maintenance()
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
 	defer stopMaintenance()
+	s.cloudflareMaintenance(maintenanceCtx)
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -32,6 +36,7 @@ func (s *Server) RunWorker(ctx context.Context) error {
 				return
 			case <-ticker.C:
 				_ = s.Store.Maintenance()
+				s.cloudflareMaintenance(maintenanceCtx)
 			}
 		}
 	}()
@@ -69,7 +74,7 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 		s.Store.FinishJob(job, false)
 		return
 	}
-	if job.Kind == "install" && password == "" {
+	if (job.Kind == "install" || job.Kind == "retire") && password == "" {
 		_ = s.Store.SetStatus(node.ID, "error", "SSH 密码已过期，请重新输入密码并重试", node.SharedHost)
 		_ = s.Store.Event(node.ID, "error", "SSH 密码已过期，请重新输入密码并重试")
 		s.Store.FinishJob(job, false)
@@ -84,13 +89,52 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 		return message
 	}
 	log := func(stage, message string) { _ = s.Store.Event(node.ID, stage, redact(message)) }
-	ctx, cancel := context.WithTimeout(parent, 15*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
-	input := provision.Input{Node: node, Password: password, AgentToken: token, ProbePassword: probe}
+	// Deletion cancels an in-flight installer, but its durable 'cancelling'
+	// job retains the host lock until ownership and rollback have settled.
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				active, checkErr := s.Store.JobActive(job.ID)
+				if checkErr != nil || !active {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	input := provision.Input{Node: node, Password: password, AgentToken: token, ProbePassword: probe, Takeover: job.Takeover, PreflightFingerprint: job.PreflightFingerprint}
+	if job.CertificateMode != "" {
+		input.Node.CertificateMode, input.Node.ZoneID = job.CertificateMode, job.ZoneID
+	}
 	var output provision.Result
 	if job.Kind == "install" {
 		_ = s.Store.SetStatus(node.ID, "installing", "正在通过 SSH 安装节点", node.SharedHost)
-		output, err = s.runner.Install(ctx, input, log, func(fingerprint string) error { return s.Store.Pin(node.ID, fingerprint) })
+		input.Node, input.Certificate, err = s.prepareNodeCloudflare(ctx, input.Node)
+		if err == nil {
+			output, err = s.runner.Install(ctx, input, log, func(fingerprint string) error { return s.Store.Pin(node.ID, fingerprint) })
+		}
+		if output.Managed {
+			_ = s.Store.MarkInstalled(node.ID)
+		}
+	} else if job.Kind == "retire" {
+		retirer, ok := s.runner.(interface {
+			Retire(context.Context, provision.Input, provision.LogFunc, provision.PinFunc) (provision.Result, error)
+		})
+		if !ok {
+			err = errors.New("当前部署组件不支持 SSH 清理")
+		} else {
+			output, err = retirer.Retire(ctx, input, log, func(fingerprint string) error { return s.Store.Pin(node.ID, fingerprint) })
+		}
+		if err == nil {
+			err = s.Store.CompleteNodeRetirement(node.ID)
+		}
 	} else {
 		_ = s.Store.SetStatus(node.ID, "verifying", "正在验证代理连接", node.SharedHost)
 		output, err = s.runner.Verify(ctx, input, log)
@@ -98,6 +142,25 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	if parent.Err() != nil {
 		return
 	} // The durable running job is requeued after restart.
+	active, checkErr := s.Store.JobActive(job.ID)
+	if checkErr != nil || !active {
+		log("cancelled", "部署任务已取消，保留需要确认清理的安装记录")
+		s.Store.FinishJob(job, false)
+		return
+	}
+	if job.Kind == "retire" {
+		if err != nil {
+			log("error", "节点清理尚未完成："+redact(err.Error()))
+		} else {
+			log("deleted", "已确认本节点服务停止并清理")
+			s.cloudflareMaintenance(parent)
+		}
+		s.Store.FinishJob(job, err == nil)
+		return
+	}
+	if err == nil && job.Kind == "install" && job.CertificateMode != "" {
+		err = s.Store.CommitNodeCertificateMode(node.ID, job.ID, job.CertificateMode, job.ZoneID)
+	}
 	if err != nil {
 		message := "部署或验证失败：" + redact(err.Error())
 		_ = s.Store.SetStatus(node.ID, "error", message, output.SharedHost || node.SharedHost)
@@ -107,6 +170,15 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	}
 	if job.Kind == "install" {
 		s.Store.ClearSSHPassword(node.ID)
+		if output.InstallationVersion > 0 {
+			_ = s.Store.SetInstallationVersion(node.ID, output.InstallationVersion)
+		}
+		if output.MachineID != "" && node.ServerID != "" {
+			current, readErr := s.Store.Node(node.ID)
+			if readErr == nil {
+				_ = s.Store.PinServer(node.ServerID, current.HostKey, output.MachineID)
+			}
+		}
 	}
 	_ = s.Store.SetTopology(node.ID, output.ControlOnNode, output.ACMEViaCaddy)
 	status, message := "error", "代理验证未通过，请检查端口及网络"

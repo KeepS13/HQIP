@@ -35,6 +35,8 @@ type pendingRevocation struct {
 }
 
 type cachedState struct {
+	Retirement      *cachedRetirement            `json:"retirement,omitempty"`
+	Certificate     *model.CertificateStatus     `json:"certificate,omitempty"`
 	DesiredRevision int64                        `json:"desiredRevision"`
 	AppliedRevision int64                        `json:"appliedRevision"`
 	Credentials     map[string]cachedCredential  `json:"credentials"`
@@ -54,24 +56,29 @@ type liveState struct {
 }
 
 type Agent struct {
-	cfg           model.AgentConfig
-	log           *slog.Logger
-	ledger        *ledger
-	controlClient *http.Client
-	statsClient   *http.Client
-	cacheMu       sync.RWMutex
-	cache         cachedState
-	liveMu        sync.RWMutex
-	live          liveState
-	metrics       systemMetrics
-	sampleMu      sync.Mutex
-	generation    func(context.Context) (string, error)
-	restartCore   func(context.Context) error
-	now           func() time.Time
-	drainGrace    time.Duration
-	revokeWake    chan struct{}
-	closeOnce     sync.Once
-	closeErr      error
+	cfg               model.AgentConfig
+	log               *slog.Logger
+	ledger            *ledger
+	controlClient     *http.Client
+	statsClient       *http.Client
+	cacheMu           sync.RWMutex
+	cache             cachedState
+	liveMu            sync.RWMutex
+	live              liveState
+	metrics           systemMetrics
+	lifecycleMu       sync.Mutex
+	stopCore          func(context.Context) error
+	disableAgent      func(context.Context) error
+	finishRetirement  func(context.Context) error
+	prepareRetirement func(context.Context) error
+	sampleMu          sync.Mutex
+	generation        func(context.Context) (string, error)
+	restartCore       func(context.Context) error
+	now               func() time.Time
+	drainGrace        time.Duration
+	revokeWake        chan struct{}
+	closeOnce         sync.Once
+	closeErr          error
 }
 
 func New(cfg model.AgentConfig, logger *slog.Logger) (*Agent, error) {
@@ -107,6 +114,10 @@ func New(cfg model.AgentConfig, logger *slog.Logger) (*Agent, error) {
 	}
 	a.generation = a.systemdGeneration
 	a.restartCore = a.systemdRestart
+	a.stopCore = a.stopOwnedCore
+	a.disableAgent = a.disableOwnedAgent
+	a.finishRetirement = a.finishOwnedRetirement
+	a.prepareRetirement = a.prepareOwnedRetirement
 	return a, nil
 }
 
@@ -212,7 +223,7 @@ func (a *Agent) authenticate(w http.ResponseWriter, r *http.Request) {
 	}{}
 	a.cacheMu.RLock()
 	for id, credential := range a.cache.Credentials {
-		if _, denied := a.cache.Pending[id]; denied || !credential.Enabled || credentialDenied(a.cache, credential.Hash, a.now()) {
+		if _, denied := a.cache.Pending[id]; a.cache.Retirement != nil || denied || !credential.Enabled || credentialDenied(a.cache, credential.Hash, a.now()) {
 			continue
 		}
 		if subtle.ConstantTimeCompare([]byte(hash), []byte(credential.Hash)) == 1 {
@@ -232,6 +243,9 @@ func passwordHash(password string) string {
 }
 
 func (a *Agent) applyDesired(desired model.AgentDesired) error {
+	if err := a.applyLifecycle(desired); err != nil {
+		return err
+	}
 	if desired.Revision < 0 || len(desired.Devices) > 10000 {
 		return errors.New("控制服务配置无效")
 	}
@@ -490,6 +504,16 @@ func (a *Agent) sync(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if err := a.progressRetirement(ctx); err != nil {
+		configErr = err
+		a.cacheMu.Lock()
+		next := cloneCache(a.cache)
+		next.Warning = "节点停止或清理待重试：" + err.Error()
+		if saveErr := a.ledger.saveCache(next); saveErr == nil {
+			a.cache = next
+		}
+		a.cacheMu.Unlock()
+	}
 	batch, err := a.ledger.batch()
 	if err != nil {
 		return err
@@ -497,10 +521,21 @@ func (a *Agent) sync(ctx context.Context) error {
 	report := model.AgentReport{
 		At: a.now().UTC(), Daily: batch.daily, Minutes: batch.minutes,
 		HistoryCompacted: batch.compacted,
+		Capabilities:     []string{"agent-v2"},
+	}
+	if a.cfg.Managed {
+		report.Capabilities = append(report.Capabilities, "multi-ip-v2", "retirement-v1", "certificate-v1")
 	}
 	a.cacheMu.RLock()
 	report.Revision = a.cache.AppliedRevision
 	report.Removals = removalStatuses(a.cache)
+	if v := a.cache.Retirement; v != nil {
+		report.Retirement = &model.RetirementStatus{ID: v.ID, Stopped: v.Stopped, Final: v.Final}
+	}
+	if v := a.cache.Certificate; v != nil {
+		copy := *v
+		report.Certificate = &copy
+	}
 	if a.cache.Warning != "" {
 		report.Warnings = []string{a.cache.Warning}
 	}
@@ -524,6 +559,9 @@ func (a *Agent) sync(ctx context.Context) error {
 	if err := a.applyDesired(desired); err != nil {
 		return err
 	}
+	if err := a.acknowledgeRetirement(ctx, report.Retirement); err != nil {
+		return err
+	}
 	return configErr
 }
 
@@ -545,6 +583,12 @@ func (a *Agent) syncLoop(ctx context.Context) {
 }
 
 func (a *Agent) drainRevocations(ctx context.Context) error {
+	a.cacheMu.RLock()
+	retiring := a.cache.Retirement != nil
+	a.cacheMu.RUnlock()
+	if retiring {
+		return a.progressRetirement(ctx)
+	}
 	a.cacheMu.Lock()
 	next := cloneCache(a.cache)
 	if expireRemovals(&next, a.now()) {
@@ -630,6 +674,7 @@ func (a *Agent) maintenanceLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
+		a.observeManualCertificate()
 		if err := a.ledger.maintain(a.now(), maxPendingBytes); err != nil && ctx.Err() == nil {
 			a.log.Warn("清理流量历史失败", "error", err)
 		}

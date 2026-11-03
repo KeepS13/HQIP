@@ -93,9 +93,9 @@ func (s *Server) clashConfig(device model.Device, nodes []model.Node) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		name := n.Name + " · " + n.ID[:6]
+		name := n.Name + " · " + n.PublicIP + " · " + n.ID[:6]
 		names = append(names, name)
-		proxies = append(proxies, map[string]any{"name": name, "type": "hysteria2", "server": n.Domain, "port": n.Port, "password": password, "sni": n.Domain, "skip-cert-verify": false})
+		proxies = append(proxies, map[string]any{"name": name, "type": "hysteria2", "server": n.PublicIP, "port": n.Port, "password": password, "sni": n.Domain, "skip-cert-verify": false})
 	}
 	selectNames := append(append([]string{}, names...), "自动测速")
 	config := map[string]any{

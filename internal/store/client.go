@@ -40,6 +40,13 @@ func (s *Store) SetClientAccount(deviceID, username, password string) error {
 		return err
 	}
 	defer tx.Rollback()
+	var active int
+	if err = tx.QueryRow("SELECT COUNT(*) FROM devices WHERE id=? AND deleted_at=0", deviceID).Scan(&active); err != nil {
+		return err
+	}
+	if active != 1 {
+		return ErrNotFound
+	}
 	if _, err = tx.Exec("INSERT INTO device_accounts(device_id,username,password) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET username=excluded.username,password=excluded.password", deviceID, username, hash); err != nil {
 		return errors.New("账号已由其他设备使用")
 	}
@@ -266,7 +273,10 @@ func (s *Store) ClientProfile(deviceID string) (model.ClientProfile, error) {
 		if e = s.DB.QueryRow("SELECT required_revision FROM assignments WHERE device_id=? AND node_id=?", deviceID, id).Scan(&required); e != nil {
 			return p, e
 		}
-		p.Nodes = append(p.Nodes, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.Domain, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && n.AppliedRevision >= required})
+		if n.Lifecycle != "active" {
+			return p, ErrConflict
+		}
+		p.Nodes = append(p.Nodes, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.PublicIP, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && n.AppliedRevision >= required})
 	}
 	var hash string
 	var version int64

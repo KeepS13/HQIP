@@ -3382,3 +3382,20 @@ tbody tr:hover {
     padding: 5px 16px 20px;
   }
 }
+.row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-form {
+  padding: 20px 24px;
+}
+.assignment-server {
+  display: grid;
+  gap: 8px;
+}
+.assignment-server h3 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+}

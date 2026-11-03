@@ -18,6 +18,7 @@ import {
   Server,
   ShieldCheck,
   Wifi,
+  Globe2,
   X,
 } from "lucide-react";
 import { api, setCSRF } from "./api";
@@ -34,6 +35,8 @@ import type { Session } from "./types";
 import { Dashboard, Guide, NotFound } from "./pages/Dashboard";
 import { Nodes, NodePage } from "./pages/Nodes";
 import { Devices, DevicePage } from "./pages/Devices";
+import { Servers, ServerPage } from "./pages/Servers";
+import { Domains } from "./pages/Domains";
 
 function Brand() {
   return (
@@ -338,6 +341,8 @@ export default function App() {
   const titles: Record<string, string> = {
     "/": "网络总览",
     "/nodes": "节点管理",
+    "/servers": "服务器",
+    "/domains": "域名与证书",
     "/devices": "设备与订阅",
     "/guide": "使用指南",
   };
@@ -381,6 +386,10 @@ export default function App() {
               <LayoutDashboard size={19} />
               <span>网络总览</span>
             </NavLink>
+            <NavLink to="/servers">
+              <Server size={19} />
+              <span>服务器</span>
+            </NavLink>
             <NavLink to="/nodes">
               <Server size={19} />
               <span>节点管理</span>
@@ -388,6 +397,10 @@ export default function App() {
             <NavLink to="/devices">
               <Monitor size={19} />
               <span>设备与订阅</span>
+            </NavLink>
+            <NavLink to="/domains">
+              <Globe2 size={19} />
+              <span>域名与证书</span>
             </NavLink>
           </nav>
           <div className="nav-caption nav-caption-second">支持</div>
@@ -469,6 +482,9 @@ export default function App() {
           <main className="page-content">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/servers" element={<Servers />} />
+              <Route path="/servers/:id" element={<ServerPage />} />
+              <Route path="/domains" element={<Domains />} />
               <Route path="/nodes" element={<Nodes />} />
               <Route path="/nodes/:id" element={<NodePage />} />
               <Route path="/devices" element={<Devices />} />

@@ -74,6 +74,17 @@ func normalizeConfig(cfg *model.AgentConfig) error {
 	if strings.ContainsAny(cfg.HysteriaService, "\x00\r\n /\\") || strings.HasPrefix(cfg.HysteriaService, "-") {
 		return fmt.Errorf("无效 Hysteria systemd 服务名")
 	}
+	if cfg.Managed {
+		if !managedID.MatchString(cfg.NodeID) || cfg.NodeDir != "/etc/hqip-nodes/"+cfg.NodeID || cfg.StatePath != "/var/lib/hqip-nodes/"+cfg.NodeID+"/state.db" || cfg.HysteriaService != "hqip-hysteria-"+cfg.NodeID+".service" || cfg.AgentService != "hqip-agent-"+cfg.NodeID+".service" || cfg.ControllerID == "" {
+			return errors.New("受管 Agent 路径、身份或服务名不匹配")
+		}
+		if ip := net.ParseIP(cfg.PublicIP); ip == nil || ip.To4() == nil {
+			return errors.New("受管 Agent 公网 IPv4 无效")
+		}
+		if cfg.Domain == "" || (cfg.CertificateMode != "" && cfg.CertificateMode != "http" && cfg.CertificateMode != "cloudflare") {
+			return errors.New("受管 Agent 证书配置无效")
+		}
+	}
 	cfg.ControlURL = strings.TrimRight(cfg.ControlURL, "/")
 	cfg.StatsURL = strings.TrimRight(cfg.StatsURL, "/")
 	return nil

@@ -16,6 +16,18 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 	if len(r.Daily) > 4000 || len(r.Minutes) > 4000 || len(r.Online) > 4000 {
 		return errors.New("一次上报最多包含 4000 条记录")
 	}
+	var existingLifecycle, existingCertificateMode string
+	if err := s.DB.QueryRow("SELECT lifecycle,COALESCE(json_extract(config,'$.certificateMode'),'http') FROM nodes WHERE id=?", nodeID).Scan(&existingLifecycle, &existingCertificateMode); err != nil {
+		return notFound(err)
+	}
+	if existingLifecycle == "active" {
+		if err := s.validateCertificateReport(nodeID, r.Certificate); err != nil {
+			return err
+		}
+	}
+	if r.Certificate != nil && ((existingCertificateMode == "http" && r.Certificate.Version > 0) || (existingCertificateMode == "cloudflare" && r.Certificate.Version == 0 && r.Certificate.Error == "")) {
+		r.Certificate = nil
+	}
 	now := s.Now()
 	dailyCutoff := DayStart(now.AddDate(0, -13, 0))
 	minuteCutoff := now.AddDate(0, 0, -7).Unix() / 60 * 60
@@ -35,7 +47,8 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 	}
 	defer tx.Rollback()
 	var desired int64
-	if err = tx.QueryRow("SELECT desired_revision FROM nodes WHERE id=?", nodeID).Scan(&desired); err != nil {
+	var lifecycle string
+	if err = tx.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", nodeID).Scan(&desired, &lifecycle); err != nil {
 		return notFound(err)
 	}
 	if r.Revision < 0 || r.Revision > desired {
@@ -96,10 +109,13 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 			}
 		}
 	}
-	if _, err = tx.Exec("UPDATE nodes SET applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
+	if _, err = tx.Exec("UPDATE nodes SET managed=1,applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
 		return err
 	}
 	if err = s.recordRemovals(tx, nodeID, r.Removals); err != nil {
+		return err
+	}
+	if err = s.recordLifecycle(tx, nodeID, r); err != nil {
 		return err
 	}
 	if len(r.Warnings) > 0 {
@@ -114,7 +130,13 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	if r.Certificate != nil && lifecycle == "active" {
+		return s.RecordCertificateStatus(nodeID, *r.Certificate)
+	}
+	return nil
 }
 
 func upsertBucket(tx *sql.Tx, table, nodeID string, b model.UsageBucket) (int64, int64, error) {

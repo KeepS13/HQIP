@@ -16,9 +16,9 @@
 
 ## 使用流程
 
-1. 先为节点域名设置 DNS A 记录，指向服务器的公网 IPv4；不要启用普通 HTTP CDN 代理。
-2. 在 `https://hqip.5202345.xyz` 添加服务器。SSH 地址可以是管理地址，公网 IP 是客户端连接地址；两者可不同。默认 root、SSH 22、节点 UDP 443。
-3. 等待系统检查、安装和连通性验证。远程节点由控制台实际连接验证；控制台自身兼作节点时还须执行外部验证。
+1. 在 `https://hqip.5202345.xyz` 登记服务器并验证 SSH。管理地址与节点公网 IP 可以不同；登记服务器不会安装 HY2。
+2. 在服务器清单添加已经绑定到网卡的公网 IPv4，再创建对应的独立节点。可在“域名与证书”配置 Cloudflare，自动分配 DNS only 子域名；也可使用预先解析到该 IP 的手工域名。
+3. 等待独立实例安装及 TLS、UDP、HTTPS 和出口 IP 验证。入口和出口均使用所选 IP；一个服务器的不同 IP 必须分别部署和分配。控制台自身兼作节点时还须执行外部验证。
 4. 在“设备”中分别创建电脑、手机，显式分配节点并选择默认节点。Windows 可初始化设备账号后登录 HQIP 客户端；其他设备可复制订阅或点击“导入 Clash”，使用支持 Hysteria 2 的 Clash Verge Rev/Mihomo。
 5. 在设备/节点详情查看速率与用量。当前网络必须支持 UDP；第一版没有 TCP 备用协议。
 
@@ -33,7 +33,7 @@
 - `desktop`、`internal/client`、`internal/winclient`、`cmd/hqip-helper`：Wails Windows 客户端、配置同步、内核与系统网络生命周期。
 - `internal/rules`：共享路由规则校验、规范化、版本摘要和 Clash/sing-box 输出。
 - `deploy`、`scripts`：systemd、Caddy、发布构建、部署与外部验证。
-- [客户端使用说明](docs/client.md) · [接口约定](docs/interfaces.md) · [运维与迁移](docs/operations.md)
+- [服务器与多 IP 管理](docs/multi-ip.md) · [Cloudflare 配置](docs/cloudflare.md) · [客户端使用说明](docs/client.md) · [接口约定](docs/interfaces.md) · [运维与迁移](docs/operations.md)
 
 ## 构建与测试
 
@@ -68,7 +68,7 @@ go run ./cmd/hqip serve --data-dir .local/dev --listen 127.0.0.1:8080 --public-l
 
 ## 部署与运行
 
-正式控制服务运行在 `207.57.127.105`，网页与客户端入口为 `https://hqip.5202345.xyz`。Nginx 分别转发至回环监听 `18090/18091`；Windows 管理电脑关闭后仍可使用。部署、日志、备份和回退见 [独立服务器部署](docs/server-deployment.md)。新站不导入旧设备和订阅，只保留分流模板；原测试节点及旧公共入口退役。
+正式控制服务运行在 `207.57.127.105`，网页与客户端入口为 `https://hqip.5202345.xyz`。Nginx 分别转发至回环监听 `18090/18091`；Windows 管理电脑关闭后仍可使用。部署、日志、备份和回退见 [独立服务器部署](docs/server-deployment.md)。首次建站与后续升级分开：升级保留现有业务数据；旧测试节点可通过显式接管重新加入新控制台，旧订阅不会恢复。
 
 以下旧 Caddy 引导脚本仅用于独立的干净主机；不得在正式 Nginx 主机重复执行：
 
@@ -83,7 +83,7 @@ uv run --with paramiko python scripts/deploy.py \
 
 凭据文件两行分别为主机地址和密码。可通过 `--socks 127.0.0.1:7897` 使用已有 SOCKS5 管理通道。脚本不打印密码；初始管理员凭据存放于服务器 `/var/lib/hqip/bootstrap-admin.json`，仅所有者可读。
 
-网站使用 TCP 80/443，节点使用 UDP 443；本机鉴权和统计在 127.0.0.1:18081/18082。共享主机禁用 Caddy HTTP/3，Hysteria HTTP ACME 挑战转发到 127.0.0.1:18080。云安全组须放行这些公网端口；安装器不会清空已有防火墙策略。
+当前节点按指定公网 IPv4 监听 UDP（默认 443），本机鉴权和统计使用独立的回环端口。Cloudflare DNS 验证无需 TCP 80；手工域名的 HTTP 自动续期需要该 IP 的 TCP 80。云安全组须放行所用公网端口；安装器不会清空已有防火墙策略。旧 Caddy 同机验证路径仅保留兼容，不能代替当前实例的归属检查。
 
 ## 数据与安全
 

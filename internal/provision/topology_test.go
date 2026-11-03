@@ -17,8 +17,8 @@ func TestMigratedControlKeepsCertificateRoute(t *testing.T) {
 		}
 	}
 	local, route := deploymentTopology(model.Node{}, "same\n", "same", "linux")
-	if !local || !route {
-		t.Fatal("actual shared Linux host not detected")
+	if !local || route {
+		t.Fatal("same-host detection must not assume a Caddy ACME route")
 	}
 	local, route = deploymentTopology(model.Node{}, "", "remote", "windows")
 	if local || route {
