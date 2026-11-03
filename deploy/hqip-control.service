@@ -1,0 +1,23 @@
+[Unit]
+Description=HQIP HTTPS control service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hqip-control
+Group=hqip-control
+ExecStart=/opt/hqip-control/current/hqip serve --data-dir /var/lib/hqip-control --listen 127.0.0.1:18090 --public-listen 127.0.0.1:18091 --admin-origin https://hqip.5202345.xyz --public-url https://hqip.5202345.xyz --artifact-dir /opt/hqip-control/current/artifacts
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hqip-control
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+LogNamespace=hqip-control
+
+[Install]
+WantedBy=multi-user.target

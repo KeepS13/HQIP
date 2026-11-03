@@ -41,7 +41,7 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		return nil, e
 	}
 	c := &Controller{dir: dir, platform: platform, engine: engine, wake: make(chan struct{}, 1)}
-	c.saved = persisted{InstallationID: randomID(), Mode: "rule", ServerURL: "https://testvps.sharevps.online"}
+	c.saved = persisted{InstallationID: randomID(), Mode: "rule", ServerURL: "https://hqip.5202345.xyz"}
 	if encrypted, e := os.ReadFile(filepath.Join(dir, "session.dat")); e == nil {
 		b, e := platform.Unprotect(encrypted)
 		if e != nil {

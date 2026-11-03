@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/control"
+	"github.com/KeepS13/HQIP/internal/rules"
 	"github.com/KeepS13/HQIP/internal/secure"
 	"github.com/KeepS13/HQIP/internal/store"
 	"github.com/KeepS13/HQIP/web"
@@ -54,7 +55,7 @@ func serve(args []string) error {
 	dir := f.String("data-dir", "/var/lib/hqip", "数据目录")
 	listen := f.String("listen", "127.0.0.1:8080", "监听地址")
 	publicListen := f.String("public-listen", "127.0.0.1:8081", "仅客户端及 Agent API 监听地址")
-	adminOrigin := f.String("admin-origin", "http://127.0.0.1:8080", "本地管理员页面地址")
+	adminOrigin := f.String("admin-origin", "http://127.0.0.1:8080", "管理员页面根地址（HTTPS 或本地 HTTP）")
 	public := f.String("public-url", "", "公网 HTTPS 地址")
 	artifacts := f.String("artifact-dir", "/opt/hqip/artifacts", "节点安装文件目录")
 	if err := f.Parse(args); err != nil {
@@ -67,14 +68,13 @@ func serve(args []string) error {
 	if u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1" {
 		return errors.New("公网网站必须使用 HTTPS")
 	}
-	adminURL, e := url.Parse(*adminOrigin)
-	if e != nil || adminURL.User != nil || adminURL.RawQuery != "" || adminURL.Fragment != "" || (adminURL.Path != "" && adminURL.Path != "/") || adminURL.Scheme != "http" || adminURL.Hostname() != "127.0.0.1" {
-		return errors.New("--admin-origin 必须为本地 http://127.0.0.1:端口")
+	if err := validateAdminOrigin(*adminOrigin); err != nil {
+		return err
 	}
 	for _, address := range []string{*listen, *publicListen} {
 		host, _, e := net.SplitHostPort(address)
 		if e != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
-			return errors.New("两个监听地址必须使用回环 IP，公网访问只能通过 SSH 隧道")
+			return errors.New("两个监听地址必须使用回环 IP，公网访问需经可信 HTTPS 反向代理")
 		}
 	}
 	db, err := store.Open(*dir, strings.TrimRight(*public, "/"))
@@ -130,22 +130,60 @@ func serve(args []string) error {
 	publicErr := publicServer.Shutdown(shutdown)
 	return errors.Join(adminErr, publicErr)
 }
+func validateAdminOrigin(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" {
+		return errors.New("--admin-origin 必须为不含凭据、路径和查询参数的根地址")
+	}
+	if u.Scheme == "https" || (u.Scheme == "http" && u.Hostname() == "127.0.0.1") {
+		return nil
+	}
+	return errors.New("--admin-origin 必须使用 HTTPS，或本地 http://127.0.0.1:端口")
+}
 func initAdmin(args []string) error {
 	f := flag.NewFlagSet("init-admin", flag.ContinueOnError)
 	dir := f.String("data-dir", "/var/lib/hqip", "数据目录")
 	username := f.String("username", "admin", "管理员用户名")
 	output := f.String("output", "", "初始凭据输出文件（0600，不会覆盖）")
+	rulesFile := f.String("rules", "", "可选：在空站初始化时导入无凭据规则包")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
 	if *output == "" {
 		return errors.New("请指定 --output 凭据文件，密码不会打印到日志")
 	}
+	var initialRules *rules.Bundle
+	if *rulesFile != "" {
+		raw, err := os.ReadFile(*rulesFile)
+		if err != nil {
+			return err
+		}
+		var bundle rules.Bundle
+		if len(raw) > 8<<20 {
+			return errors.New("规则文件不能超过 8 MiB")
+		}
+		if err := json.Unmarshal(raw, &bundle); err != nil {
+			return err
+		}
+		bundle, err = rules.Normalize(bundle)
+		if err != nil {
+			return err
+		}
+		initialRules = &bundle
+	}
 	db, err := store.Open(*dir, "")
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if initialRules != nil {
+		if _, _, _, err := db.Admin(); err == nil {
+			return errors.New("已有管理员，不能通过初始化命令修改规则")
+		}
+		if _, err := db.SaveRules(*initialRules); err != nil {
+			return err
+		}
+	}
 	file, err := os.OpenFile(*output, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
