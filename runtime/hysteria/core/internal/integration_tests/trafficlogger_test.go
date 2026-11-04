@@ -3,11 +3,13 @@ package integration_tests
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/apernet/hysteria/core/v2/client"
 	"github.com/apernet/hysteria/core/v2/internal/integration_tests/mocks"
@@ -24,12 +26,13 @@ func TestClientServerTrafficLoggerTCP(t *testing.T) {
 	auth := mocks.NewMockAuthenticator(t)
 	auth.EXPECT().Authenticate(mock.Anything, mock.Anything, mock.Anything).Return(true, "nobody")
 	trafficLogger := mocks.NewMockTrafficLogger(t)
+	traces := newTrafficTraceRecorder(trafficLogger)
 	s, err := server.NewServer(&server.Config{
 		TLSConfig:     serverTLSConfig(),
 		Conn:          udpConn,
 		Outbound:      serverOb,
 		Authenticator: auth,
-		TrafficLogger: trafficLogger,
+		TrafficLogger: traces,
 	})
 	assert.NoError(t, err)
 	defer s.Close()
@@ -62,10 +65,13 @@ func TestClientServerTrafficLoggerTCP(t *testing.T) {
 		return nil
 	})
 	serverOb.EXPECT().TCP(addr).Return(sobConn, nil).Once()
-	trafficLogger.EXPECT().TraceStream(mock.Anything, mock.Anything).Return().Once()
 
 	conn, err := c.TCP(addr)
 	assert.NoError(t, err)
+	trace := awaitTrafficTrace(t, traces.traced)
+	require.NotNil(t, trace.stats)
+	assert.Equal(t, "nobody", trace.authID)
+	assert.Equal(t, server.StreamStateInitial, trace.initialState)
 
 	// Client reads from server
 	trafficLogger.EXPECT().LogTraffic("nobody", uint64(0), uint64(11)).Return(true).Once()
@@ -78,16 +84,17 @@ func TestClientServerTrafficLoggerTCP(t *testing.T) {
 
 	// Client writes to server
 	trafficLogger.EXPECT().LogTraffic("nobody", uint64(12), uint64(0)).Return(true).Once()
-	sobConn.EXPECT().Write([]byte("who is there")).Return(12, nil).Once()
+	written := make(chan struct{})
+	sobConn.EXPECT().Write([]byte("who is there")).Run(func([]byte) { close(written) }).Return(12, nil).Once()
 	n, err = conn.Write([]byte("who is there"))
 	assert.NoError(t, err)
 	assert.Equal(t, 12, n)
-	time.Sleep(1 * time.Second) // Need some time for the server to receive the data
+	awaitTrafficTrace(t, written)
 
 	// Client reads from server again but blocked
-	trafficLogger.EXPECT().UntraceStream(mock.Anything).Return().Once()
 	trafficLogger.EXPECT().LogTraffic("nobody", uint64(0), uint64(4)).Return(false).Once()
-	trafficLogger.EXPECT().LogOnlineState("nobody", false).Return().Once()
+	offline := make(chan struct{})
+	trafficLogger.EXPECT().LogOnlineState("nobody", false).Run(func(string, bool) { close(offline) }).Return().Once()
 	sobConnCh <- []byte("nope")
 	n, err = conn.Read(buf)
 	assert.Zero(t, n)
@@ -96,6 +103,20 @@ func TestClientServerTrafficLoggerTCP(t *testing.T) {
 	// The client should be disconnected
 	_, err = c.TCP("whatever")
 	assert.Error(t, err)
+	awaitTrafficTrace(t, offline)
+	untraced := awaitTrafficTrace(t, traces.untraced)
+	// Compare stream identity without recursively formatting the live QUIC object.
+	if untraced != trace.stream {
+		t.Error("UntraceStream did not receive the traced stream")
+	}
+	// Closed is stored by the final defer, after UntraceStream. Read through the
+	// supported atomic API instead of letting testify reflect into atomic.Value.
+	require.Eventually(t, func() bool { return trace.stats.State.Load() == server.StreamStateClosed }, 3*time.Second, time.Millisecond)
+	assert.Equal(t, int32(1), traces.traceCalls.Load())
+	assert.Equal(t, int32(1), traces.untraceCalls.Load())
+	assert.Equal(t, addr, trace.stats.ReqAddr.Load())
+	assert.Equal(t, uint64(12), trace.stats.Tx.Load())
+	assert.Equal(t, uint64(15), trace.stats.Rx.Load())
 }
 
 // TestClientServerTrafficLoggerUDP tests that the traffic logger is correctly called for UDP sessions,
@@ -152,10 +173,11 @@ func TestClientServerTrafficLoggerUDP(t *testing.T) {
 
 	// Client writes to server
 	trafficLogger.EXPECT().LogTraffic("nobody", uint64(9), uint64(0)).Return(true).Once()
-	sobConn.EXPECT().WriteTo([]byte("small sad"), addr).Return(9, nil).Once()
+	written := make(chan struct{})
+	sobConn.EXPECT().WriteTo([]byte("small sad"), addr).Run(func([]byte, string) { close(written) }).Return(9, nil).Once()
 	err = conn.Send([]byte("small sad"), addr)
 	assert.NoError(t, err)
-	time.Sleep(1 * time.Second) // Need some time for the server to receive the data
+	awaitTrafficTrace(t, written)
 
 	// Client reads from server
 	trafficLogger.EXPECT().LogTraffic("nobody", uint64(0), uint64(7)).Return(true).Once()
@@ -167,7 +189,8 @@ func TestClientServerTrafficLoggerUDP(t *testing.T) {
 
 	// Client reads from server again but blocked
 	trafficLogger.EXPECT().LogTraffic("nobody", uint64(0), uint64(4)).Return(false).Once()
-	trafficLogger.EXPECT().LogOnlineState("nobody", false).Return().Once()
+	offline := make(chan struct{})
+	trafficLogger.EXPECT().LogOnlineState("nobody", false).Run(func(string, bool) { close(offline) }).Return().Once()
 	sobConnCh <- []byte("nope")
 	bs, rAddr, err = conn.Receive()
 	assert.Equal(t, err, io.EOF)
@@ -177,4 +200,61 @@ func TestClientServerTrafficLoggerUDP(t *testing.T) {
 	// The client should be disconnected
 	_, err = c.UDP()
 	assert.Error(t, err)
+	awaitTrafficTrace(t, offline)
+}
+
+type recordedTrafficTrace struct {
+	stream       server.HyStream
+	stats        *server.StreamStats
+	authID       string
+	initialState server.StreamState
+}
+
+// Testify records and formats every argument even for mock.Anything. Streams and
+// StreamStats remain mutable after UntraceStream, so never hand them to a mock.
+// Keep the original traffic/online mock assertions and observe trace lifecycle
+// separately, using channels for publication and atomics for mutable statistics.
+type trafficTraceRecorder struct {
+	*mocks.MockTrafficLogger
+	traced       chan recordedTrafficTrace
+	untraced     chan server.HyStream
+	traceCalls   atomic.Int32
+	untraceCalls atomic.Int32
+}
+
+func newTrafficTraceRecorder(logger *mocks.MockTrafficLogger) *trafficTraceRecorder {
+	return &trafficTraceRecorder{MockTrafficLogger: logger, traced: make(chan recordedTrafficTrace, 1), untraced: make(chan server.HyStream, 1)}
+}
+
+func (r *trafficTraceRecorder) TraceStream(stream server.HyStream, stats *server.StreamStats) {
+	r.traceCalls.Add(1)
+	value := recordedTrafficTrace{stream: stream, stats: stats}
+	if stats != nil {
+		value.authID = stats.AuthID
+		value.initialState = stats.State.Load()
+	}
+	select {
+	case r.traced <- value:
+	default:
+	}
+}
+
+func (r *trafficTraceRecorder) UntraceStream(stream server.HyStream) {
+	r.untraceCalls.Add(1)
+	select {
+	case r.untraced <- stream:
+	default:
+	}
+}
+
+func awaitTrafficTrace[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for server traffic logger callback")
+		var zero T
+		return zero
+	}
 }
