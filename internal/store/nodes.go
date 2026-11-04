@@ -387,7 +387,21 @@ func (s *Store) FinishJob(j Job, success bool) {
 	if success {
 		state = "done"
 	}
-	_, _ = s.DB.Exec("UPDATE jobs SET state=CASE WHEN state='cancelling' THEN 'cancelled' ELSE ? END WHERE id=? AND state IN ('running','cancelling')", state, j.ID)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return
+	}
+	err = tx.QueryRow("UPDATE jobs SET state=CASE WHEN state='cancelling' THEN 'cancelled' ELSE ? END WHERE id=? AND state IN ('running','cancelling') RETURNING state", state, j.ID).Scan(&state)
+	if err == nil && state == "error" {
+		err = recordJobNotification(tx, j.ID, s.Now().Unix())
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		_ = tx.Rollback()
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		return
+	}
 	// If no owner was ever installed, cancellation has no remote resources to
 	// retire. Managed partial installs remain visible until stopped/cleaned.
 	var abandoned int

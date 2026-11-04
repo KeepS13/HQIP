@@ -103,8 +103,11 @@ func serve(args []string) error {
 	defer publicListener.Close()
 	server := &http.Server{Addr: *listen, Handler: s.AdminHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	publicServer := &http.Server{Addr: *publicListen, Handler: s.PublicHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	go func() { errCh <- s.RunWorker(ctx) }()
+	notificationsDone := make(chan struct{})
+	go func() { defer close(notificationsDone); errCh <- s.RunNotifications(ctx) }()
+	defer func() { cancel(); <-notificationsDone }()
 	go func() {
 		log.Printf("HQIP 本地管理服务正在监听 %s", *listen)
 		errCh <- server.Serve(adminListener)

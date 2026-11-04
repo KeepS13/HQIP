@@ -22,6 +22,7 @@ import {
   X,
   UsersRound,
   Package,
+  BellRing,
 } from "lucide-react";
 import { api, setCSRF } from "./api";
 import {
@@ -39,6 +40,7 @@ import { Nodes, NodePage } from "./pages/Nodes";
 import { Users, UserPage, Plans, TurnstileSettingsPage } from "./pages/Accounts";
 import { Servers, ServerPage } from "./pages/Servers";
 import { Domains } from "./pages/Domains";
+import { Notifications } from "./pages/Notifications";
 
 function Brand() {
   return (
@@ -348,6 +350,7 @@ export default function App() {
     "/users": "用户管理",
     "/plans": "套餐管理",
     "/turnstile": "注册与安全验证",
+    "/notifications": "告警与通知",
     "/guide": "使用指南",
   };
   const title =
@@ -415,6 +418,10 @@ export default function App() {
             <NavLink to="/domains">
               <Globe2 size={19} />
               <span>域名与证书</span>
+            </NavLink>
+            <NavLink to="/notifications">
+              <BellRing size={19} />
+              <span>告警与通知</span>
             </NavLink>
           </nav>
           <div className="nav-caption nav-caption-second">支持</div>
@@ -505,6 +512,7 @@ export default function App() {
               <Route path="/users/:id" element={<UserPage />} />
               <Route path="/plans" element={<Plans />} />
               <Route path="/turnstile" element={<TurnstileSettingsPage />} />
+              <Route path="/notifications" element={<Notifications />} />
               <Route path="/devices/*" element={<Navigate to="/users" replace />} />
               <Route path="/guide" element={<Guide />} />
               <Route path="*" element={<NotFound />} />
