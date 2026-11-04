@@ -84,6 +84,7 @@ func (s *Server) AdminHandler() http.Handler {
 	s.registerCloudflareRoutes(m)
 	s.registerPortalAdmin(m)
 	s.registerNotificationRoutes(m)
+	s.registerNetworkQualityRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	return s.headers(m, s.opts.AdminOrigin)

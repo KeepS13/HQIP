@@ -53,6 +53,7 @@ import {
   useToast,
 } from "../components";
 import { DeployNode, DeleteNode, RetireNode, DeletedNodeNotice } from "./NodeActions";
+import { NetworkQuality } from "./NetworkQuality";
 import type { Node, NodeDetail, TaskEvent, ManagedServer, ServerAddress, CloudflareSettings, CloudflareZone } from "../types";
 
 function AddNode({ onClose }: { onClose: () => void }) {
@@ -654,6 +655,7 @@ export function NodePage() {
           </div>
         </Panel>
       </div>
+      <NetworkQuality key={node.id} node={node} />
       <TaskLog node={node} events={data.events} />
       <Panel
         title="凭据用量记录"

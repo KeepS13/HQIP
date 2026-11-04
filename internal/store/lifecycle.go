@@ -172,6 +172,12 @@ func (s *Store) DeleteNode(id string, options model.NodeDeleteOptions) (model.No
 	if _, err = tx.Exec("UPDATE jobs SET state=CASE WHEN state='running' THEN 'cancelling' ELSE 'cancelled' END WHERE node_id=? AND state IN ('pending','running')", id); err != nil {
 		return model.Node{}, err
 	}
+	if _, err = tx.Exec("UPDATE nodes SET password='',password_expires=0 WHERE id=? AND EXISTS(SELECT 1 FROM node_network_quality q JOIN jobs j ON j.id=q.job_id WHERE q.node_id=? AND j.kind='quality' AND q.status IN ('queued','running'))", id, id); err != nil {
+		return model.Node{}, err
+	}
+	if _, err = tx.Exec("UPDATE node_network_quality SET status='cancelled',finished_at=?,error='节点已删除，检测已取消' WHERE node_id=? AND status IN ('queued','running')", s.Now().Unix(), id); err != nil {
+		return model.Node{}, err
+	}
 	if _, err = tx.Exec("UPDATE nodes SET lifecycle=?,deleted_at=?,revision=revision+1,desired_revision=desired_revision+1,config=json_set(config,'$.status',?,'$.message',?) WHERE id=?", next, s.Now().Unix(), next, message, id); err != nil {
 		return model.Node{}, err
 	}

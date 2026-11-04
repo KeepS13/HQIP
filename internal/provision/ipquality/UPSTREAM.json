@@ -1,0 +1,19 @@
+{
+  "project": "xykt/IPQuality",
+  "repository": "https://github.com/xykt/IPQuality",
+  "commit": "b4f5c99e37e20411ef6311e90cf1ffb6dbb1c049",
+  "license": "AGPL-3.0",
+  "upstreamScriptSHA256": "b30df5a3c2204276c54e99dcc5080b46f8a627667730aee7de63b109b8ecaecf",
+  "adaptation": "hqip1",
+  "modifiedAt": "2026-11-04",
+  "files": {
+    "hqip.patch": "e961fd305a6867c82db33ae2597e0ced37cc17104b07f0ed2794a455c065844f",
+    "ip.sh": "456eead9fec5b63493f9e58c6370957fb04e689ec0f0d1c60cf708a76fd14cbc",
+    "LICENSE": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+    "NOTICE.md": "d6a75d3d09f03cd272a961a53e9d5972b603e218af424189ff748ffc0843bffe",
+    "ref/cookies.txt": "8d05deb991fd5a094b4971b389bdd24c1c86c462dfb45dd3aa4befe77b34616f",
+    "ref/dnsbl.list": "a92ca482843310167309c82f05cb7e208d7decc7f8bb7eada0f96af42f1143ad",
+    "ref/iso3166.json": "e1434e42786484b1841082a0a16cf27208691443dc6440d125ad81d49007ea42",
+    "upstream/ip.sh": "b30df5a3c2204276c54e99dcc5080b46f8a627667730aee7de63b109b8ecaecf"
+  }
+}

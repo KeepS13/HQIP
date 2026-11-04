@@ -1,0 +1,574 @@
+--- upstream/ip.sh
++++ ip.sh
+@@ -1,5 +1,7 @@
+ #!/bin/bash
+-script_version="v2026-09-16"
++# HQIP adaptation, 2026-11-04. Original: xykt/IPQuality (AGPL-3.0).
++# Source revision, changes, license and hashes: UPSTREAM.json / NOTICE.md.
++script_version="v2026-09-16-hqip1"
+ check_bash(){
+ current_bash_version=$(bash --version|head -n 1|awk -F ' ' '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+/) {print $i; exit}}'|cut -d . -f 1)
+ if [ "$current_bash_version" = "0" ]||[ "$current_bash_version" = "1" ]||[ "$current_bash_version" = "2" ]||[ "$current_bash_version" = "3" ];then
+@@ -375,11 +377,7 @@
+ *)echo -ne "ERROR: Language not supported!"
+ esac
+ }
+-countRunTimes(){
+-local RunTimes=$(curl $CurlARG -s --max-time 10 "https://hits.xykt.de/ip?action=hit" 2>&1)
+-stail[today]=$(echo "$RunTimes"|jq '.daily')
+-stail[total]=$(echo "$RunTimes"|jq '.total')
+-}
++countRunTimes(){ :; }
+ show_progress_bar(){
+ show_progress_bar_ "$@" 1>&2
+ }
+@@ -396,103 +394,6 @@
+ }
+ kill_progress_bar(){
+ kill "$bar_pid" 2>/dev/null&&echo -ne "\r"
+-}
+-install_dependencies(){
+-if ! jq --version >/dev/null 2>&1||! curl --version >/dev/null 2>&1||! bc --version >/dev/null 2>&1||! nc -h >/dev/null 2>&1||! dig -v >/dev/null 2>&1;then
+-echo "Detecting operating system..."
+-if [ "$(uname)" == "Darwin" ];then
+-install_packages "brew" "brew install" "no_sudo"
+-elif [ -f /etc/os-release ];then
+-. /etc/os-release
+-if [ $(id -u) -ne 0 ]&&! sudo -v >/dev/null 2>&1;then
+-ERRORcode=3
+-fi
+-case $ID in
+-ubuntu|debian|linuxmint)install_packages "apt" "apt-get install -y"
+-;;
+-rhel|centos|almalinux|rocky|anolis)if
+-[ "$(echo $VERSION_ID|cut -d '.' -f1)" -ge 8 ]
+-then
+-install_packages "dnf" "dnf install -y"
+-else
+-install_packages "yum" "yum install -y"
+-fi
+-;;
+-arch|manjaro)install_packages "pacman" "pacman -S --noconfirm"
+-;;
+-alpine)install_packages "apk" "apk add"
+-;;
+-fedora)install_packages "dnf" "dnf install -y"
+-;;
+-alinux)install_packages "yum" "yum install -y"
+-;;
+-suse|opensuse*)install_packages "zypper" "zypper install -y"
+-;;
+-void)install_packages "xbps" "xbps-install -Sy"
+-;;
+-*)echo "Unsupported distribution: $ID"
+-exit 1
+-esac
+-elif [ -n "$PREFIX" ];then
+-install_packages "pkg" "pkg install"
+-else
+-echo "Cannot detect distribution because /etc/os-release is missing."
+-exit 1
+-fi
+-fi
+-}
+-install_packages(){
+-local package_manager=$1
+-local install_command=$2
+-local no_sudo=$3
+-echo "Using package manager: $package_manager"
+-echo -e "Lacking necessary dependencies, $Font_I${Font_Cyan}jq curl bc netcat dnsutils iproute$Font_Suffix will be installed using $Font_I$Font_Cyan$package_manager$Font_Suffix."
+-if [[ $mode_yes -eq 0 ]];then
+-prompt=$(printf "Continue? (${Font_Green}y$Font_Suffix/${Font_Red}n$Font_Suffix): ")
+-read -p "$prompt" choice
+-case "$choice" in
+-y|Y|yes|Yes|YES)echo "Continue to execute script..."
+-;;
+-n|N|no|No|NO)echo "Script exited."
+-exit 0
+-;;
+-*)echo "Invalid input, script exited."
+-exit 1
+-esac
+-else
+-echo -e "Detected parameter $Font_Green-y$Font_Suffix. Continue installation..."
+-fi
+-if [ "$no_sudo" == "no_sudo" ]||[ $(id -u) -eq 0 ];then
+-local usesudo=""
+-else
+-local usesudo="sudo"
+-fi
+-case $package_manager in
+-apt)$usesudo apt update
+-$usesudo $install_command jq curl bc netcat-openbsd dnsutils iproute2
+-;;
+-dnf|yum)$usesudo $install_command epel-release
+-$usesudo $package_manager makecache
+-$usesudo $install_command jq curl bc nmap-ncat bind-utils iproute
+-;;
+-pacman)$usesudo pacman -Sy
+-$usesudo $install_command jq curl bc gnu-netcat bind-tools iproute2
+-;;
+-apk)$usesudo apk update
+-$usesudo $install_command jq curl bc netcat-openbsd grep bind-tools iproute2
+-;;
+-pkg)$usesudo $package_manager update
+-$usesudo $package_manager $install_command jq curl bc netcat dnsutils iproute
+-;;
+-brew)eval "$(/opt/homebrew/bin/brew shellenv)"
+-$install_command jq curl bc netcat bind
+-;;
+-zypper)$usesudo zypper refresh
+-$usesudo $install_command jq curl bc netcat bind-utils iproute2
+-;;
+-xbps)$usesudo xbps-install -Sy
+-$usesudo $install_command jq curl bc netcat bind-utils iproute2
+-esac
+ }
+ declare -A browsers=(
+ [Chrome]="145.0.0.0 144.0.0.0 143.0.0.0 142.0.0.0 141.0.0.0 140.0.0.0"
+@@ -515,19 +416,7 @@
+ local ifunicode=$(printf '\u2800')
+ [[ ${#ifunicode} -gt 3 ]]&&export LC_CTYPE=en_US.UTF-8 2>/dev/null
+ }
+-check_connectivity(){
+-local url="https://www.google.com/generate_204"
+-local timeout=2
+-local http_code
+-http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout "$timeout" "$url" 2>/dev/null)
+-if [[ $http_code == "204" ]];then
+-rawgithub="https://github.com/xykt/IPQuality/raw/"
+-return 0
+-else
+-rawgithub="https://testingcf.jsdelivr.net/gh/xykt/IPQuality@"
+-return 1
+-fi
+-}
++check_connectivity(){ :; }
+ is_valid_ipv4(){
+ local ip=$1
+ if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]];then
+@@ -560,7 +449,7 @@
+ IPV4=""
+ local API_NET=("ipinfo.io/ip" "myip.check.place" "ip.sb" "ping0.cc" "icanhazip.com" "api64.ipify.org" "ifconfig.co" "ident.me")
+ for p in "${API_NET[@]}";do
+-response=$(curl $CurlARG -s4 --max-time 2 "$p")
++response=$(curl $CurlARG -s4 --max-time 2 "https://$p")
+ if [[ $? -eq 0 && $response =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]];then
+ IPV4="$response"
+ break
+@@ -600,7 +489,7 @@
+ IPV6=""
+ local API_NET=("myip.check.place" "ip.sb" "ping0.cc" "icanhazip.com" "api64.ipify.org" "ifconfig.co" "ident.me")
+ for p in "${API_NET[@]}";do
+-response=$(curl $CurlARG -s6k --max-time 2 "$p")
++response=$(curl $CurlARG -s6k --max-time 2 "https://$p")
+ response="${response%$'\n'}"
+ if [[ $? -eq 0 && $response =~ ^[0-9a-fA-F:]+$ && $response == *:* ]];then
+ IPV6="$response"
+@@ -802,7 +691,7 @@
+ ipinfo[tor]=$(echo "$RESPONSE"|jq -r '.data.privacy.tor')
+ ipinfo[vpn]=$(echo "$RESPONSE"|jq -r '.data.privacy.vpn')
+ ipinfo[server]=$(echo "$RESPONSE"|jq -r '.data.privacy.hosting')
+-local ISO3166=$(curl -sL -m 10 "${rawgithub}main/ref/iso3166.json")
++local ISO3166=$(cat "$HQIP_REF/iso3166.json")
+ ipinfo[asn]=$(echo "$RESPONSE"|jq -r '.data.asn.asn'|sed 's/^AS//')
+ ipinfo[org]=$(echo "$RESPONSE"|jq -r '.data.asn.name')
+ ipinfo[city]=$(echo "$RESPONSE"|jq -r '.data.city')
+@@ -1697,105 +1586,30 @@
+ chatgpt[utype]="${smedia[nodata]}"
+ fi
+ }
+-get_sorted_mx_records(){
+-local domain=$1
+-dig +short MX $domain|sort -n|head -1|awk '{print $2}'
+-}
+-check_email_service(){
+-local service=$1
+-local port=25
+-local expected_response="220"
+-local domain=""
+-local host=""
+-local response=""
+-local success="false"
+-case $service in
+-"Gmail")domain="gmail.com";;
+-"Outlook")domain="outlook.com";;
+-"Yahoo")domain="yahoo.com";;
+-"Apple")domain="me.com";;
+-"MailRU")domain="mail.ru";;
+-"AOL")domain="aol.com";;
+-"GMX")domain="gmx.com";;
+-"MailCOM")domain="mail.com";;
+-"163")domain="163.com";;
+-"Sohu")domain="sohu.com";;
+-"Sina")domain="sina.com";;
+-"QQ")domain="qq.com";;
+-*)return
+-esac
+-if [[ -z $host ]];then
+-local mx_hosts=($(get_sorted_mx_records $domain))
+-for host in "${mx_hosts[@]}";do
+-response=$(timeout 5 bash -c "echo -e 'QUIT\r\n' | nc -s $IP -w4 $host $port 2>&1")
+-smail_response[$service]=$response
+-if [[ $response == *"$expected_response"* ]];then
+-success="true"
+-smail[$service]="$Font_Black+$Font_Suffix$Back_Green$Font_White$Font_B$service$Font_Suffix"
+-smailstatus[$service]="true"
+-smail[remote]=1
+-break
+-fi
+-done
+-else
+-response=$(timeout 5 bash -c "echo -e 'QUIT\r\n' | nc -s $IP -w4 $host $port 2>&1")
+-if [[ $response == *"$expected_response"* ]];then
+-success="true"
+-smail[$service]="$Font_Black+$Font_Suffix$Back_Green$Font_White$Font_B$service$Font_Suffix"
+-smailstatus[$service]="true"
+-smail[remote]=1
+-fi
+-fi
+-if [[ $success == "false" ]];then
+-smail[$service]="$Font_Black-$Font_Suffix$Back_Red$Font_White$Font_B$service$Font_Suffix"
+-smailstatus[$service]="false"
+-fi
+-}
+ check_mail(){
+-ss -tano|grep -q ":25\b"&&smail[local]=2||smail[local]=0
+-if [[ smail[local] -ne 2 && -z $usePROXY ]];then
+-local response=$(timeout 10 bash -c "echo -e 'QUIT\r\n' | nc -s $IP -p25 -w9 smtp.mailgun.org 25 2>&1")
+-[[ $response == *"220"* ]]&&smail[local]=1
+-fi
+-[[ -n $usePROXY ]]&&smail[local]=0
+-smail[remote]=0
+-services=("Gmail" "Outlook" "Yahoo" "Apple" "QQ" "MailRU" "AOL" "GMX" "MailCOM" "163" "Sohu" "Sina")
+-for service in "${services[@]}";do
+-local temp_info="$Font_Cyan$Font_B${sinfo[mail]}$Font_I$service$Font_Suffix "
+-((ibar_step+=3))
+-show_progress_bar "$temp_info" $((40-1-${#service}-${sinfo[lmail]}))&
+-bar_pid="$!"&&disown "$bar_pid"
+-check_email_service $service
+-kill_progress_bar
+-done
++smail[local]=2
++services=()
+ }
+ check_dnsbl_parallel(){
+-ip_to_check=$1
+-parallel_jobs=$2
+-smail[t]=0
+-smail[c]=0
+-smail[m]=0
+-smail[b]=0
+-reversed_ip=$(echo "$ip_to_check"|awk -F. '{print $4"."$3"."$2"."$1}')
+-local total=0
+-local clean=0
+-local blacklisted=0
+-local other=0
+-curl $CurlARG -sL "${rawgithub}main/ref/dnsbl.list"|sort -u|xargs -P "$parallel_jobs" -I {} bash -c "result=\$(dig +short \"$reversed_ip.{}\" A); if [[ -z \"\$result\" ]]; then echo 'Clean'; elif [[ \"\$result\" =~ ^127\.255\.255\. ]]; then echo 'Clean'; elif [[ \"\$result\" == '127.0.0.2' ]]; then echo 'Blacklisted'; else echo 'Other'; fi"|{
+-while IFS= read -r line;do
+-((total++))
+-case "$line" in
+-"Clean")((clean++));;
+-"Blacklisted")((blacklisted++));;
+-*)((other++))
+-esac
+-done
+-smail[t]="$total"
+-smail[c]="$clean"
+-smail[m]="$other"
+-smail[b]="$blacklisted"
+-echo "${smail[t]} ${smail[c]} ${smail[m]} ${smail[b]}"
+-}
++local ip_to_check=$1
++local reversed_ip=$(echo "$ip_to_check"|awk -F. '{print $4"."$3"."$2"."$1}')
++# Only pinned, validated hostnames reach a positional argument, never shell text.
++LC_ALL=C grep -E '^[A-Za-z0-9_]([A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$' "$HQIP_REF/dnsbl.list" | sort -u |
++xargs -P 10 -I {} bash -c '
++ source=$1; zone=$2; reversed=$3
++ result=$(command dig -b "$source" +time=2 +tries=1 +comments +answer +noquestion +noauthority +noadditional "$reversed.$zone" A 2>/dev/null)
++ code=$?
++ if [[ $code -ne 0 ]] || ! grep -Eq "status: (NOERROR|NXDOMAIN)," <<<"$result"; then echo Unknown
++ elif grep -q "status: NXDOMAIN," <<<"$result"; then echo Clean
++ else
++  answer=$(awk '\''$4=="A"{print $5}'\'' <<<"$result")
++  if [[ -z $answer ]]; then echo Clean
++  elif grep -q "^127\\.255\\.255\\." <<<"$answer"; then echo Unknown
++  elif grep -qx "127.0.0.2" <<<"$answer"; then echo Blacklisted
++  else echo Other; fi
++ fi
++' _ "$ip_to_check" '{}' "$reversed_ip" |
++awk 'BEGIN{t=0;c=0;m=0;b=0;u=0} {t++;if($1=="Clean")c++;else if($1=="Blacklisted")b++;else if($1=="Unknown")u++;else m++} END{print t,c,m,b,u}'
+ }
+ check_dnsbl(){
+ local temp_info="$Font_Cyan$Font_B${sinfo[dnsbl]} $Font_Suffix"
+@@ -1808,6 +1622,7 @@
+ smail[c]=${num_array[1]:-0}
+ smail[m]=${num_array[2]:-0}
+ smail[b]=${num_array[3]:-0}
++smail[unknown]=${num_array[4]:-0}
+ smail[sdnsbl]="$Font_Cyan${smail[dnsbl]}  ${smail[available]}${smail[t]}   ${smail[clean]}${smail[c]}   ${smail[marked]}${smail[m]}   ${smail[blacklisted]}${smail[b]}$Font_Suffix"
+ }
+ show_head(){
+@@ -2160,164 +1975,38 @@
+ echo -e ""
+ }
+ get_opts(){
+-while getopts "i:l:o:x:fhjnpyEM46" opt;do
+-case $opt in
+-4)if
+-[[ IPV4check -ne 0 ]]
+-then
+-IPV6check=0
+-else
+-ERRORcode=4
+-fi
+-;;
+-6)if
+-[[ IPV6check -ne 0 ]]
+-then
+-IPV4check=0
+-else
+-ERRORcode=6
+-fi
+-;;
+-f)fullIP=1
+-;;
+-h)show_help
+-;;
+-i)iface="$OPTARG"
+-useNIC=" --interface $iface"
+-CurlARG+="$useNIC"
+-get_ipv4
+-get_ipv6
+-is_valid_ipv4 $IPV4
+-is_valid_ipv6 $IPV6
+-[[ $IPV4work -eq 0 && $IPV6work -eq 0 ]]&&ERRORcode=7
+-;;
+-j)mode_json=1
+-;;
+-l)YY=$(echo "$OPTARG"|tr '[:upper:]' '[:lower:]')
+-;;
+-n)mode_no=1
+-;;
+-o)mode_output=1
+-outputfile="$OPTARG"
+-[[ -z $outputfile ]]&&{
+-ERRORcode=1
+-break
+-}
+-[[ -e $outputfile ]]&&{
+-ERRORcode=10
+-break
+-}
+-touch "$outputfile" 2>/dev/null||{
+-ERRORcode=11
+-break
+-}
+-;;
+-p)mode_privacy=1
+-;;
+-x)xproxy="$OPTARG"
+-usePROXY=" -x $xproxy"
+-CurlARG+="$usePROXY"
+-get_ipv4
+-get_ipv6
+-is_valid_ipv4 $IPV4
+-is_valid_ipv6 $IPV6
+-[[ $IPV4work -eq 0 && $IPV6work -eq 0 ]]&&ERRORcode=8
+-;;
+-y)mode_yes=1
+-;;
+-E)YY="en"
+-;;
+-M)mode_menu=1
+-;;
+-\?)ERRORcode=1
++while getopts "i:l:o:fhjnp4" opt;do
++case "$opt" in
++4) IPV6check=0 ;;
++f) fullIP=1 ;;
++h) show_help ;;
++i) iface="$OPTARG"
++   if ! is_valid_ipv4 "$iface"; then ERRORcode=7; return; fi
++   useNIC=" --interface $iface"
++   CurlARG="$useNIC"
++   get_ipv4
++   is_valid_ipv4 "$IPV4" || ERRORcode=7
++   [[ "$IPV4" == "$iface" ]] || ERRORcode=7
++   ;;
++j) mode_json=1 ;;
++l) YY="$OPTARG" ;;
++n) mode_no=1 ;;
++p) mode_privacy=1 ;;
++o) mode_output=1;outputfile="$OPTARG"
++   if [[ -z "$outputfile" || -e "$outputfile" ]]; then ERRORcode=10;return;fi
++   touch "$outputfile" 2>/dev/null || ERRORcode=11 ;;
++*) ERRORcode=1 ;;
+ esac
+ done
+-if [[ $mode_menu -eq 1 ]];then
+-if [[ $YY == "cn" ]];then
+-eval "bash <(curl -sL https://Check.Place) -I"
+-else
+-eval "bash <(curl -sL https://Check.Place) -EI"
+-fi
+-exit 0
+-fi
+-[[ $IPV4check -eq 1 && $IPV6check -eq 0 && $IPV4work -eq 0 ]]&&ERRORcode=40
+-[[ $IPV4check -eq 0 && $IPV6check -eq 1 && $IPV6work -eq 0 ]]&&ERRORcode=60
+-CurlARG="$useNIC$usePROXY"
++[[ "$IPV4work" == 1 && "$IPV4" == "$iface" && "$IPV6check" == 0 ]] || ERRORcode=7
+ }
+ show_help(){
+ echo -ne "\r$shelp\n"
+ exit 0
+ }
+-show_ad(){
+-RANDOM=$(date +%s)
+-local -a ads=()
+-local i=1
+-while :;do
+-local content
+-content=$(curl -fsL --max-time 5 "${rawgithub}main/ref/ad$i.ans")||break
+-ads+=("$content")
+-((i++))
+-done
+-ADLines=0
+-local adCount=${#ads[@]}
+-[[ $adCount -eq 0 ]]&&return
+-local -a indices=()
+-for ((i=1; i<=adCount; i++));do indices+=("$i");done
+-for ((i=adCount-1; i>0; i--));do
+-local j=$((RANDOM%(i+1)))
+-local tmp=${indices[i]}
+-indices[i]=${indices[j]}
+-indices[j]=$tmp
+-done
+-local -a aad
+-aad[0]=$(curl -sL --max-time 5 "${rawgithub}main/ref/sponsor.ans")
+-for ((i=0; i<adCount; i++));do
+-aad[${indices[i]}]="${ads[i]}"
+-done
+-local rows cols
+-if ! read rows cols < <(stty size 2>/dev/null);then cols=0;fi
+-print_pair(){
+-local left="$1" right="$2"
+-local -a L R
+-mapfile -t L <<<"$left"
+-mapfile -t R <<<"$right"
+-local i
+-for ((i=0; i<12; i++));do
+-printf "%-72s$Font_Suffix     %-72s\n" "${L[i]}" "${R[i]}" 1>&2
+-done
+-ADLines=$((ADLines+12))
+-}
+-print_block(){
+-echo "$1" 1>&2
+-ADLines=$((ADLines+12))
+-}
+-if [[ $cols -ge 150 ]];then
+-if ((adCount==0));then
+-print_block "${aad[0]}"
+-elif ((adCount%2==1));then
+-print_pair "${aad[0]}" "${aad[1]}"
+-local k
+-for ((k=2; k<=adCount; k+=2));do
+-print_pair "${aad[$k]}" "${aad[$((k+1))]}"
+-done
+-else
+-print_block "${aad[0]}"
+-local k
+-for ((k=1; k<=adCount; k+=2));do
+-print_pair "${aad[$k]}" "${aad[$((k+1))]}"
+-done
+-fi
+-else
+-echo "${aad[0]}" 1>&2
+-for ((i=1; i<=adCount; i++));do
+-echo "${aad[$i]}" 1>&2
+-done
+-ADLines=$(((adCount+1)*12))
+-fi
+-}
++show_ad(){ :; }
+ read_ref(){
+-Media_Cookie=$(curl $CurlARG -sL --retry 3 --max-time 10 "${rawgithub}main/ref/cookies.txt")
+-IATA_Database="${rawgithub}main/ref/iata-icao.csv"
++Media_Cookie=$(cat "$HQIP_REF/cookies.txt")
+ }
+ clean_ansi(){
+ local input="$1"
+@@ -2531,10 +2220,12 @@
+ mail_updates+=".Mail |= . + { \"$service\": false } | "
+ done
+ fi
++mail_updates+=".Mail |= . + { Status: \"smtp-not-tested\", Reason: \"SMTP privileged-port checks are omitted by HQIP\", SourceIP: \"$IP\" } | "
+ mail_updates+=".Mail |= . * { DNSBlacklist: { Total: ${smail[t]:-null} } } | "
+ mail_updates+=".Mail |= . * { DNSBlacklist: { Clean: ${smail[c]:-null} } } | "
+ mail_updates+=".Mail |= . * { DNSBlacklist: { Marked: ${smail[m]:-null} } } | "
+ mail_updates+=".Mail |= . * { DNSBlacklist: { Blacklisted: ${smail[b]:-null} } } | "
++mail_updates+=".Mail |= . * { DNSBlacklist: { Unknown: ${smail[unknown]:-null} } } | "
+ ipjson=$(echo "$ipjson"|jq "$head_updates$basic_updates$type_updates$score_updates$factor_updates$media_updates$mail_updates.")
+ }
+ check_IP(){
+@@ -2585,7 +2276,7 @@
+ show_score
+ show_factor
+ show_media
+-show_mail $2
++echo "SMTP checks omitted in HQIP; DNSBL results are in JSON."
+ show_tail)
+ else
+ local ip_report=$(show_head
+@@ -2594,12 +2285,12 @@
+ show_score
+ show_factor_lite
+ show_media
+-show_mail $2
++echo "SMTP checks omitted in HQIP; DNSBL results are in JSON."
+ show_tail)
+ fi
+ local report_link=""
+ [[ mode_json -eq 1 || mode_output -eq 1 || mode_privacy -eq 0 ]]&&save_json
+-[[ $mode_lite -eq 0 && mode_privacy -eq 0 ]]&&report_link=$(curl -$2 -s -X POST https://upload.check.place -d "type=ip" --data-urlencode "json=$ipjson" --data-urlencode "content=$ip_report")
++
+ [[ mode_json -eq 0 ]]&&echo -ne "\r$ip_report\n"
+ [[ mode_json -eq 0 && mode_privacy -eq 0 && $report_link == *"https://Report.Check.Place/"* ]]&&echo -ne "\r${stail[link]}$report_link$Font_Suffix\n"
+ [[ mode_json -eq 1 ]]&&echo -ne "\r$ipjson\n"
+@@ -2614,22 +2305,22 @@
+ esac
+ fi
+ }
++# HQIP invokes this pinned copy in an unprivileged, time-limited service.
++# All HTTP checks use the selected source IPv4, including upstream fallbacks.
++HQIP_REF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/ref" && pwd)" || exit 1
++curl(){
++ command curl -q --interface "$iface" --ipv4 --proto '=https' --proto-redir '=https' --connect-timeout 5 --max-time 15 --max-filesize 4194304 "$@"
++}
++dig(){ command dig -b "$iface" +time=2 +tries=1 "$@"; }
++umask 077
++mode_no=1
++mode_privacy=1
+ generate_random_user_agent
+-adapt_locale
+-check_connectivity
+ read_ref
+-get_ipv4
+-get_ipv6
+-is_valid_ipv4 $IPV4
+-is_valid_ipv6 $IPV6
+ get_opts "$@"
+-[[ mode_no -eq 0 ]]&&install_dependencies 1>&2
+ set_language
+ if [[ $ERRORcode -ne 0 ]];then
+-echo -ne "\r$Font_B$Font_Red${swarn[$ERRORcode]}$Font_Suffix\n"
+-exit $ERRORcode
+-fi
+-clear
+-show_ad
+-[[ $IPV4work -ne 0 && $IPV4check -ne 0 ]]&&check_IP "$IPV4" 4
+-[[ $IPV6work -ne 0 && $IPV6check -ne 0 ]]&&check_IP "$IPV6" 6
++ printf '%s\n' "HQIP IPQuality: invalid options, unavailable source IPv4, or observed IP mismatch" >&2
++ exit "$ERRORcode"
++fi
++check_IP "$IPV4" 4

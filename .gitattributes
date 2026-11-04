@@ -5,3 +5,5 @@
 runtime/hysteria/**/*.dat binary
 runtime/hysteria/**/*.bin binary
 runtime/hysteria/extras/sniff/testdata/http-chrome153.txt -text -whitespace
+# Preserve upstream source and recorded SHA-256 values on every platform.
+internal/provision/ipquality/** -text

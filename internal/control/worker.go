@@ -20,6 +20,9 @@ func (s *Server) RunWorker(ctx context.Context) error {
 	if s.initErr != nil {
 		return s.initErr
 	}
+	if err := s.Store.RecoverNetworkQuality(); err != nil {
+		return err
+	}
 	if err := s.Store.RecoverJobs(); err != nil {
 		return err
 	}
@@ -63,6 +66,10 @@ func (s *Server) RunWorker(ctx context.Context) error {
 	}
 }
 func (s *Server) runJob(parent context.Context, job store.Job) {
+	if job.Kind == "quality" {
+		s.runQualityJob(parent, job)
+		return
+	}
 	node, err := s.Store.Node(job.NodeID)
 	if err != nil {
 		s.Store.FinishJob(job, false)
@@ -195,4 +202,20 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	_ = s.Store.SetStatus(node.ID, status, message, output.ACMEViaCaddy)
 	log(status, message)
 	s.Store.FinishJob(job, output.Verified || output.ControlOnNode)
+	if job.Kind == "install" && (output.Verified || output.ControlOnNode) {
+		if _, ok := s.runner.(networkQualityRunner); ok {
+			// Commit installation first: a crash during an optional diagnostic
+			// must not replay a successful install after its password was erased.
+			current, readErr := s.Store.Node(node.ID)
+			if readErr == nil && current.Lifecycle == "active" {
+				_, queueErr := s.Store.QueueNetworkQuality(node.ID, password, current.Revision)
+				if queueErr == nil {
+					log("quality", "已排队检测节点网络质量，代理可继续使用")
+					s.signal()
+				} else {
+					log("quality", "自动网络质量检测未排队，可在节点详情中手动检测")
+				}
+			}
+		}
+	}
 }
