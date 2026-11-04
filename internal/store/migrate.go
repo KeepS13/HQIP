@@ -17,10 +17,10 @@ func migrate(db *sql.DB) error {
 	if err = tx.QueryRow("SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil {
 		return err
 	}
-	if version == "3" {
+	if version == "4" {
 		return tx.Commit()
 	}
-	if version != "1" && version != "2" {
+	if version != "1" && version != "2" && version != "3" {
 		return errors.New("数据库版本不受此程序支持")
 	}
 	if version == "1" {
@@ -43,7 +43,12 @@ UPDATE metadata SET value='2' WHERE key='schema_version';
 			return err
 		}
 	}
-	if err = migrateServers(tx); err != nil {
+	if version != "3" {
+		if err = migrateServers(tx); err != nil {
+			return err
+		}
+	}
+	if err = migratePortal(tx); err != nil {
 		return err
 	}
 	return tx.Commit()

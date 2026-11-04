@@ -54,9 +54,11 @@ def main():
             if resource_created:resource_path.unlink()
     run(['go','run','-mod=readonly','.', '-icon',str(icon),'-verify',str(out/'HQIP.exe')],RESOURCE_TOOL)
     subprocess.run(['go','build','-trimpath','-ldflags=-s -w -H windowsgui','-o',str(out/'hqip-helper.exe'),'./cmd/hqip-helper'],cwd=ROOT,env=env,check=True)
-    sources={'HQIP':'https://github.com/KeepS13/HQIP','sing-box':f'https://github.com/SagerNet/sing-box/tree/v{VERSION}','Wails':'https://github.com/wailsapp/wails/tree/v3.1.0'}
+    source_sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    dirty=bool(subprocess.check_output(['git','status','--porcelain','--untracked-files=normal'],cwd=ROOT,text=True).strip())
+    sources={'HQIP':f'https://github.com/KeepS13/HQIP/tree/{source_sha}','sing-box':f'https://github.com/SagerNet/sing-box/tree/v{VERSION}','Wails':'https://github.com/wailsapp/wails/tree/v3.1.0'}
     (out/'THIRD-PARTY-NOTICES.txt').write_text('HQIP Windows client\n\nsing-box '+VERSION+' (GPL-3.0-or-later): see sing-box-LICENSE.\nWails v3.1.0 (MIT).\nSource revisions:\n'+json.dumps(sources,indent=2)+'\nRouting data attribution is included in each authenticated rules bundle.\n',encoding='utf-8')
-    manifest={'version':'2.0.0','singBox':VERSION,'wails':'3.1.0','sources':sources,'windowsResources':{'generator':'github.com/tc-hib/winres@v0.3.1','iconSha256':sha(icon),'groupId':3},'sha256':{n:sha(out/n) for n in ['HQIP.exe','hqip-helper.exe','sing-box.exe','libcronet.dll']}}
+    manifest={'version':'3.0.0','sourceSHA':source_sha,'dirty':dirty,'singBox':VERSION,'wails':'3.1.0','sources':sources,'windowsResources':{'generator':'github.com/tc-hib/winres@v0.3.1','iconSha256':sha(icon),'groupId':3},'sha256':{n:sha(out/n) for n in ['HQIP.exe','hqip-helper.exe','sing-box.exe','libcronet.dll']}}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     readme=ROOT/'docs/client.md'
     if readme.exists():shutil.copyfile(readme,out/'使用说明.md')
@@ -65,5 +67,8 @@ def main():
     (ROOT/'dist').mkdir(parents=True,exist_ok=True)
     with zipfile.ZipFile(ROOT/'dist/HQIP-Windows-x64.zip','w',zipfile.ZIP_DEFLATED) as z:
         for name in PACKAGE_FILES:z.write(out/name,'HQIP/'+name)
+    package=ROOT/'dist/HQIP-Windows-x64.zip'
+    release={'version':'3.0.0','sourceSHA':source_sha,'dirty':dirty,'filename':package.name,'sha256':sha(package),'size':package.stat().st_size}
+    (ROOT/'dist/desktop-manifest.json').write_text(json.dumps(release,indent=2)+'\n',encoding='utf-8')
     print('Built dist/HQIP-Windows-x64.zip with verified sing-box core.')
 if __name__=='__main__':main()

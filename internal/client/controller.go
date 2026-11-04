@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +33,8 @@ type Controller struct {
 	cancelApply         context.CancelFunc
 	closed              bool
 	wake                chan struct{}
+	authCancel          context.CancelFunc
+	loginGeneration     uint64
 }
 
 func New(dir string, platform Platform, engine Engine) (*Controller, error) {
@@ -52,6 +53,12 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		}
 	}
 	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{RunState: "disconnected", Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, CoreVersion: CoreVersion}}
+	if c.saved.AccountVersion != 2 {
+		c.saved.Tokens = Tokens{}
+		c.saved.Profile = Profile{}
+		c.saved.SelectedNodeID = ""
+		c.saved.AccountVersion = 2
+	}
 	if c.saved.Tokens.RefreshToken != "" {
 		a, e := NewAPI(c.saved.ServerURL, c.saved.Tokens)
 		if e != nil {
@@ -101,43 +108,17 @@ func (c *Controller) populateLocked(p Profile) {
 	c.view.Revision = p.Revision
 	c.view.RulesVersion = p.Rules.Version
 	c.view.DefaultNodeID = p.DefaultNodeID
+	c.view.Entitlement = p.Entitlement
 	c.view.Nodes = []NodeView{}
 	for _, n := range p.Nodes {
 		c.view.Nodes = append(c.view.Nodes, NodeView{n.ID, n.Name, n.Ready})
 	}
 }
 func (c *Controller) Login(server, user, password string) error {
-	if c.View().LoggedIn {
-		return errors.New("请先退出当前设备账号")
-	}
-	a, e := NewAPI(strings.TrimRight(server, "/"), Tokens{})
-	if e != nil {
-		return e
-	}
-	c.mu.Lock()
-	id := c.saved.InstallationID
-	c.mu.Unlock()
-	name, _ := os.Hostname()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if e = a.Login(ctx, user, password, id, name); e != nil {
-		return e
-	}
-	c.mu.Lock()
-	c.api = a
-	c.saved.ServerURL = strings.TrimRight(server, "/")
-	c.saved.Tokens = a.Tokens()
-	c.view.ServerURL = c.saved.ServerURL
-	c.view.LoggedIn = true
-	c.etag = ""
-	e = c.persistLocked()
-	c.mu.Unlock()
-	if e != nil {
-		return e
-	}
-	return c.Sync(ctx)
+	return errors.New("请在系统浏览器中登录用户账户，旧设备账号不再可用")
 }
 func (c *Controller) Logout() error {
+	c.CancelLogin()
 	return c.logoutFor(nil)
 }
 
@@ -175,6 +156,7 @@ func (c *Controller) logoutFor(expected *API) error {
 	return c.persistLocked()
 }
 func (c *Controller) Run(ctx context.Context) {
+	go c.accountWatchdog(ctx)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	delay := 5 * time.Second
@@ -203,6 +185,7 @@ func (c *Controller) Run(ctx context.Context) {
 			c.fail("代理内核已停止，请手动重新连接")
 			c.report()
 		}
+		c.checkAccountConnection(ctx)
 		timer.Reset(delay)
 	}
 }
@@ -217,7 +200,6 @@ func (c *Controller) Sync(ctx context.Context) error {
 	c.mu.Lock()
 	api := c.api
 	etag := c.etag
-	selectionGeneration := c.selectionGeneration
 	c.mu.Unlock()
 	if api == nil {
 		return nil
@@ -252,11 +234,18 @@ func (c *Controller) Sync(ctx context.Context) error {
 	if !p.Enabled {
 		return c.logoutFor(api)
 	}
+	if p.Entitlement == nil || p.Entitlement.Status != "active" || !p.Entitlement.ExpiresAt.After(time.Now()) {
+		return c.cacheUnavailable(api, p)
+	}
 	c.mu.Lock()
 	old := c.saved.Profile
 	b := c.bundle
+	selected := c.saved.SelectedNodeID
 	c.mu.Unlock()
-	configurationChanged := old.Revision != p.Revision || old.Rules.Hash != p.Rules.Hash
+	if p.Revision < old.Revision {
+		return nil
+	}
+	configurationChanged := connectionConfigurationChanged(old, p, selected)
 	if old.Rules.Hash != p.Rules.Hash || len(b.Rules) == 0 {
 		data, e := api.Rules(ctx, p.Rules.URL)
 		if e != nil {
@@ -296,14 +285,17 @@ func (c *Controller) Sync(ctx context.Context) error {
 		c.mu.Unlock()
 		return nil
 	}
-	defaultChanged := old.DefaultNodeID != p.DefaultNodeID
+	if p.Revision < old.Revision {
+		c.mu.Unlock()
+		return nil
+	}
 	allowed := false
 	for _, n := range p.Nodes {
 		if n.ID == c.saved.SelectedNodeID {
 			allowed = true
 		}
 	}
-	if (defaultChanged && c.selectionGeneration == selectionGeneration) || !allowed {
+	if !allowed {
 		c.saved.SelectedNodeID = p.DefaultNodeID
 	}
 	c.saved.Profile = p
@@ -315,7 +307,9 @@ func (c *Controller) Sync(ctx context.Context) error {
 	c.view.LastSync = &now
 	c.view.SyncError = ""
 	intent := c.view.ConnectionIntent
-	apply := intent && (configurationChanged || c.view.RunState == "connecting")
+	// Usage/lease updates also change the profile ETag. They must not cancel a
+	// slow connection attempt while its effective routing configuration is stable.
+	apply := intent && configurationChanged
 	if apply {
 		c.generation++
 		if c.cancelApply != nil {
@@ -325,7 +319,12 @@ func (c *Controller) Sync(ctx context.Context) error {
 	if !intent {
 		c.view.AppliedConfigRevision = p.Revision
 		c.view.ProcessedConfigRevision = p.Revision
-		c.view.RunState = "cached"
+		if c.view.RunState != "failed" {
+			c.view.RunState = "cached"
+		}
+	} else if !apply && c.view.RunState == "connected" {
+		c.view.AppliedConfigRevision = p.Revision
+		c.view.ProcessedConfigRevision = p.Revision
 	}
 	e = c.persistLocked()
 	c.mu.Unlock()
@@ -366,6 +365,7 @@ func (c *Controller) rejectProfile(api *API, p Profile, err error) error {
 	c.view.LastError = err.Error()
 	if c.view.ConnectionIntent {
 		c.view.RunState = "failed"
+		c.view.ConnectionIntent = false
 	}
 	_ = c.persistLocked()
 	c.mu.Unlock()
@@ -383,7 +383,11 @@ func (c *Controller) Connect() error {
 	c.mu.Lock()
 	if c.api == nil {
 		c.mu.Unlock()
-		return errors.New("请先登录设备账号")
+		return errors.New("请先登录用户账户")
+	}
+	if c.view.Entitlement == nil || c.view.Entitlement.Status != "active" || !c.view.Entitlement.ExpiresAt.After(time.Now()) {
+		c.mu.Unlock()
+		return errors.New("套餐未开通、已到期或流量已用尽")
 	}
 	if len(c.bundle.Rules) == 0 {
 		c.mu.Unlock()
@@ -481,12 +485,28 @@ func (c *Controller) applyLatest() {
 	mode := c.saved.Mode
 	tun := c.saved.TUN
 	server := c.saved.ServerURL
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	api := c.api
+	ctx, cancel := context.WithTimeout(context.Background(), 135*time.Second)
 	c.cancelApply = cancel
 	c.view.RunState = "connecting"
 	c.view.LastError = ""
 	c.mu.Unlock()
-	e := c.engine.Apply(ctx, p, b, id, mode, tun, server)
+	// Release the old transport before any candidate consumes another slot.
+	e := c.engine.Stop()
+	if e == nil {
+		e = api.Drain(ctx)
+	}
+	if e == nil {
+		e = api.WaitDrained(ctx)
+	}
+	if e == nil {
+		e = c.engine.Apply(ctx, p, b, id, mode, tun, server)
+	}
+	if e != nil && ctx.Err() == nil {
+		if state, err := api.Connections(ctx); err == nil && state.Message != "" {
+			e = errors.New(state.Message)
+		}
+	}
 	cancel()
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
@@ -501,6 +521,7 @@ func (c *Controller) applyLatest() {
 	}
 	if e != nil {
 		c.view.RunState = "failed"
+		c.view.ConnectionIntent = false
 		c.view.ActualNodeID = ""
 		c.view.LastError = e.Error()
 		c.view.ProcessedConfigRevision = p.Revision
@@ -518,6 +539,7 @@ func (c *Controller) fail(message string) {
 	_ = c.engine.Stop()
 	c.mu.Lock()
 	c.view.RunState = "failed"
+	c.view.ConnectionIntent = false
 	c.view.ActualNodeID = ""
 	c.view.LastError = message
 	c.mu.Unlock()
@@ -542,6 +564,7 @@ func (c *Controller) report() {
 	c.mu.Unlock()
 }
 func (c *Controller) Close() {
+	c.CancelLogin()
 	c.mu.Lock()
 	c.closed = true
 	c.generation++

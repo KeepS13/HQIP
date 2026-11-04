@@ -54,7 +54,10 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 	if r.Revision < 0 || r.Revision > desired {
 		return errors.New("配置版本无效")
 	}
-	rows, err := tx.Query("SELECT c.device_id FROM credentials c JOIN devices d ON d.id=c.device_id WHERE c.node_id=?", nodeID)
+	// Portal lease identities remain valid for historical ledger reports after
+	// credential rotation or expiry. Quota is settled only by lease reports;
+	// these buckets feed node/server traffic graphs and never charge it again.
+	rows, err := tx.Query("SELECT c.device_id FROM credentials c JOIN devices d ON d.id=c.device_id WHERE c.node_id=? UNION SELECT 'user_'||user_id FROM portal_leases WHERE node_id=?", nodeID, nodeID)
 	if err != nil {
 		return err
 	}

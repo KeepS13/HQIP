@@ -1,6 +1,6 @@
 """Build reproducible HQIP release assets; third-party binaries are hash pinned."""
 from __future__ import annotations
-import argparse, hashlib, json, os, pathlib, subprocess, sys, tarfile, urllib.request
+import argparse, hashlib, json, os, pathlib, shutil, subprocess, sys, tarfile, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / "dist"
@@ -51,17 +51,29 @@ def main():
                 run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"{name}-linux-{arch}"), f"./cmd/{command}"], env=env)
             env = dict(os.environ, GOOS="windows", GOARCH=arch, CGO_ENABLED="0")
             run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"hqip-windows-{arch}.exe"), "./cmd/hqip"], env=env)
+        run([sys.executable, str(ROOT / "scripts/build_hy2.py")])
     if not args.skip_download:
         for name, (url, expected) in PINNED.items():
+            if name.startswith("hysteria-linux-"):
+                continue  # Linux nodes use the reviewed, pinned-source extension.
             download(name, url, expected)
         with tarfile.open(OUT / "caddy-linux-amd64.tar.gz", "r:gz") as archive:
             # Never extract arbitrary archive members onto the filesystem.
             with archive.extractfile("caddy") as source, (OUT / "caddy-linux-amd64").open("wb") as destination:
                 destination.write(source.read())
+    for arch in ["amd64", "arm64"]:
+        extended = OUT / f"hqip-hysteria-linux-{arch}"
+        provenance = json.loads((OUT / "hqip-hysteria-manifest.json").read_text(encoding="utf-8"))
+        if not extended.is_file() or provenance["sha256"].get(extended.name) != digest(extended):
+            raise ValueError("Missing or mismatched HQIP admission core: " + extended.name)
+        shutil.copyfile(extended, OUT / f"hysteria-linux-{arch}")
     names = [f"{name}-linux-{arch}" for arch in ["amd64", "arm64"] for name in ["hqip", "agent", "hysteria"]]
     names += ["caddy-linux-amd64"]
     names += [f"{name}-windows-{arch}.exe" for arch in ["amd64", "arm64"] for name in ["hqip", "hysteria"]]
-    manifest = {"hysteriaVersion": "2.13.0", "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names if (OUT / name).exists()}}
+    extension = OUT / "hqip-hysteria-manifest.json"
+    manifest = {"hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names if (OUT / name).exists()}}
+    if extension.exists():
+        manifest["hysteriaSource"] = json.loads(extension.read_text(encoding="utf-8"))
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print("Release manifest generated.")
 

@@ -23,6 +23,7 @@ type Installer interface {
 	Verify(context.Context, provision.Input, provision.LogFunc) (provision.Result, error)
 }
 type Options struct {
+	TurnstileClient                     *http.Client
 	PublicURL, AdminOrigin, ArtifactDir string
 	Assets                              fs.FS
 	Installer                           Installer
@@ -80,6 +81,7 @@ func (s *Server) AdminHandler() http.Handler {
 	}
 	s.registerServerRoutes(m)
 	s.registerCloudflareRoutes(m)
+	s.registerPortalAdmin(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	m.HandleFunc("/", s.static)
 	return s.headers(m, s.opts.AdminOrigin)
@@ -93,14 +95,36 @@ func (s *Server) PublicHandler() http.Handler {
 	m.HandleFunc("GET /api/v1/agents/config", s.agentConfig)
 	m.HandleFunc("POST /api/v1/agents/report", s.agentReport)
 	m.HandleFunc("GET /sub/{token}", s.subscription)
-	m.HandleFunc("POST /api/v1/client/login", s.clientLogin)
-	m.HandleFunc("POST /api/v1/client/refresh", s.clientRefresh)
-	m.HandleFunc("POST /api/v1/client/logout", s.clientLogout)
-	m.HandleFunc("GET /api/v1/client/profile", s.clientProfile)
-	m.HandleFunc("POST /api/v1/client/status", s.clientStatus)
-	m.HandleFunc("GET /api/v1/client/rules/{hash}", s.clientRules)
+	legacy := http.NewServeMux()
+	legacy.HandleFunc("POST /api/v1/client/login", s.clientLogin)
+	legacy.HandleFunc("POST /api/v1/client/refresh", s.clientRefresh)
+	legacy.HandleFunc("POST /api/v1/client/logout", s.clientLogout)
+	legacy.HandleFunc("GET /api/v1/client/profile", s.clientProfile)
+	legacy.HandleFunc("POST /api/v1/client/status", s.clientStatus)
+	legacy.HandleFunc("GET /api/v1/client/rules/{hash}", s.clientRules)
+	m.Handle("/api/v1/client/", s.legacyClientGate(legacy))
+	s.registerPortalPublic(m)
+	m.HandleFunc("GET /{$}", s.static)
+	for _, path := range []string{"/authorize", "/login", "/register"} {
+		m.HandleFunc("GET "+path, s.turnstilePage)
+	}
+	for _, path := range []string{"/nodes", "/subscriptions", "/downloads", "/account"} {
+		m.HandleFunc("GET "+path, s.static)
+	}
+	m.HandleFunc("GET /favicon.svg", s.static)
+	m.HandleFunc("GET /assets/", s.static)
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	return s.headers(m, s.opts.PublicURL)
+}
+
+func (s *Server) legacyClientGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Store.PortalEnabled() {
+			fail(w, http.StatusUpgradeRequired, "请升级 HQIP 3.0，使用邮箱账户在浏览器登录")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) headers(m http.Handler, origin string) http.Handler {
@@ -108,15 +132,20 @@ func (s *Server) headers(m http.Handler, origin string) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		if strings.HasPrefix(origin, "https://") {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/sub/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/sub/") || strings.HasPrefix(r.URL.Path, "/usub/") || r.URL.Path == "/authorize" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		m.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) turnstilePage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	s.static(w, r)
 }
 
 func reply(w http.ResponseWriter, status int, v any) {

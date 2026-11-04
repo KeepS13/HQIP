@@ -1,39 +1,41 @@
 # HQIP
 
-自用的 Hysteria 2 节点管理平台，包含中文管理网站和 Windows 客户端。通过网站填写 SSH 地址、密码、公网 IP、域名和套餐信息，自动部署节点，为每台设备分配允许使用的节点，使用桌面账号或 Clash/Mihomo 订阅连接，并查看代理流量、在线凭据和服务器资源。
+Hysteria 2 节点与用户套餐管理平台，包含中文用户网站、独立管理员后台和 Windows 客户端。用户自行注册邮箱账号，由管理员开通套餐后使用 HQIP 或 Clash/Mihomo 连接；管理员通过 SSH 部署独立 IP 节点，监控代理流量、连接和服务器资源。
 
 ## 功能
 
 - 中文深色管理界面，适配手机与桌面，单管理员登录。
 - SSH 指纹固定、安装组件 SHA-256 校验、后台部署进度、失败重试。
-- Hysteria 2 HTTP 鉴权与本机 Agent；控制网站离线时，已同步凭据继续工作。
-- 每设备、每节点独立连接密码；独立订阅、停用和轮换；撤销等待节点确认。
-- Windows 设备账号、节点选择、规则/全局模式、系统代理与受限 TUN 服务；关闭窗口隐藏到托盘，退出恢复网络。
+- 邮箱注册、Cloudflare Turnstile 验证、管理员开通套餐，无支付或邮件找回。
+- 保持标准 HY2 协议兼容的服务端扩展，执行用户总带宽、一次性流量、实际连接数和到期限制；控制离线最长 120 秒停止授权。
+- 用户、节点、订阅或客户端会话独立凭据；订阅轮换、会话撤销与精确断开。
+- Windows 浏览器账户授权、节点选择、规则/全局模式、系统代理与受限 TUN 服务；关闭窗口隐藏到托盘，退出恢复网络。
 - HTTPS 管理网站与独立公共 API 监听，Nginx 提供公网入口；保留本地开发模式。
 - 每秒采样、每五秒上报；SQLite 持久计数、断网补报和幂等聚合。
-- 带宽/月流量仅作参考，80%/100% 站内提醒，**不主动限速或断网**。
+- 服务器和节点的带宽/月流量仍只作监控提醒；用户套餐限制由服务端执行，不能通过客户端参数绕过。
 - 系统服务自动恢复、TLS 自动续期、一致性备份与恢复命令。
 
 ## 使用流程
 
-1. 在 `https://hqip.5202345.xyz` 登记服务器并验证 SSH。管理地址与节点公网 IP 可以不同；登记服务器不会安装 HY2。
+1. 在 `https://hqip.5202345.xyz/admin` 登记服务器并验证 SSH。管理地址与节点公网 IP 可以不同；登记服务器不会安装 HY2。
 2. 在服务器清单添加已经绑定到网卡的公网 IPv4，再创建对应的独立节点。可在“域名与证书”配置 Cloudflare，自动分配 DNS only 子域名；也可使用预先解析到该 IP 的手工域名。
 3. 等待独立实例安装及 TLS、UDP、HTTPS 和出口 IP 验证。入口和出口均使用所选 IP；一个服务器的不同 IP 必须分别部署和分配。控制台自身兼作节点时还须执行外部验证。
-4. 在“设备”中分别创建电脑、手机，显式分配节点并选择默认节点。Windows 可初始化设备账号后登录 HQIP 客户端；其他设备可复制订阅或点击“导入 Clash”，使用支持 Hysteria 2 的 Clash Verge Rev/Mihomo。
-5. 在设备/节点详情查看速率与用量。当前网络必须支持 UDP；第一版没有 TCP 备用协议。
+4. 在“套餐”中设置带宽、一次性流量、节点集合、默认节点和连接上限。用户注册后在“用户”中开通套餐并指定个人到期日。
+5. 用户在网页查看套餐、管理会话及订阅，或用 Windows 客户端打开浏览器授权。当前网络必须支持 UDP；没有 TCP 备用协议。
 
-“在线登记设备”是有活动连接的独立设备凭据，并非硬件识别。复制同一订阅到多台机器会共享一个设备身份；“连接实例”可能大于设备数。节点心跳超过 30 秒时在线信息未知。流量统计是代理有效载荷，不含所有加密、重传与网络开销，不等同服务商账单；突然崩溃可能漏掉最后约一秒尚未采样的流量。
+“在线连接”统计实际 HY2 连接，并非硬件识别。网页登录和客户端登录不占名额。节点心跳超过 30 秒时监控信息未知。代理流量不等同服务商账单；套餐采用预留预算，失联或崩溃后的未核对预算保持待结算，不重新发放。旧设备数据只作历史归属，激活新账户体系时撤销其账号、订阅和代理权限。
 
 ## 技术与目录
 
 - `cmd/hqip`、`internal/control`、`internal/store`：Go 控制面、SQLite、后台任务与订阅。
 - `cmd/hqip-agent`、`internal/agent`：节点鉴权、计量和补报。
+- `runtime/hysteria`：固定上游 app/v2.13.0 的标准协议兼容扩展，连接租约、精确断开、预算和限速。
 - `internal/provision`：带预检、指纹固定与真实代理探测的 SSH 安装器。
 - `web`：React / TypeScript / Vite，构建后嵌入 Go 二进制。
 - `desktop`、`internal/client`、`internal/winclient`、`cmd/hqip-helper`：Wails Windows 客户端、配置同步、内核与系统网络生命周期。
 - `internal/rules`：共享路由规则校验、规范化、版本摘要和 Clash/sing-box 输出。
 - `deploy`、`scripts`：systemd、Caddy、发布构建、部署与外部验证。
-- [服务器与多 IP 管理](docs/multi-ip.md) · [Cloudflare 配置](docs/cloudflare.md) · [客户端使用说明](docs/client.md) · [接口约定](docs/interfaces.md) · [运维与迁移](docs/operations.md)
+- [用户与套餐运维](docs/portal.md) · [服务器与多 IP 管理](docs/multi-ip.md) · [Cloudflare 配置](docs/cloudflare.md) · [客户端使用说明](docs/client.md) · [接口约定](docs/interfaces.md) · [运维与迁移](docs/operations.md)
 
 ## 构建与测试
 
@@ -47,7 +49,7 @@ go vet ./...
 python scripts/build.py --skip-web
 ```
 
-发布脚本交叉构建 Linux amd64/arm64 与 Windows 控制命令，并下载校验固定版本 Hysteria 2.13.0、Caddy 2.11.7。第三方下载摘要固定在 `scripts/build.py`，输出 `dist/manifest.json`。节点运行不需要 Node、Go 编译器、Docker 或独立数据库。
+发布脚本交叉构建 Linux amd64/arm64、Windows 控制命令和本仓库 HY2 服务端扩展，并校验固定第三方工具。输出 `dist/manifest.json` 和源码摘要；上游源码与 MIT 许可保留在 `runtime/hysteria`。节点运行不需要 Node、Go 编译器、Docker 或独立数据库。
 
 在 Windows 上构建桌面发布包：
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
   Activity,
   ArrowRight,
@@ -20,6 +20,8 @@ import {
   Wifi,
   Globe2,
   X,
+  UsersRound,
+  Package,
 } from "lucide-react";
 import { api, setCSRF } from "./api";
 import {
@@ -34,7 +36,7 @@ import {
 import type { Session } from "./types";
 import { Dashboard, Guide, NotFound } from "./pages/Dashboard";
 import { Nodes, NodePage } from "./pages/Nodes";
-import { Devices, DevicePage } from "./pages/Devices";
+import { Users, UserPage, Plans, TurnstileSettingsPage } from "./pages/Accounts";
 import { Servers, ServerPage } from "./pages/Servers";
 import { Domains } from "./pages/Domains";
 
@@ -271,7 +273,7 @@ function Login({
           )}
           <div className="login-note">
             <ShieldCheck size={14} />
-            仅限管理员访问 · 无公开注册
+            仅限管理员访问 · 用户请前往网站首页
           </div>
         </div>
         <div className="login-footer">
@@ -343,7 +345,9 @@ export default function App() {
     "/nodes": "节点管理",
     "/servers": "服务器",
     "/domains": "域名与证书",
-    "/devices": "设备与订阅",
+    "/users": "用户管理",
+    "/plans": "套餐管理",
+    "/turnstile": "注册与安全验证",
     "/guide": "使用指南",
   };
   const title =
@@ -352,8 +356,8 @@ export default function App() {
       ? "节点详情"
       : location.pathname.startsWith("/servers/")
         ? "服务器详情"
-      : location.pathname.startsWith("/devices/")
-        ? "设备详情"
+      : location.pathname.startsWith("/users/")
+        ? "用户详情"
         : "控制台");
   return (
     <ToastContext.Provider value={notify}>
@@ -396,9 +400,17 @@ export default function App() {
               <Server size={19} />
               <span>节点管理</span>
             </NavLink>
-            <NavLink to="/devices">
-              <Monitor size={19} />
-              <span>设备与订阅</span>
+            <NavLink to="/users">
+              <UsersRound size={19} />
+              <span>用户管理</span>
+            </NavLink>
+            <NavLink to="/plans">
+              <Package size={19} />
+              <span>套餐管理</span>
+            </NavLink>
+            <NavLink to="/turnstile">
+              <ShieldCheck size={19} />
+              <span>注册与安全验证</span>
             </NavLink>
             <NavLink to="/domains">
               <Globe2 size={19} />
@@ -489,8 +501,11 @@ export default function App() {
               <Route path="/domains" element={<Domains />} />
               <Route path="/nodes" element={<Nodes />} />
               <Route path="/nodes/:id" element={<NodePage />} />
-              <Route path="/devices" element={<Devices />} />
-              <Route path="/devices/:id" element={<DevicePage />} />
+              <Route path="/users" element={<Users />} />
+              <Route path="/users/:id" element={<UserPage />} />
+              <Route path="/plans" element={<Plans />} />
+              <Route path="/turnstile" element={<TurnstileSettingsPage />} />
+              <Route path="/devices/*" element={<Navigate to="/users" replace />} />
               <Route path="/guide" element={<Guide />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

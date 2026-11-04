@@ -15,10 +15,11 @@ import (
 	"time"
 )
 
-var ErrUnauthorized = errors.New("设备登录已失效，请重新登录")
+var ErrUnauthorized = errors.New("用户登录已失效，请重新登录")
 
 type API struct {
 	mu     sync.Mutex
+	authMu sync.Mutex // Serialize token rotation without blocking local snapshots.
 	base   string
 	tokens Tokens
 	http   *http.Client
@@ -38,7 +39,7 @@ func NewAPI(base string, tokens Tokens) (*API, error) {
 }
 func (a *API) Tokens() Tokens { a.mu.Lock(); defer a.mu.Unlock(); return a.tokens }
 func (a *API) request(ctx context.Context, method, path string, body any, token, etag string) ([]byte, string, int, error) {
-	if !strings.HasPrefix(path, "/api/v1/client/") || strings.Contains(path, "..") {
+	if !strings.HasPrefix(path, "/api/v2/client/") || strings.Contains(path, "..") {
 		return nil, "", 0, errors.New("拒绝非客户端接口")
 	}
 	var reader io.Reader
@@ -62,7 +63,7 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	}
 	resp, e := a.http.Do(req)
 	if e != nil {
-		return nil, "", 0, errors.New("无法连接管理服务，请检查网络或本地控制服务")
+		return nil, "", 0, errors.New("无法连接账户服务，请检查网络或稍后重试")
 	}
 	defer resp.Body.Close()
 	b, e := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
@@ -84,44 +85,52 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	}
 	return b, resp.Header.Get("ETag"), resp.StatusCode, nil
 }
+
+// Login remains a source-compatible error for older diagnostic tools.
+// Authentication is performed in the trusted browser with Turnstile.
 func (a *API) Login(ctx context.Context, user, password, id, name string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	b, _, _, e := a.request(ctx, "POST", "/api/v1/client/login", map[string]string{"username": user, "password": password, "installationId": id, "clientName": name}, "", "")
-	if e != nil {
-		return e
-	}
-	return json.Unmarshal(b, &a.tokens)
+	return errors.New("请使用新版浏览器登录，旧设备账号已停止使用")
 }
 func (a *API) auth(ctx context.Context, method, path string, body any, etag string) ([]byte, string, int, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.tokens.RefreshToken == "" {
+	a.authMu.Lock()
+	defer a.authMu.Unlock()
+	tokens := a.Tokens()
+	if tokens.RefreshToken == "" {
 		return nil, "", 401, ErrUnauthorized
 	}
-	if time.Until(a.tokens.AccessExpiresAt) < time.Minute {
+	if time.Until(tokens.AccessExpiresAt) < time.Minute {
 		if e := a.refresh(ctx); e != nil {
 			return nil, "", 401, e
 		}
 	}
-	b, t, s, e := a.request(ctx, method, path, body, a.tokens.AccessToken, etag)
+	b, t, s, e := a.request(ctx, method, path, body, a.Tokens().AccessToken, etag)
 	if errors.Is(e, ErrUnauthorized) {
 		if e = a.refresh(ctx); e != nil {
 			return nil, "", 401, e
 		}
-		return a.request(ctx, method, path, body, a.tokens.AccessToken, etag)
+		return a.request(ctx, method, path, body, a.Tokens().AccessToken, etag)
 	}
 	return b, t, s, e
 }
 func (a *API) refresh(ctx context.Context) error {
-	b, _, _, e := a.request(ctx, "POST", "/api/v1/client/refresh", map[string]string{"refreshToken": a.tokens.RefreshToken}, "", "")
+	b, _, _, e := a.request(ctx, "POST", "/api/v2/client/refresh", map[string]string{"refreshToken": a.Tokens().RefreshToken}, "", "")
 	if e != nil {
 		return e
 	}
-	return json.Unmarshal(b, &a.tokens)
+	var tokens Tokens
+	if e = json.Unmarshal(b, &tokens); e != nil {
+		return e
+	}
+	if tokens.AccessToken == "" || tokens.RefreshToken == "" || tokens.SessionID == "" {
+		return errors.New("账户服务未返回完整刷新凭据")
+	}
+	a.mu.Lock()
+	a.tokens = tokens
+	a.mu.Unlock()
+	return nil
 }
 func (a *API) Profile(ctx context.Context, etag string) (Profile, string, bool, error) {
-	b, t, s, e := a.auth(ctx, "GET", "/api/v1/client/profile", nil, etag)
+	b, t, s, e := a.auth(ctx, "GET", "/api/v2/client/profile", nil, etag)
 	var p Profile
 	if e == nil && s != 304 {
 		e = json.Unmarshal(b, &p)
@@ -141,7 +150,7 @@ func (a *API) Rules(ctx context.Context, path string) ([]byte, error) {
 			return nil, errors.New("规则下载地址不属于当前管理服务")
 		}
 	}
-	const prefix = "/api/v1/client/rules/"
+	const prefix = "/api/v2/client/rules/"
 	if !strings.HasPrefix(u.Path, prefix) {
 		return nil, errors.New("规则下载地址无效")
 	}
@@ -153,10 +162,10 @@ func (a *API) Rules(ctx context.Context, path string) ([]byte, error) {
 	return b, e
 }
 func (a *API) Report(ctx context.Context, s Status) error {
-	_, _, _, e := a.auth(ctx, "POST", "/api/v1/client/status", s, "")
+	_, _, _, e := a.auth(ctx, "POST", "/api/v2/client/status", s, "")
 	return e
 }
 func (a *API) Logout(ctx context.Context) error {
-	_, _, _, e := a.auth(ctx, "POST", "/api/v1/client/logout", nil, "")
+	_, _, _, e := a.auth(ctx, "POST", "/api/v2/client/logout", nil, "")
 	return e
 }

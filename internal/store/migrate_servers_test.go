@@ -92,7 +92,7 @@ func TestVersionTwoServerMigrationPreservesIDsGrantsAndCounters(t *testing.T) {
 		t.Fatal("controller identity changed on restart")
 	}
 	var version string
-	if err = again.DB.QueryRow("SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil || version != "3" {
+	if err = again.DB.QueryRow("SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil || version != "4" {
 		t.Fatal("migration not committed")
 	}
 }

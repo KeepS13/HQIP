@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+# Preserve pinned upstream binary routing fixtures and exact HTTP captures.
+runtime/hysteria/**/*.dat binary
+runtime/hysteria/**/*.bin binary
+runtime/hysteria/extras/sniff/testdata/http-chrome153.txt -text -whitespace

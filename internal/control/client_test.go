@@ -30,7 +30,7 @@ func TestPublicMuxCannotReachAdministratorOrSPA(t *testing.T) {
 	s, h := newServer(t)
 	cookie, csrf := loginAdmin(t, s, h)
 	public := s.PublicHandler()
-	for _, path := range []string{"/", "/index.html", "/api/v1/session", "/api/v1/login", "/api/v1/nodes", "/api/v1/devices", "/api/v1/rules", "/api/v1/password", "/api/v1/nodes/node/verification-config"} {
+	for _, path := range []string{"/admin", "/index.html", "/api/v1/session", "/api/v1/login", "/api/v1/nodes", "/api/v1/devices", "/api/v1/rules", "/api/v1/password", "/api/v1/nodes/node/verification-config"} {
 		for _, method := range []string{"GET", "POST"} {
 			w := request(public, method, path, map[string]string{}, cookie, csrf)
 			if w.Code != 404 {

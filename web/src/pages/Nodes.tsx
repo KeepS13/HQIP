@@ -655,11 +655,11 @@ export function NodePage() {
       </div>
       <TaskLog node={node} events={data.events} />
       <Panel
-        title="登记设备"
-        subtitle="此节点上的设备使用情况"
+        title="凭据用量记录"
+        subtitle="保留此节点的历史流量归属；用户权限在套餐中管理"
         action={
-          <Link className="text-link" to="/devices">
-            管理订阅 <ArrowRight size={15} />
+          <Link className="text-link" to="/users">
+            管理用户 <ArrowRight size={15} />
           </Link>
         }
       >
@@ -668,7 +668,7 @@ export function NodePage() {
             <table>
               <thead>
                 <tr>
-                  <th>设备名称</th>
+                  <th>记录名称</th>
                   <th>状态</th>
                   <th>本月上传</th>
                   <th>本月下载</th>
@@ -679,9 +679,9 @@ export function NodePage() {
                 {devices.map((d) => (
                   <tr key={d.id}>
                     <td>
-                      <Link className="table-name" to={`/devices/${d.id}`}>
+                      <span className="table-name">
                         {d.name}
-                      </Link>
+                      </span>
                     </td>
                     <td>
                       <Badge
@@ -712,9 +712,9 @@ export function NodePage() {
                     <td>{bytes(d.monthDownload)}</td>
                     <td>
                       <Link
-                        to={`/devices/${d.id}`}
+                        to="/users"
                         className="icon-button"
-                        aria-label={`查看 ${d.name}`}
+                        aria-label="前往用户管理"
                       >
                         <ChevronRight size={16} />
                       </Link>
@@ -726,12 +726,12 @@ export function NodePage() {
           </div>
         ) : (
           <Empty
-            title="暂无登记设备"
-            description="创建设备后，可通过独立订阅连接此节点。"
+            title="暂无凭据用量记录"
+            description="将此节点加入套餐后，用户可建立连接。"
             action={
-              <Link to="/devices?add=1" className="button button-secondary">
+              <Link to="/plans" className="button button-secondary">
                 <Plus size={15} />
-                创建设备
+                管理套餐
               </Link>
             }
           />

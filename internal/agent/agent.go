@@ -35,6 +35,7 @@ type pendingRevocation struct {
 }
 
 type cachedState struct {
+	PortalEnabled   bool                         `json:"portalEnabled"`
 	Retirement      *cachedRetirement            `json:"retirement,omitempty"`
 	Certificate     *model.CertificateStatus     `json:"certificate,omitempty"`
 	DesiredRevision int64                        `json:"desiredRevision"`
@@ -60,6 +61,8 @@ type Agent struct {
 	log               *slog.Logger
 	ledger            *ledger
 	controlClient     *http.Client
+	admissionMu       sync.Mutex
+	leaseReportMu     sync.RWMutex
 	statsClient       *http.Client
 	cacheMu           sync.RWMutex
 	cache             cachedState
@@ -171,6 +174,8 @@ func (a *Agent) Close() error {
 
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /admission", a.admitConnection)
+	mux.HandleFunc("POST /leases/{id}/renew", a.renewConnection)
 	mux.HandleFunc("POST /auth", a.authenticate)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		if !a.localAuthorized(r) {
@@ -223,6 +228,9 @@ func (a *Agent) authenticate(w http.ResponseWriter, r *http.Request) {
 	}{}
 	a.cacheMu.RLock()
 	for id, credential := range a.cache.Credentials {
+		if a.cache.PortalEnabled && !strings.HasPrefix(id, "__probe_") {
+			continue
+		}
 		if _, denied := a.cache.Pending[id]; a.cache.Retirement != nil || denied || !credential.Enabled || credentialDenied(a.cache, credential.Hash, a.now()) {
 			continue
 		}
@@ -259,7 +267,7 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 		if _, duplicate := credentials[device.ID]; duplicate || seenHashes[hash] {
 			return errors.New("控制服务返回重复设备凭据")
 		}
-		credentials[device.ID] = cachedCredential{Hash: hash, Enabled: device.Enabled}
+		credentials[device.ID] = cachedCredential{Hash: hash, Enabled: device.Enabled && (!desired.PortalEnabled || strings.HasPrefix(device.ID, "__probe_"))}
 		seenHashes[hash] = true
 	}
 	a.cacheMu.Lock()
@@ -269,6 +277,7 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 	}
 	replay := desired.Revision-a.cache.DesiredRevision > 1
 	next := cloneCache(a.cache)
+	next.PortalEnabled = desired.PortalEnabled
 	next.DesiredRevision, next.Credentials = desired.Revision, credentials
 	now := a.now()
 	for _, device := range desired.Devices {
@@ -496,6 +505,7 @@ func (a *Agent) controlJSON(ctx context.Context, method, path string, body any, 
 }
 
 func (a *Agent) sync(ctx context.Context) error {
+	queueErr := a.replayLeaseFinals(ctx)
 	var desired model.AgentDesired
 	configErr := a.controlJSON(ctx, http.MethodGet, "/api/v1/agents/config", nil, &desired)
 	if configErr == nil {
@@ -526,6 +536,13 @@ func (a *Agent) sync(ctx context.Context) error {
 	if a.cfg.Managed {
 		report.Capabilities = append(report.Capabilities, "multi-ip-v2", "retirement-v1", "certificate-v1")
 	}
+	var coreCapabilities struct {
+		Admission bool `json:"admission"`
+		Version   int  `json:"version"`
+	}
+	if a.statsJSON(ctx, http.MethodGet, "/hqip/capabilities", nil, &coreCapabilities) == nil && coreCapabilities.Admission && coreCapabilities.Version == 1 {
+		report.Capabilities = append(report.Capabilities, "admission-v1")
+	}
 	a.cacheMu.RLock()
 	report.Revision = a.cache.AppliedRevision
 	report.Removals = removalStatuses(a.cache)
@@ -540,6 +557,9 @@ func (a *Agent) sync(ctx context.Context) error {
 		report.Warnings = []string{a.cache.Warning}
 	}
 	a.cacheMu.RUnlock()
+	if warning := a.ledger.leaseQueueWarning(); warning != "" {
+		report.Warnings = append(report.Warnings, warning)
+	}
 	a.liveMu.RLock()
 	report.Metrics = a.live.Metrics
 	report.CoreHealthy = a.live.Healthy && a.now().Sub(a.live.SampleAt) < 3*time.Second
@@ -562,7 +582,10 @@ func (a *Agent) sync(ctx context.Context) error {
 	if err := a.acknowledgeRetirement(ctx, report.Retirement); err != nil {
 		return err
 	}
-	return configErr
+	if configErr != nil {
+		return configErr
+	}
+	return queueErr
 }
 
 func (a *Agent) syncLoop(ctx context.Context) {

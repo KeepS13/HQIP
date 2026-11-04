@@ -139,49 +139,13 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 			expectedIP = n.PublicIP
 		}
 	}
-	opts := ConfigOptions{Profile: p, Bundle: b, Selected: selected, Mode: "global", MixedPort: port, ProbePort: probePort, APIPort: apiPort, APISecret: secret, GeoPath: geo, ServerURL: server}
+	opts := ConfigOptions{Profile: p, Bundle: b, Selected: selected, Mode: mode, TUN: tun, MixedPort: port, ProbePort: probePort, APIPort: apiPort, APISecret: secret, GeoPath: geo, ServerURL: server}
+	// Probe the actual process; a separate probe process consumes another slot.
 	data, e := GenerateConfig(opts)
 	if e != nil {
 		return e
 	}
-	candidate := filepath.Join(c.Dir, "candidate.json")
-	if e = c.Check(ctx, data, candidate); e != nil {
-		return e
-	}
-	probeCtx, probeCancel := context.WithCancel(ctx)
-	probe := c.command(probeCtx, "run", "-c", candidate)
-	if e = probe.Start(); e != nil {
-		probeCancel()
-		return errors.New("无法启动候选内核")
-	}
-	job, e := c.Platform.Attach(probe)
-	if e != nil {
-		_ = probe.Process.Kill()
-		_ = probe.Wait()
-		probeCancel()
-		return e
-	}
-	done := make(chan struct{})
-	go func() { _ = probe.Wait(); close(done) }()
-	e = Probe(ctx, probePort, expectedIP)
-	probeCancel()
-	if job != nil {
-		_ = job.Close()
-	}
-	<-done
-	if e != nil {
-		_ = os.Remove(candidate)
-		return e
-	}
-	if e = ctx.Err(); e != nil {
-		return e
-	}
-	// The old route is stopped only after the candidate has passed the probe.
-	_ = c.stopLocked()
-	opts.TUN = tun
-	opts.Mode = mode
-	data, e = GenerateConfig(opts)
-	if e != nil {
+	if e = c.stopLocked(); e != nil {
 		return e
 	}
 	path := filepath.Join(c.Dir, "active.json")
@@ -223,7 +187,7 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 	}
 	c.done = make(chan struct{})
 	proc := c.process
-	done = c.done
+	done := c.done
 	go func() { _ = proc.Wait(); close(done) }()
 	c.port = port
 	c.probePort = probePort

@@ -4,9 +4,10 @@ import io
 import json
 import os
 import pathlib
+import sqlite3
 import tempfile
 import unittest
-from contextlib import ExitStack, redirect_stdout
+from contextlib import ExitStack, closing, redirect_stdout
 from unittest.mock import patch
 
 import upgrade_control as upgrade
@@ -22,7 +23,9 @@ class UpgradeSafetyTests(unittest.TestCase):
         self.backups = self.root / 'root/backups'
         self.data.mkdir(parents=True)
         self.backups.mkdir(parents=True)
-        (self.data / 'hqip.db').write_bytes(b'old-database')
+        with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+            db.execute('CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        self.old_database = (self.data / 'hqip.db').read_bytes()
         (self.data / 'master.key').write_bytes(b'old-key-paired-with-old-database')
         (self.data / 'hqip.db-wal').write_bytes(b'old-wal')
         self.previous = self.release('a')
@@ -99,7 +102,7 @@ class UpgradeSafetyTests(unittest.TestCase):
         with patch.object(upgrade.shutil, 'copytree', side_effect=snapshot):
             upgrade.upgrade(self.new, self.state)
         self.assertEqual((self.base / 'current').resolve(), self.new)
-        self.assertEqual((self.state / 'data.before/hqip.db').read_bytes(), b'old-database')
+        self.assertEqual((self.state / 'data.before/hqip.db').read_bytes(), self.old_database)
         self.assertEqual((self.state / 'data.before/hqip.db-wal').read_bytes(), b'old-wal')
         self.assertEqual(json.loads((self.state / 'state.json').read_text())['phase'], 'active')
         self.assertTrue(self.running)
@@ -114,12 +117,14 @@ class UpgradeSafetyTests(unittest.TestCase):
             nonlocal checks
             checks += 1
             if checks == 1:
-                (self.data / 'hqip.db').write_bytes(b'new-migrated-database')
+                with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+                    db.execute("INSERT INTO metadata VALUES('portal_enabled','false')")
+                self.failed_database = (self.data / 'hqip.db').read_bytes()
                 (self.data / 'master.key').write_bytes(b'new-key')
                 (self.data / 'new-data').write_bytes(b'only-in-failed-release')
                 raise RuntimeError('new release unhealthy')
             self.assertEqual((self.base / 'current').resolve(), self.previous)
-            self.assertEqual((self.data / 'hqip.db').read_bytes(), b'old-database')
+            self.assertEqual((self.data / 'hqip.db').read_bytes(), self.old_database)
             self.assertEqual((self.data / 'master.key').read_bytes(), b'old-key-paired-with-old-database')
 
         with patch.object(upgrade, 'healthy', side_effect=health):
@@ -129,7 +134,7 @@ class UpgradeSafetyTests(unittest.TestCase):
         self.assertFalse((self.data / 'new-data').exists())
         failed = list(self.state.glob('failed-data-*'))
         self.assertEqual(len(failed), 1)
-        self.assertEqual((failed[0] / 'hqip.db').read_bytes(), b'new-migrated-database')
+        self.assertEqual((failed[0] / 'hqip.db').read_bytes(), self.failed_database)
         self.assertEqual((failed[0] / 'master.key').read_bytes(), b'new-key')
         self.assertEqual(json.loads((self.state / 'state.json').read_text())['phase'], 'rolled-back')
         self.assertTrue(self.running)
@@ -140,7 +145,7 @@ class UpgradeSafetyTests(unittest.TestCase):
                 upgrade.upgrade(self.new, self.state)
         self.assertTrue(self.running)
         self.assertEqual((self.base / 'current').resolve(), self.previous)
-        self.assertEqual((self.data / 'hqip.db').read_bytes(), b'old-database')
+        self.assertEqual((self.data / 'hqip.db').read_bytes(), self.old_database)
 
     def test_invalid_target_manifest_never_stops_service(self):
         (self.new / 'hqip').write_bytes(b'tampered')
@@ -201,6 +206,61 @@ class UpgradeSafetyTests(unittest.TestCase):
         with self.assertRaises((ValueError, RuntimeError)):
             upgrade.rollback(self.state)
         self.assertEqual(self.commands, [])
+
+    def test_activated_database_blocks_rollback_without_marker(self):
+        upgrade.upgrade(self.new, self.state)
+        with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+            db.execute("INSERT INTO metadata VALUES('portal_enabled','true')")
+        activated = (self.data / 'hqip.db').read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'Unsafe rollback refused'):
+            upgrade.rollback(self.state)
+        self.assertFalse(self.running)
+        self.assertEqual((self.base / 'current').resolve(), self.new)
+        self.assertEqual((self.data / 'hqip.db').read_bytes(), activated)
+
+    def test_recovery_hold_or_marker_blocks_rollback(self):
+        upgrade.upgrade(self.new, self.state)
+        with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+            db.execute("INSERT INTO metadata VALUES('portal_recovery_hold','true')")
+        with self.assertRaisesRegex(RuntimeError, 'Unsafe rollback refused'):
+            upgrade.rollback(self.state)
+        self.assertFalse(self.running)
+        with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+            db.execute("DELETE FROM metadata")
+        (self.state / 'portal-stage.json').write_text('{"activated":true}')
+        with self.assertRaisesRegex(RuntimeError, 'Unsafe rollback refused'):
+            upgrade.rollback(self.state)
+
+    def test_activation_during_stop_blocks_rollback(self):
+        upgrade.upgrade(self.new, self.state)
+        def activating_stop(*args):
+            if args[:2] == ('systemctl', 'stop'):
+                with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+                    db.execute("INSERT INTO metadata VALUES('portal_enabled','true')")
+            return self.command(*args)
+        with patch.object(upgrade, 'run', side_effect=activating_stop):
+            with self.assertRaisesRegex(RuntimeError, 'Unsafe rollback refused'):
+                upgrade.rollback(self.state)
+        self.assertFalse(self.running)
+        self.assertEqual((self.base / 'current').resolve(), self.new)
+
+    def test_committed_wal_activation_is_seen(self):
+        upgrade.upgrade(self.new, self.state)
+        with closing(sqlite3.connect(self.data / 'hqip.db')) as db, db:
+            db.execute('PRAGMA journal_mode=WAL')
+            db.execute("INSERT INTO metadata VALUES('portal_enabled','true')")
+            db.commit()
+            with self.assertRaisesRegex(RuntimeError, 'Unsafe rollback refused'):
+                upgrade.rollback(self.state)
+        self.assertFalse(self.running)
+
+    def test_corrupt_current_database_fails_closed(self):
+        upgrade.upgrade(self.new, self.state)
+        (self.data / 'hqip.db').write_bytes(b'cannot-verify-activation')
+        with self.assertRaisesRegex(RuntimeError, 'Unsafe rollback refused'):
+            upgrade.rollback(self.state)
+        self.assertFalse(self.running)
+        self.assertEqual((self.data / 'hqip.db').read_bytes(), b'cannot-verify-activation')
 
 
 if __name__ == '__main__':

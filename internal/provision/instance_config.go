@@ -49,12 +49,13 @@ func instanceConfig(n model.Node, acmeViaCaddy bool, statsSecret string) ([]byte
 	}
 	rules := []string{"reject(0.0.0.0/8)", "reject(10.0.0.0/8)", "reject(100.64.0.0/10)", "reject(127.0.0.0/8)", "reject(169.254.0.0/16)", "reject(172.16.0.0/12)", "reject(192.168.0.0/16)", "reject(224.0.0.0/4)", "reject(240.0.0.0/4)", "reject(::/128)", "reject(::1/128)", "reject(fc00::/7)", "reject(fe80::/10)", "reject(ff00::/8)"}
 	config := map[string]any{
-		"listen":       net.JoinHostPort(n.PublicIP, strconv.Itoa(n.Port)),
-		"auth":         map[string]any{"type": "http", "http": map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d/auth?secret=%s", authPort, statsSecret)}},
-		"trafficStats": map[string]any{"listen": fmt.Sprintf("127.0.0.1:%d", statsPort), "secret": statsSecret},
-		"acl":          map[string]any{"inline": rules},
-		"resolver":     map[string]any{"type": "udp", "udp": map[string]any{"addr": "1.1.1.1:53", "timeout": "4s"}},
-		"outbounds":    []any{map[string]any{"name": "direct", "type": "direct", "direct": map[string]any{"mode": "4", "bindIPv4": n.PublicIP}}},
+		"hqipAdmission": map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d", authPort), "secret": statsSecret},
+		"listen":        net.JoinHostPort(n.PublicIP, strconv.Itoa(n.Port)),
+		"auth":          map[string]any{"type": "http", "http": map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d/auth?secret=%s", authPort, statsSecret)}},
+		"trafficStats":  map[string]any{"listen": fmt.Sprintf("127.0.0.1:%d", statsPort), "secret": statsSecret},
+		"acl":           map[string]any{"inline": rules},
+		"resolver":      map[string]any{"type": "udp", "udp": map[string]any{"addr": "1.1.1.1:53", "timeout": "4s"}},
+		"outbounds":     []any{map[string]any{"name": "direct", "type": "direct", "direct": map[string]any{"mode": "4", "bindIPv4": n.PublicIP}}},
 	}
 	if n.CertificateMode == "cloudflare" {
 		config["tls"] = map[string]any{"cert": p.State + "/certificates/current/cert.pem", "key": p.State + "/certificates/current/key.pem"}

@@ -26,6 +26,13 @@ func (d *Desktop) State() client.View { return d.controller.View() }
 func (d *Desktop) Login(server, user, password string) error {
 	return d.controller.Login(server, user, password)
 }
+func (d *Desktop) LoginBrowser(server string) error {
+	return d.controller.LoginBrowser(server, winclient.OpenBrowser)
+}
+func (d *Desktop) OpenAccount() error {
+	return winclient.OpenBrowser(d.controller.View().ServerURL + "/account")
+}
+func (d *Desktop) CancelLogin()                        { d.controller.CancelLogin() }
 func (d *Desktop) Logout() error                       { return d.controller.Logout() }
 func (d *Desktop) Connect() error                      { return d.controller.Connect() }
 func (d *Desktop) Disconnect() error                   { return d.controller.Disconnect() }

@@ -135,6 +135,12 @@ func (a *Agent) systemdRestart(ctx context.Context) error {
 // Persist the alert and retry throttle before restarting, then only acknowledge
 // when a different systemd invocation proves the previous process has exited.
 func (a *Agent) forceDrainIfOverdue(ctx context.Context, pending map[string]pendingRevocation, reason error) error {
+	a.cacheMu.RLock()
+	portal := a.cache.PortalEnabled
+	a.cacheMu.RUnlock()
+	if portal {
+		return reason
+	} // Admission core closes individual leases; never interrupt other users.
 	now := a.now()
 	if !overdue(pending, now) {
 		return reason

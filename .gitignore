@@ -7,6 +7,9 @@
 *.db-wal
 *.key
 *.pem
+# Public upstream test-only TLS keys, recorded in runtime/hysteria/UPSTREAM.json.
+!runtime/hysteria/app/internal/http/test.key
+!runtime/hysteria/core/internal/integration_tests/test.key
 .env
 web/node_modules/
 web/dist/

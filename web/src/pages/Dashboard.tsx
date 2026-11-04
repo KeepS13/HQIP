@@ -129,7 +129,7 @@ export function Dashboard() {
           }
         />
         <StatCard
-          label="在线登记设备"
+          label="在线凭据身份"
           value={unknown ? "—" : online}
           unit={`/ ${devices.length}`}
           icon={Monitor}
@@ -186,13 +186,13 @@ export function Dashboard() {
             <div>
               <span>
                 <span className="status-dot purple" />
-                已登记设备
+                历史凭据身份
               </span>
               <strong>{devices.length}</strong>
             </div>
           </div>
-          <Link to="/devices" className="panel-bottom-link">
-            管理设备订阅 <ArrowRight size={15} />
+          <Link to="/users" className="panel-bottom-link">
+            管理用户套餐 <ArrowRight size={15} />
           </Link>
         </Panel>
       </div>
@@ -291,7 +291,7 @@ export function Dashboard() {
         )}
       </Panel>
       {(data.alerts || []).length > 0 && (
-        <Panel title="需要关注" subtitle="额度仅提醒，不会限速或断网">
+        <Panel title="需要关注" subtitle="服务器与节点容量提醒；用户套餐额度单独执行">
           <div className="alerts-list">
             {data.alerts.map((alert, i) => (
               <div
@@ -315,11 +315,11 @@ export function Dashboard() {
           <Sparkles size={20} />
         </span>
         <div>
-          <strong>让新设备连接到你的私人网络</strong>
-          <p>为每台设备创建独立订阅，复制链接即可导入 Clash。</p>
+          <strong>为用户开通属于他们的连接</strong>
+          <p>分配套餐与有效期，用户即可登录客户端或创建订阅。</p>
         </div>
-        <Link to="/devices?add=1" className="button button-secondary">
-          创建设备 <ArrowRight size={15} />
+        <Link to="/users" className="button button-secondary">
+          管理用户 <ArrowRight size={15} />
         </Link>
       </div>
     </>
@@ -332,7 +332,7 @@ export function Guide() {
       <PageHeader
         eyebrow="QUICK START"
         title="连接指南"
-        description="添加节点、分配设备，再通过 Windows 客户端或 Clash 连接。"
+        description="添加节点、创建套餐，为用户开通连接权限。"
       />
       <div className="guide-steps">
         <Panel title="01 · 添加服务器" subtitle="准备好可通过 SSH 连接的服务器">
@@ -345,29 +345,29 @@ export function Guide() {
           </p>
           <p>
             支持 Ubuntu 22.04 / 24.04、Debian 12，amd64 / arm64。首次部署需要
-            root 权限，带宽和流量额度只用于记录与提醒。
+            root 权限。服务器与节点的容量指标用于监控，用户套餐限制另行执行。
           </p>
           <Link className="text-link" to="/nodes?add=1">
             添加节点 <ArrowRight size={15} />
           </Link>
         </Panel>
         <Panel
-          title="02 · 创建设备并分配节点"
-          subtitle="电脑、手机分别创建一台登记设备"
+          title="02 · 创建套餐并开通用户"
+          subtitle="每个账户独立累计流量与使用权限"
         >
           <span className="guide-icon green">
             <Monitor size={28} />
           </span>
           <p>
-            打开设备详情，选择允许连接的节点和默认节点。Windows
-            客户端需要先初始化设备账号；账号与控制台管理员相互独立。
+            创建套餐并设置共享带宽、一次性流量、连接上限、可用节点和默认节点。
+            用户在网站首页注册邮箱账号后，由管理员分配套餐并单独设置到期时间。
           </p>
           <p>
-            Clash
-            订阅只包含该设备已分配且验证通过的可用节点。请妥善保存设备密码与订阅链接。
+            套餐修改会同步到已分配用户；已用流量保留。明确选择重新开通后，
+            才会重置本次套餐使用量，历史统计继续保留。
           </p>
-          <Link className="text-link" to="/devices?add=1">
-            创建设备 <ArrowRight size={15} />
+          <Link className="text-link" to="/plans">
+            管理套餐 <ArrowRight size={15} />
           </Link>
         </Panel>
         <Panel
@@ -379,12 +379,12 @@ export function Guide() {
           </span>
           <p>
             在 HQIP Windows
-            客户端填写控制台地址和设备账号，登录后获取节点与规则。选择规则分流或全局代理，按需开启
+            客户端打开系统浏览器，使用邮箱账号登录并授权后获取节点与规则。选择规则分流或全局代理，按需开启
             TUN。手动断开后，配置刷新不会自动重连。
           </p>
           <p>
             使用 Clash
-            时，在「订阅」中导入设备链接，再选择节点。两种客户端都需要当前网络支持
+            时，在用户门户创建并导入订阅，再选择节点。两种客户端都需要当前网络支持
             UDP；TUN 通常需要管理员权限。
           </p>
           <a
@@ -408,23 +408,23 @@ export function Guide() {
               </p>
             </div>
             <div>
-              <strong>在线登记设备</strong>
+              <strong>VPN 连接上限</strong>
               <p>
-                根据独立连接凭据识别并跨节点去重，不代表真实物理设备数量。节点心跳超过
-                30 秒后，在线状态显示为未知。
+                按真实 VPN 连接计算，跨设备、跨节点共享上限。登录网页或客户端不占名额，
+                达到上限时拒绝新连接。
               </p>
             </div>
             <div>
               <strong>客户端连接实例</strong>
               <p>
-                同一设备凭据可能存在多个连接；这项指标反映当前活跃连接数量。
+                同一用户可以建立多个连接。可在用户详情查看并断开当前连接。
               </p>
             </div>
             <div>
               <strong>额度与带宽</strong>
               <p>
-                流量在 80% 和 100%
-                时站内提醒；不会限速、断网。带宽为容量参考值。
+                套餐带宽在用户全部连接间共享，一次性流量不按月重置。
+                用户套餐到期或额度耗尽时停止服务；服务器容量提醒保持独立。
               </p>
             </div>
           </div>
@@ -439,9 +439,9 @@ export function Guide() {
               </p>
             </div>
             <div>
-              <strong>停止某台设备的访问</strong>
+              <strong>停止用户访问</strong>
               <p>
-                在设备详情中停用设备。节点先拒绝新鉴权，再断开已有连接；失联节点显示「待同步」，重连后应用。
+                在用户详情停用账户，撤销该用户连接权限。需要短暂断开时，可以单独断开当前连接。
               </p>
             </div>
             <div>
@@ -453,7 +453,7 @@ export function Guide() {
             <div>
               <strong>节点与控制台短暂断开</strong>
               <p>
-                节点保留最近成功配置，现有连接继续运行；恢复后上报累计流量并同步变更。
+                超过 120 秒无法续租时，节点停止用户连接。恢复后同步累计流量与权限，用户可重新连接。
               </p>
             </div>
           </div>
@@ -462,7 +462,7 @@ export function Guide() {
       <Notice>
         <CheckCircle2 size={15} className="inline-icon" />{" "}
         日常使用前，请确认节点显示「运行正常」，客户端使用兼容 Mihomo
-        的最新稳定版，且设备订阅处于启用状态。
+        的最新稳定版，且用户套餐处于有效状态。
       </Notice>
     </>
   );

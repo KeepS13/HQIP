@@ -22,13 +22,27 @@ type RulesRef struct {
 	URL     string `json:"url"`
 }
 type Profile struct {
-	DeviceID      string   `json:"deviceId"`
-	Name          string   `json:"name"`
-	Enabled       bool     `json:"enabled"`
-	Revision      int64    `json:"revision"`
-	DefaultNodeID string   `json:"defaultNodeId"`
-	Nodes         []Node   `json:"nodes"`
-	Rules         RulesRef `json:"rules"`
+	DeviceID      string       `json:"deviceId"`
+	Name          string       `json:"name"`
+	Enabled       bool         `json:"enabled"`
+	Revision      int64        `json:"revision"`
+	DefaultNodeID string       `json:"defaultNodeId"`
+	Nodes         []Node       `json:"nodes"`
+	Rules         RulesRef     `json:"rules"`
+	Entitlement   *Entitlement `json:"entitlement"`
+}
+
+type Entitlement struct {
+	ID             string    `json:"id"`
+	PlanName       string    `json:"planName"`
+	Status         string    `json:"status"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	QuotaBytes     *int64    `json:"quotaBytes"`
+	UsedBytes      int64     `json:"usedBytes"`
+	ReservedBytes  int64     `json:"reservedBytes"`
+	BandwidthMbps  *float64  `json:"bandwidthMbps"`
+	MaxConnections int       `json:"maxConnections"`
+	Occupied       int       `json:"occupied"`
 }
 type Tokens struct {
 	AccessToken      string    `json:"accessToken"`
@@ -36,7 +50,11 @@ type Tokens struct {
 	AccessExpiresAt  time.Time `json:"accessExpiresAt"`
 	RefreshExpiresAt time.Time `json:"refreshExpiresAt"`
 	SessionID        string    `json:"sessionId"`
-	Device           struct {
+	User             struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	} `json:"user"`
+	Device struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"device"`
@@ -59,18 +77,22 @@ type NodeView struct {
 	Ready bool   `json:"ready"`
 }
 type View struct {
-	LoggedIn      bool       `json:"loggedIn"`
-	ServerURL     string     `json:"serverUrl"`
-	DeviceName    string     `json:"deviceName"`
-	Nodes         []NodeView `json:"nodes"`
-	DefaultNodeID string     `json:"defaultNodeId"`
-	Revision      int64      `json:"revision"`
-	RulesVersion  int64      `json:"rulesVersion"`
-	LastSync      *time.Time `json:"lastSync"`
-	SyncError     string     `json:"syncError"`
+	LoggedIn      bool         `json:"loggedIn"`
+	ServerURL     string       `json:"serverUrl"`
+	DeviceName    string       `json:"deviceName"`
+	Nodes         []NodeView   `json:"nodes"`
+	DefaultNodeID string       `json:"defaultNodeId"`
+	Revision      int64        `json:"revision"`
+	RulesVersion  int64        `json:"rulesVersion"`
+	LastSync      *time.Time   `json:"lastSync"`
+	SyncError     string       `json:"syncError"`
+	Entitlement   *Entitlement `json:"entitlement"`
+	LoginPending  bool         `json:"loginPending"`
+	Connections   Connections  `json:"connections"`
 	Status
 }
 type persisted struct {
+	AccountVersion int     `json:"accountVersion"`
 	ServerURL      string  `json:"serverUrl"`
 	InstallationID string  `json:"installationId"`
 	Tokens         Tokens  `json:"tokens"`

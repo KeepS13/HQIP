@@ -11,7 +11,7 @@ import (
 )
 
 func TestRulesAcceptsSameOriginProfileURL(t *testing.T) {
-	path := "/api/v1/client/rules/" + strings.Repeat("a", 64)
+	path := "/api/v2/client/rules/" + strings.Repeat("a", 64)
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -44,17 +44,17 @@ func TestRulesRejectsCrossOriginAndOtherResourcesWithoutSendingToken(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/v1/client/rules/" + strings.Repeat("a", 64)
+	path := "/api/v2/client/rules/" + strings.Repeat("a", 64)
 	for _, address := range []string{
 		"https://untrusted.invalid" + path,
 		"//untrusted.invalid" + path,
 		strings.Replace(server.URL, "http://", "https://", 1) + path,
-		server.URL + "/api/v1/client/profile",
+		server.URL + "/api/v2/client/profile",
 		server.URL + path + "?token=secret",
 		server.URL + path + "#fragment",
 		server.URL + path + "/../profile",
-		server.URL + "/api/v1/client/rules/%61" + strings.Repeat("a", 63),
-		server.URL + "/api/v1/client/rules/" + strings.Repeat("g", 64),
+		server.URL + "/api/v2/client/rules/%61" + strings.Repeat("a", 63),
+		server.URL + "/api/v2/client/rules/" + strings.Repeat("g", 64),
 	} {
 		if _, err := api.Rules(context.Background(), address); err == nil {
 			t.Errorf("accepted invalid rules address %q", address)

@@ -19,6 +19,7 @@ export interface Node {
   addressId: string;
   revision: number;
   lifecycle: string;
+  capabilities?: string[];
   managed: boolean;
   retirement?: { stopped: boolean };
   dnsMode: string;

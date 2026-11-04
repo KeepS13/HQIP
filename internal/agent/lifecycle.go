@@ -20,6 +20,7 @@ type cachedRetirement struct {
 	ID                string `json:"id"`
 	FinalizeRequested bool   `json:"finalizeRequested"`
 	Stopped           bool   `json:"stopped"`
+	StoppedAt         int64  `json:"stoppedAt,omitempty"`
 	Final             bool   `json:"final"`
 }
 
@@ -131,6 +132,7 @@ func (a *Agent) progressRetirement(ctx context.Context) error {
 		a.cacheMu.Lock()
 		next := cloneCache(a.cache)
 		next.Retirement.Stopped = true
+		next.Retirement.StoppedAt = a.now().UnixNano()
 		for id := range next.Pending {
 			finishRevoke(&next, id, a.now())
 		}
@@ -144,8 +146,14 @@ func (a *Agent) progressRetirement(ctx context.Context) error {
 			return err
 		}
 		retirement.Stopped = true
+		retirement.StoppedAt = a.now().UnixNano()
 	}
 	if retirement.FinalizeRequested && !retirement.Final {
+		a.leaseReportMu.Lock()
+		defer a.leaseReportMu.Unlock()
+		if err := a.flushRetirementLeases(ctx, retirement); err != nil {
+			return err
+		}
 		pending, err := a.ledger.batch()
 		if err != nil {
 			return err
@@ -182,7 +190,64 @@ func (a *Agent) acknowledgeRetirement(ctx context.Context, reported *model.Retir
 	}
 	a.lifecycleMu.Lock()
 	defer a.lifecycleMu.Unlock()
+	a.leaseReportMu.Lock()
+	defer a.leaseReportMu.Unlock()
+	a.cacheMu.RLock()
+	retirement := a.cache.Retirement
+	a.cacheMu.RUnlock()
+	if err := a.flushRetirementLeases(ctx, retirement); err != nil {
+		return err
+	}
 	if err := a.finishRetirement(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *Agent) flushRetirementLeases(ctx context.Context, retirement *cachedRetirement) error {
+	a.admissionMu.Lock()
+	defer a.admissionMu.Unlock()
+	if err := a.replayLeaseFinals(ctx); err != nil {
+		return err
+	}
+	a.ledger.mu.Lock()
+	var total, pending, unclosed int
+	err := a.ledger.db.QueryRow("SELECT COUNT(*),COALESCE(SUM(CASE WHEN closed=1 AND dirty=1 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN closed=0 THEN 1 ELSE 0 END),0) FROM lease_usage").Scan(&total, &pending, &unclosed)
+	a.ledger.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if pending > 0 {
+		return errors.New("节点最终连接用量尚未确认，保留 Agent 继续补报")
+	}
+	// A stopped process may have local HTTP handlers still delivering its final
+	// message. Wait beyond their request timeout before declaring no more finals.
+	if total > 0 && retirement != nil && retirement.StoppedAt == 0 {
+		a.cacheMu.Lock()
+		next := cloneCache(a.cache)
+		next.Retirement.StoppedAt = a.now().UnixNano()
+		err = a.ledger.saveCache(next)
+		if err == nil {
+			a.cache = next
+		}
+		a.cacheMu.Unlock()
+		if err != nil {
+			return err
+		}
+		return errors.New("等待已停止内核的最后连接用量到达")
+	}
+	if total > 0 && retirement != nil && a.now().Sub(time.Unix(0, retirement.StoppedAt)) < 5*time.Second {
+		return errors.New("等待已停止内核的最后连接用量到达")
+	}
+	if unclosed > 0 {
+		a.cacheMu.Lock()
+		next := cloneCache(a.cache)
+		next.Warning = "内核已停止，但部分连接未提供最终报告；其预留额度仍保守保留，账本已归档待核对"
+		err = a.ledger.saveCache(next)
+		if err == nil {
+			a.cache = next
+		}
+		a.cacheMu.Unlock()
 		return err
 	}
 	return nil

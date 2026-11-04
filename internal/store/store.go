@@ -223,6 +223,18 @@ func (s *Store) ReconcileRestore() error {
 	if _, err = tx.Exec("UPDATE client_sessions SET revoked=1"); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(`UPDATE portal_sessions SET revoked=1;
+UPDATE portal_authorizations SET consumed=1;
+UPDATE portal_leases SET revoked=1;
+DELETE FROM portal_credentials;
+UPDATE portal_users SET subscription_hash='',subscription_secret='',revision=revision+1;`); err != nil {
+		return err
+	}
+	for key, value := range map[string]string{"portal_recovery_hold": "true", "portal_recovery_epoch": NewID(), "portal_recovery_started": fmt.Sprint(s.Now().Unix())} {
+		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {
+			return err
+		}
+	}
 	if _, err = tx.Exec("UPDATE device_config SET revision=MAX(revision+1,?)", s.Now().UnixMilli()); err != nil {
 		return err
 	}

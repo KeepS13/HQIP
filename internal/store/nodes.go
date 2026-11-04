@@ -284,6 +284,7 @@ func (s *Store) ResolveAgent(token string) (string, error) {
 
 func (s *Store) Desired(id string) (model.AgentDesired, error) {
 	var result model.AgentDesired
+	result.PortalEnabled = s.PortalEnabled()
 	result.Devices = []model.AgentDevice{}
 	var lifecycle string
 	err := s.DB.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", id).Scan(&result.Revision, &lifecycle)
@@ -319,6 +320,10 @@ WHERE c.node_id=? ORDER BY c.device_id`, lifecycle, ProbeID(id), id)
 			return result, secretError(err)
 		}
 		result.Devices = append(result.Devices, d)
+		if result.PortalEnabled && d.ID != ProbeID(id) {
+			result.Devices[len(result.Devices)-1].Enabled = false
+			result.Devices[len(result.Devices)-1].RevokeAfterSeconds = 0
+		}
 	}
 	err = rows.Err()
 	rows.Close()

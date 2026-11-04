@@ -93,10 +93,11 @@ type AgentRemovalStatus struct {
 }
 
 type AgentDesired struct {
-	Revision    int64              `json:"revision"`
-	Devices     []AgentDevice      `json:"devices"`
-	Retirement  *AgentRetirement   `json:"retirement,omitempty"`
-	Certificate *CertificateBundle `json:"certificate,omitempty"`
+	PortalEnabled bool               `json:"portalEnabled"`
+	Revision      int64              `json:"revision"`
+	Devices       []AgentDevice      `json:"devices"`
+	Retirement    *AgentRetirement   `json:"retirement,omitempty"`
+	Certificate   *CertificateBundle `json:"certificate,omitempty"`
 }
 
 // Bucket counters are cumulative for a fixed UTC Unix-second interval start.

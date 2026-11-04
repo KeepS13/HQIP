@@ -74,19 +74,19 @@ func waitState(t *testing.T, c *Controller, want string) {
 func setupClient(t *testing.T) (*Controller, *fakeEngine, func(Profile)) {
 	t.Helper()
 	var mu sync.Mutex
-	p := Profile{DeviceID: "device", Name: "computer", Enabled: true, Revision: 1, DefaultNodeID: "A", Nodes: []Node{{ID: "A", Name: "A", Ready: true}, {ID: "B", Name: "B", Ready: true}}}
+	p := Profile{Entitlement: &Entitlement{Status: "active", ExpiresAt: time.Now().Add(time.Hour), MaxConnections: 2}, DeviceID: "device", Name: "computer", Enabled: true, Revision: 1, DefaultNodeID: "A", Nodes: []Node{{ID: "A", Name: "A", Ready: true}, {ID: "B", Name: "B", Ready: true}}}
 	bundle := rules.Default()
 	data, _ := rules.Canonical(bundle)
 	hash, _ := rules.Hash(bundle)
-	p.Rules = RulesRef{Version: 1, Hash: hash, URL: "/api/v1/client/rules/" + hash}
+	p.Rules = RulesRef{Version: 1, Hash: hash, URL: "/api/v2/client/rules/" + hash}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch r.URL.Path {
-		case "/api/v1/client/profile":
+		case "/api/v2/client/profile":
 			w.Header().Set("ETag", time.Now().String())
 			_ = json.NewEncoder(w).Encode(p)
-		case "/api/v1/client/rules/" + hash:
+		case "/api/v2/client/rules/" + hash:
 			w.Write(data)
 		default:
 			w.Write([]byte(`{"ok":true}`))
@@ -109,6 +109,7 @@ func setupClient(t *testing.T) (*Controller, *fakeEngine, func(Profile)) {
 	return c, e, func(next Profile) {
 		mu.Lock()
 		defer mu.Unlock()
+		next.Entitlement = p.Entitlement
 		next.Rules = p.Rules
 		next.DeviceID = p.DeviceID
 		next.Enabled = true
@@ -139,13 +140,13 @@ func TestFailedDefaultStopsWithoutFallback(t *testing.T) {
 	e.mu.Lock()
 	e.fail = true
 	e.mu.Unlock()
-	set(Profile{Revision: 2, DefaultNodeID: "B", Nodes: []Node{{ID: "A", Ready: true}, {ID: "B", Ready: true}}})
+	set(Profile{Revision: 2, DefaultNodeID: "B", Nodes: []Node{{ID: "B", Ready: true}}})
 	if err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, c, "failed")
 	v := c.View()
-	if !v.ConnectionIntent || v.ActualNodeID != "" || v.DesiredNodeID != "B" || v.ProcessedConfigRevision != 2 {
+	if v.ConnectionIntent || v.ActualNodeID != "" || v.DesiredNodeID != "B" || v.ProcessedConfigRevision != 2 {
 		t.Fatalf("bad failed state %+v", v)
 	}
 	e.mu.Lock()
@@ -175,7 +176,7 @@ func TestUserDisconnectWinsConfigUpdateApply(t *testing.T) {
 	e.mu.Lock()
 	e.blocked = make(chan struct{})
 	e.mu.Unlock()
-	set(Profile{Revision: 2, DefaultNodeID: "B", Nodes: []Node{{ID: "A", Ready: true}, {ID: "B", Ready: true}}})
+	set(Profile{Revision: 2, DefaultNodeID: "B", Nodes: []Node{{ID: "B", Ready: true}}})
 	if err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -203,11 +204,11 @@ func TestStaleSyncResponsesCannotMutateReplacementSession(t *testing.T) {
 			started := make(chan struct{})
 			release := make(chan struct{})
 			oldServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/client/refresh" {
+				if r.URL.Path == "/api/v2/client/refresh" {
 					w.WriteHeader(http.StatusUnauthorized)
 					return
 				}
-				if r.URL.Path != "/api/v1/client/profile" {
+				if r.URL.Path != "/api/v2/client/profile" {
 					t.Errorf("unexpected request %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
 					return
@@ -278,7 +279,7 @@ func TestManualSelectionDuringProfileRefreshWinsDefaultChange(t *testing.T) {
 	p.Revision = 2
 	p.DefaultNodeID = "B"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/client/profile" {
+		if r.URL.Path != "/api/v2/client/profile" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -298,20 +299,13 @@ func TestManualSelectionDuringProfileRefreshWinsDefaultChange(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- c.Refresh() }()
 	<-started
-	selected := make(chan error, 1)
-	go func() { selected <- c.Select("B") }()
-	deadline := time.Now().Add(3 * time.Second)
-	for c.mu.TryLock() {
-		c.mu.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("manual node selection did not begin")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	close(release)
-	if err := <-selected; err != nil {
+	// Selection and credential persistence must finish while HTTP is still
+	// blocked; observing a contended mutex depended on the old network-lock bug.
+	if err := c.Select("B"); err != nil {
+		close(release)
 		t.Fatal(err)
 	}
+	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +321,7 @@ func TestConcurrentReportsUseCurrentStatus(t *testing.T) {
 	firstArrived := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/client/status" {
+		if r.URL.Path != "/api/v2/client/status" {
 			t.Errorf("unexpected request %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return

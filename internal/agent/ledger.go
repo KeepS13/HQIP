@@ -80,7 +80,12 @@ CREATE TABLE IF NOT EXISTS usage (
  PRIMARY KEY(kind,start,device_id)) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS usage_dirty ON usage(dirty,kind,start);
 CREATE TABLE IF NOT EXISTS totals (
- device_id TEXT PRIMARY KEY, upload INTEGER NOT NULL, download INTEGER NOT NULL);`)
+ device_id TEXT PRIMARY KEY, upload INTEGER NOT NULL, download INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS lease_usage (
+ lease_id TEXT PRIMARY KEY, upload INTEGER NOT NULL, download INTEGER NOT NULL,
+ closed INTEGER NOT NULL, applied_rate INTEGER NOT NULL, version INTEGER NOT NULL,
+ dirty INTEGER NOT NULL, received INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt INTEGER NOT NULL DEFAULT 0);`)
 	if err != nil {
 		_ = db.Close()
 		return nil, err

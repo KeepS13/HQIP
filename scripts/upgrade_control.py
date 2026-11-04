@@ -5,6 +5,7 @@ with sourceSHA and SHA-256 hashes of every payload file. Rollback preserves the
 failed database and restores the exact stopped database/master-key snapshot.
 """
 from __future__ import annotations
+from contextlib import closing
 
 import argparse
 import hashlib
@@ -13,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import subprocess
 import tarfile
 import time
@@ -86,6 +88,9 @@ def rollback(state):
     if not (snapshot / 'hqip.db').is_file() or not (snapshot / 'master.key').is_file():
         raise ValueError('Backup is incomplete')
     run('systemctl', 'stop', SERVICE)
+    # Check after stop: an administrator could activate between a live preflight
+    # and systemd stopping the controller. Never rewind accounting or old rights.
+    assert_pre_activation(state)
     failure = state / ('failed-data-' + str(time.time_ns()))
     shutil.copytree(DATA, failure)
     # DATA is fixed, never derived from user input. Retain the failed copy first.
@@ -100,6 +105,34 @@ def rollback(state):
     healthy()
     info['phase'] = 'rolled-back'
     (state / 'state.json').write_text(json.dumps(info, indent=2) + '\n')
+
+
+def assert_pre_activation(state):
+    message = ('Unsafe rollback refused; controller remains stopped and current data is preserved. '
+               'Stop all user node connections, retain current databases/ledgers, and coordinate recovery manually.')
+    try:
+        marker = state / 'portal-stage.json'
+        if marker.exists() or marker.is_symlink():
+            if marker.is_symlink() or not marker.is_file():
+                raise ValueError('Unsafe portal marker')
+            stage = json.loads(marker.read_text())
+            if not isinstance(stage, dict) or not isinstance(stage.get('activated'), bool):
+                raise ValueError('Invalid portal marker')
+            if stage['activated']:
+                raise ValueError('Activation recorded')
+        database = DATA / 'hqip.db'
+        if database.is_symlink() or not database.is_file():
+            raise ValueError('Missing current database')
+        # mode=ro includes committed WAL; immutable=1 would miss recent activation.
+        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True, timeout=5)) as db:
+            flags = dict(db.execute("SELECT key,value FROM metadata WHERE key IN ('portal_enabled','portal_recovery_hold')"))
+            for value in flags.values():
+                if value not in ('true', 'false'):
+                    raise ValueError('Unrecognized activation flag')
+            if any(value == 'true' for value in flags.values()):
+                raise ValueError('Portal activated or recovery hold set')
+    except (OSError, ValueError, sqlite3.Error) as error:
+        raise RuntimeError(message) from error
 
 
 def upgrade(release, state):
