@@ -3,12 +3,10 @@ package control
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
@@ -155,26 +153,15 @@ func TestPortalAuthorizationRechecksBrowserAfterMiddleware(t *testing.T) {
 	}
 }
 
-func TestPortalTurnstileCSPOnlyOnAuthenticationPages(t *testing.T) {
+// Authentication pages and their CSP are served by the separate static sites.
+func TestAPISurfacesDoNotServeFrontend(t *testing.T) {
 	s, _ := newServer(t)
-	s.opts.Assets = fstest.MapFS{"index.html": {Data: []byte("portal")}, "favicon.svg": {Data: []byte("<svg/>")}}
-	for _, surface := range []struct {
-		name string
-		h    http.Handler
-	}{{"public", s.PublicHandler()}, {"admin", s.AdminHandler()}} {
-		for _, path := range []string{"/", "/login", "/register", "/authorize?request=test", "/account", "/nodes", "/api/v1/user/config", "/admin", "/favicon.svg"} {
-			w := request(surface.h, "GET", path, nil, "", "")
-			u, _ := url.Parse(path)
-			want := surface.name == "public" && (u.Path == "/login" || u.Path == "/register" || u.Path == "/authorize")
-			if got := strings.Contains(w.Header().Get("Content-Security-Policy"), "https://challenges.cloudflare.com"); got != want {
-				t.Fatalf("%s %s unexpected CAPTCHA CSP: %v", surface.name, path, got)
+	for _, h := range []http.Handler{s.PublicHandler(), s.AdminHandler()} {
+		for _, path := range []string{"/", "/login", "/register", "/authorize?request=test", "/account", "/nodes", "/admin", "/favicon.svg", "/assets/test.js"} {
+			w := request(h, "GET", path, nil, "", "")
+			if w.Code != 404 || strings.Contains(w.Header().Get("Content-Security-Policy"), "challenges.cloudflare.com") {
+				t.Fatalf("frontend exposed by API: %s %d", path, w.Code)
 			}
 		}
-	}
-	if w := request(s.PublicHandler(), "GET", "/favicon.svg", nil, "", ""); w.Code != 200 || w.Body.String() != "<svg/>" {
-		t.Fatal("exact favicon asset unavailable")
-	}
-	if w := request(s.PublicHandler(), "GET", "/favicon-other.svg", nil, "", ""); w.Code != 404 {
-		t.Fatal("favicon route broadened static allowlist")
 	}
 }

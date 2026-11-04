@@ -154,7 +154,7 @@ func normalizeEmail(v string) (string, error) {
 	return v, nil
 }
 func portalPassword(v string) bool {
-	return utf8.ValidString(v) && utf8.RuneCountInString(v) >= 12 && len(v) <= 1024
+	return utf8.ValidString(v) && utf8.RuneCountInString(v) >= 6 && len(v) <= 1024
 }
 func (s *Store) RegisterPortal(email, password string) (model.PortalUser, error) {
 	var u model.PortalUser
@@ -163,7 +163,7 @@ func (s *Store) RegisterPortal(email, password string) (model.PortalUser, error)
 		return u, err
 	}
 	if !portalPassword(password) {
-		return u, errors.New("密码须为12至1024字节")
+		return u, errors.New("密码至少需要 6 个字符，且不能超过 1024 字节")
 	}
 	u = model.PortalUser{ID: NewID(), Email: email, Enabled: true, CreatedAt: s.Now().UTC()}
 	hash := secure.HashPassword(password)
@@ -346,7 +346,7 @@ func (s *Store) SetPortalEnabled(id string, enabled bool, expected ...int64) err
 }
 func (s *Store) PortalPassword(id, current, next string, admin bool) error {
 	if !portalPassword(next) {
-		return errors.New("密码须为12至1024字节")
+		return errors.New("密码至少需要 6 个字符，且不能超过 1024 字节")
 	}
 	var old string
 	if err := s.DB.QueryRow("SELECT password FROM portal_users WHERE id=?", id).Scan(&old); err != nil {

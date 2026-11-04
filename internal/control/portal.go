@@ -64,7 +64,7 @@ type portalHandler func(http.ResponseWriter, *http.Request, string, string)
 
 func (s *Server) portalOrigin(r *http.Request) bool {
 	got, err := url.Parse(r.Header.Get("Origin"))
-	want, e := url.Parse(s.opts.PublicURL)
+	want, e := url.Parse(s.opts.UserOrigin)
 	return err == nil && e == nil && got.Scheme == want.Scheme && got.Host == want.Host && got.Path == "" && got.RawQuery == "" && got.Fragment == "" && got.User == nil
 }
 func portalCookie(r *http.Request) string {
@@ -152,7 +152,7 @@ func (s *Server) portalTurnstileSettings(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if len(b.AllowedHostnames) == 0 {
-			base, _ := url.Parse(s.opts.PublicURL)
+			base, _ := url.Parse(s.opts.UserOrigin)
 			b.AllowedHostnames = []string{base.Hostname()}
 		}
 		v, err := s.Store.SaveTurnstile(b.SiteKey, b.AllowedHostnames, b.SecretKey, b.ExpectedRevision)
@@ -201,7 +201,7 @@ func (s *Server) verifyTurnstile(ctx context.Context, token, ip, action string) 
 	if json.NewDecoder(io.LimitReader(res.Body, 32768)).Decode(&answer) != nil {
 		return false
 	}
-	base, _ := url.Parse(s.opts.PublicURL)
+	base, _ := url.Parse(s.opts.UserOrigin)
 	now := s.Store.Now()
 	allowed := settings.AllowedHostnames
 	if len(allowed) == 0 {
@@ -435,7 +435,7 @@ func (s *Server) nativeBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, expires, err := s.Store.BeginPortalAuthorization(b.CodeChallenge, b.RedirectURI, b.State, b.ClientName, b.InstallationID)
-	portalResult(w, map[string]any{"requestId": id, "authorizationUrl": s.opts.PublicURL + "/authorize?request=" + id, "expiresAt": expires}, err)
+	portalResult(w, map[string]any{"requestId": id, "authorizationUrl": s.opts.UserOrigin + "/authorize?request=" + id, "expiresAt": expires}, err)
 }
 func (s *Server) nativeToken(w http.ResponseWriter, r *http.Request) {
 	if !s.allowLogin("native-token:" + clientIP(r)) {

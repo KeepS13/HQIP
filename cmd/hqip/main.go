@@ -24,7 +24,6 @@ import (
 	"github.com/KeepS13/HQIP/internal/rules"
 	"github.com/KeepS13/HQIP/internal/secure"
 	"github.com/KeepS13/HQIP/internal/store"
-	"github.com/KeepS13/HQIP/web"
 )
 
 func main() {
@@ -55,8 +54,9 @@ func serve(args []string) error {
 	dir := f.String("data-dir", "/var/lib/hqip", "数据目录")
 	listen := f.String("listen", "127.0.0.1:8080", "监听地址")
 	publicListen := f.String("public-listen", "127.0.0.1:8081", "仅客户端及 Agent API 监听地址")
-	adminOrigin := f.String("admin-origin", "http://127.0.0.1:8080", "管理员页面根地址（HTTPS 或本地 HTTP）")
-	public := f.String("public-url", "", "公网 HTTPS 地址")
+	adminOrigin := f.String("admin-origin", "http://127.0.0.1:5173", "管理员页面根地址（HTTPS 或本地 HTTP）")
+	public := f.String("public-url", "", "API 公网 HTTPS 地址")
+	userOrigin := f.String("user-origin", "http://127.0.0.1:5174", "用户页面根地址")
 	artifacts := f.String("artifact-dir", "/opt/hqip/artifacts", "节点安装文件目录")
 	if err := f.Parse(args); err != nil {
 		return err
@@ -69,6 +69,9 @@ func serve(args []string) error {
 		return errors.New("公网网站必须使用 HTTPS")
 	}
 	if err := validateAdminOrigin(*adminOrigin); err != nil {
+		return err
+	}
+	if err := validateAdminOrigin(*userOrigin); err != nil {
 		return err
 	}
 	for _, address := range []string{*listen, *publicListen} {
@@ -88,7 +91,7 @@ func serve(args []string) error {
 	if _, err = db.Rules(); err != nil {
 		return err
 	}
-	s := control.New(db, control.Options{PublicURL: strings.TrimRight(*public, "/"), AdminOrigin: strings.TrimRight(*adminOrigin, "/"), ArtifactDir: *artifacts, Assets: web.Assets()})
+	s := control.New(db, control.Options{PublicURL: strings.TrimRight(*public, "/"), AdminOrigin: strings.TrimRight(*adminOrigin, "/"), UserOrigin: strings.TrimRight(*userOrigin, "/"), ArtifactDir: *artifacts})
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	adminListener, err := net.Listen("tcp", *listen)

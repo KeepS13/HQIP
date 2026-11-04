@@ -1,0 +1,56 @@
+from contextlib import closing
+from pathlib import Path
+from unittest.mock import patch
+import hashlib,json,sqlite3,tempfile,unittest
+from contextlib import ExitStack
+import render_domains as render
+import upgrade_domains as deploy
+import upgrade_control as control
+
+class DomainReleaseTests(unittest.TestCase):
+ def test_nginx_static_and_api_separation(self):
+  text=render.render()
+  self.assertEqual(text, (Path(__file__).resolve().parents[1]/'deploy/nginx-hqip.conf').read_text(encoding='utf-8'))
+  for host in [render.USER,render.ADMIN,render.API]:self.assertEqual(text.count('server_name '+host+';'),2)
+  self.assertNotIn('$request_uri\'',text)
+  self.assertIn('return 410;',text)
+  self.assertIn('root /opt/hqip-control/current/user-web',text)
+  self.assertIn('root /opt/hqip-control/current/admin-web',text)
+  self.assertIn('real_ip_header CF-Connecting-IP',text)
+  self.assertNotIn('*.5202345.xyz',text)
+  self.assertIn('map $request_uri $hqip_user_csp',text)
+  self.assertIn('~^/(login|register|authorize)(\\?|$)',text)
+ def test_retiring_feishu_preserves_business_usage(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=Path(folder)
+   with closing(sqlite3.connect(root/'hqip.db')) as d,d:
+    d.executescript("CREATE TABLE feishu_settings(enabled,webhook,secret);INSERT INTO feishu_settings VALUES(1,'encrypted','encrypted');CREATE TABLE notifications(status,claim,claim_until,next_attempt);INSERT INTO notifications VALUES('retry','x',99,99);CREATE TABLE usage(bytes);INSERT INTO usage VALUES(12345);")
+   with patch.object(control,'DATA',root):deploy.disable_feishu()
+   with closing(sqlite3.connect(root/'hqip.db')) as d:
+    self.assertEqual(d.execute('SELECT * FROM feishu_settings').fetchone(),(0,'',''))
+    self.assertEqual(d.execute('SELECT status FROM notifications').fetchone(),('cancelled',))
+    self.assertEqual(d.execute('SELECT bytes FROM usage').fetchone(),(12345,))
+ def test_state_must_be_direct_private_backup(self):
+  for path in [Path('relative'),Path('/tmp/random'),Path('/root/backups/nested/state')]:
+   with self.assertRaises(ValueError):deploy.check_state(path)
+ def test_rollback_keeps_new_accounting_and_disables_robot(self):
+  with tempfile.TemporaryDirectory() as folder,ExitStack() as mocks:
+   root=Path(folder).resolve();data=root/'data';data.mkdir();base=root/'base';base.mkdir();backups=root/'backups';backups.mkdir();state=backups/'release';state.mkdir()
+   previous=base/'previous';previous.mkdir();release=base/'release';release.mkdir();(base/'current').symlink_to(release,target_is_directory=True)
+   key=data/'master.key';key.write_bytes(b'original-paired-key')
+   with closing(sqlite3.connect(data/'hqip.db')) as db,db:
+    db.executescript("CREATE TABLE metadata(key,value);INSERT INTO metadata VALUES('schema_version','4');CREATE TABLE usage(bytes);INSERT INTO usage VALUES(987654);CREATE TABLE feishu_settings(enabled,webhook,secret);INSERT INTO feishu_settings VALUES(1,'ciphertext','ciphertext');CREATE TABLE notifications(status,claim,claim_until,next_attempt);INSERT INTO notifications VALUES('pending','x',99,99);")
+   site=root/'nginx.conf';site.write_text('new-route');unit=root/'service';unit.write_text('new-unit');(state/'nginx.before.conf').write_text('old-route');(state/'unit.before.service').write_text('old-unit')
+   (state/'domains-state.json').write_text(json.dumps({'previous':str(previous),'release':str(release),'masterSHA256':hashlib.sha256(key.read_bytes()).hexdigest()}))
+   for obj,name,value in [(control,'DATA',data),(control,'BASE',base),(deploy,'BACKUPS',backups),(deploy,'SITE',site),(deploy,'UNIT',unit),(deploy,'PREP',root/'prepare')]:mocks.enter_context(patch.object(obj,name,value))
+   mocks.enter_context(patch.object(control,'verify_release',return_value=(previous,{})));run=mocks.enter_context(patch.object(control,'run'));mocks.enter_context(patch.object(control,'healthy'));point=mocks.enter_context(patch.object(control,'point_current'))
+   deploy.rollback(state)
+   point.assert_called_once_with(previous)
+   self.assertEqual(site.read_text(),'old-route');self.assertEqual(unit.read_text(),'old-unit')
+   with closing(sqlite3.connect(data/'hqip.db')) as db:
+    self.assertEqual(db.execute('SELECT bytes FROM usage').fetchone(),(987654,));self.assertEqual(db.execute('SELECT * FROM feishu_settings').fetchone(),(0,'',''))
+   key.write_bytes(b'unexpected-key');run.reset_mock()
+   with self.assertRaisesRegex(ValueError,'Master key changed'):deploy.rollback(state)
+   run.assert_not_called()
+
+if __name__=='__main__':unittest.main()

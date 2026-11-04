@@ -254,7 +254,7 @@ func (p *ProxyManager) Enable(port int) error {
 		if err != nil {
 			return err
 		}
-		lease := proxyLease{PID: os.Getpid(), Stamp: stamp, Before: before, Owned: map[string]proxyValue{"ProxyEnable": {Present: true, Kind: registry.DWORD, Number: 1}, "ProxyServer": {Present: true, Kind: registry.SZ, Text: fmt.Sprintf("127.0.0.1:%d", port)}, "ProxyOverride": {Present: true, Kind: registry.SZ, Text: "<local>"}, "AutoConfigURL": {}}}
+		lease := proxyLease{PID: os.Getpid(), Stamp: stamp, Before: before, Owned: map[string]proxyValue{"ProxyEnable": {Present: true, Kind: registry.DWORD, Number: 1}, "ProxyServer": {Present: true, Kind: registry.SZ, Text: fmt.Sprintf("127.0.0.1:%d", port)}, "ProxyOverride": {Present: true, Kind: registry.SZ, Text: "<local>;api-hqip.5202345.xyz;hqip.5202345.xyz"}, "AutoConfigURL": {}}}
 		if err = p.save(lease); err != nil {
 			return err
 		}

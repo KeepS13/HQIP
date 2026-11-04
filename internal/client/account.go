@@ -108,7 +108,7 @@ func (a *API) BrowserLogin(ctx context.Context, installationID, clientName strin
 	}
 	origin, _ := url.Parse(a.base)
 	destination, e := url.Parse(auth.AuthorizationURL)
-	if e != nil || destination.Scheme != origin.Scheme || !strings.EqualFold(destination.Host, origin.Host) || destination.User != nil || destination.Fragment != "" {
+	if e != nil || !trustedAuthorizationOrigin(origin, destination) || destination.User != nil || destination.Fragment != "" || destination.Opaque != "" {
 		return errors.New("拒绝跳转到不受信任的授权页面")
 	}
 	result := make(chan string, 1)
@@ -339,4 +339,15 @@ func (c *Controller) accountWatchdog(ctx context.Context) {
 		}
 		c.routeMu.Unlock()
 	}
+}
+
+// Official deployments separate API and browser origins. Other servers retain same-origin authorization.
+func trustedAuthorizationOrigin(api, page *url.URL) bool {
+	if api == nil || page == nil {
+		return false
+	}
+	if page.Scheme == api.Scheme && strings.EqualFold(page.Host, api.Host) {
+		return true
+	}
+	return api.Scheme == "https" && strings.EqualFold(api.Host, "api-hqip.5202345.xyz") && page.Scheme == "https" && strings.EqualFold(page.Host, "hqip.5202345.xyz") && page.Path == "/authorize"
 }

@@ -78,7 +78,7 @@ func (s *Server) desktopRelease() (desktopRelease, error) {
 		return release, errors.New("desktop artifact checksum mismatch")
 	}
 	release.Platform = "windows-amd64"
-	release.URL = "/downloads/" + desktopFilename
+	release.URL = s.opts.PublicURL + "/downloads/" + desktopFilename
 	if desktopCache.files == nil {
 		desktopCache.files = map[string]verifiedDesktop{}
 	}

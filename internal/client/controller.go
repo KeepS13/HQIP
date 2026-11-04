@@ -42,7 +42,7 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		return nil, e
 	}
 	c := &Controller{dir: dir, platform: platform, engine: engine, wake: make(chan struct{}, 1)}
-	c.saved = persisted{InstallationID: randomID(), Mode: "rule", ServerURL: "https://hqip.5202345.xyz"}
+	c.saved = persisted{InstallationID: randomID(), Mode: "rule", ServerURL: "https://api-hqip.5202345.xyz"}
 	if encrypted, e := os.ReadFile(filepath.Join(dir, "session.dat")); e == nil {
 		b, e := platform.Unprotect(encrypted)
 		if e != nil {
@@ -51,6 +51,9 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		if e = json.Unmarshal(b, &c.saved); e != nil {
 			return nil, e
 		}
+	}
+	if c.saved.ServerURL == "https://hqip.5202345.xyz" || c.saved.ServerURL == "https://hqip.5202345.xyz/" {
+		c.saved.ServerURL = "https://api-hqip.5202345.xyz"
 	}
 	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{RunState: "disconnected", Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, CoreVersion: CoreVersion}}
 	if c.saved.AccountVersion != 2 {

@@ -42,8 +42,9 @@ def main():
     OUT.mkdir(exist_ok=True)
     if not args.skip_web:
         npm = "npm.cmd" if os.name == "nt" else "npm"
-        run([npm, "--prefix", "web", "ci"])
-        run([npm, "--prefix", "web", "run", "build"])
+        for frontend in ["admin-web", "user-web"]:
+            run([npm, "--prefix", frontend, "ci"])
+            run([npm, "--prefix", frontend, "run", "build"])
     if not args.skip_go:
         for arch in ["amd64", "arm64"]:
             env = dict(os.environ, GOOS="linux", GOARCH=arch, CGO_ENABLED="0")

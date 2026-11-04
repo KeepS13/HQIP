@@ -13,7 +13,7 @@
 .env
 web/node_modules/
 web/dist/
-!web/dist/.gitkeep
+web/*.tsbuildinfo
 coverage.out
 *.exe
 __pycache__/
@@ -23,3 +23,10 @@ desktop/frontend/dist/
 desktop/frontend/*.tsbuildinfo
 desktop/*.exe
 desktop/*.syso
+
+admin-web/node_modules/
+admin-web/dist/
+admin-web/*.tsbuildinfo
+user-web/node_modules/
+user-web/dist/
+user-web/*.tsbuildinfo

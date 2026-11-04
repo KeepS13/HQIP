@@ -376,7 +376,6 @@ func TestNotificationStoppedCertificateAndCounterOverflow(t *testing.T) {
 func TestNotificationCollectorRetirementCancelsInsteadOfRecovery(t *testing.T) {
 	s, now := fixture(t)
 	v, a, _ := serverPair(t, s)
-	enableFeishu(t, s)
 	if err := s.Report(a.ID, model.AgentReport{CoreHealthy: true, Metrics: model.Metrics{DiskTotal: 1 << 30, DiskUsed: (1 << 30) - (128 << 20)}}); err != nil {
 		t.Fatal(err)
 	}
@@ -387,23 +386,24 @@ func TestNotificationCollectorRetirementCancelsInsteadOfRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		evaluate(t, s, cs...)
+		if err := s.EvaluateAlerts(cs); err != nil {
+			t.Fatal(err)
+		}
 	}
 	scan()
-	delivered(t, s, claim(t, s)) // Disk and certificate first-enable summary.
 	*now = now.Add(60 * time.Second)
 	scan()
-	delivered(t, s, claim(t, s)) // Confirmed heartbeat outage.
 	notificationExec(t, s, "UPDATE nodes SET lifecycle='deleted',deleted_at=? WHERE json_extract(config,'$.serverId')=?", now.Unix(), v.ID)
 	notificationExec(t, s, "UPDATE servers SET deleted_at=? WHERE id=?", now.Unix(), v.ID)
 	scan()
 	*now = now.Add(time.Minute)
 	scan()
-	if claim(t, s) != nil {
-		t.Fatal("retirement generated a false recovery")
+	items, err := s.ListAlerts(1, 100, "", "", "", "", false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, r := range notifications(t, s) {
-		if r.Category == "recovery" {
+	for _, r := range items.Items {
+		if r.Status == "resolved" {
 			t.Fatalf("retirement must not claim healthy: %+v", r)
 		}
 	}

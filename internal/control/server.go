@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,10 +22,9 @@ type Installer interface {
 	Verify(context.Context, provision.Input, provision.LogFunc) (provision.Result, error)
 }
 type Options struct {
-	TurnstileClient                     *http.Client
-	PublicURL, AdminOrigin, ArtifactDir string
-	Assets                              fs.FS
-	Installer                           Installer
+	TurnstileClient                                 *http.Client
+	PublicURL, AdminOrigin, UserOrigin, ArtifactDir string
+	Installer                                       Installer
 }
 type Server struct {
 	Store     *store.Store
@@ -42,6 +40,9 @@ type Server struct {
 func New(s *store.Store, opts Options) *Server {
 	if opts.AdminOrigin == "" {
 		opts.AdminOrigin = opts.PublicURL
+	}
+	if opts.UserOrigin == "" {
+		opts.UserOrigin = opts.PublicURL
 	}
 	runner := opts.Installer
 	controllerID, initErr := s.ControllerID()
@@ -84,7 +85,7 @@ func (s *Server) AdminHandler() http.Handler {
 	s.registerPortalAdmin(m)
 	s.registerNotificationRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
-	m.HandleFunc("/", s.static)
+	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	return s.headers(m, s.opts.AdminOrigin)
 }
 
@@ -105,17 +106,8 @@ func (s *Server) PublicHandler() http.Handler {
 	legacy.HandleFunc("GET /api/v1/client/rules/{hash}", s.clientRules)
 	m.Handle("/api/v1/client/", s.legacyClientGate(legacy))
 	s.registerPortalPublic(m)
-	m.HandleFunc("GET /{$}", s.static)
-	for _, path := range []string{"/authorize", "/login", "/register"} {
-		m.HandleFunc("GET "+path, s.turnstilePage)
-	}
-	for _, path := range []string{"/nodes", "/subscriptions", "/downloads", "/account"} {
-		m.HandleFunc("GET "+path, s.static)
-	}
-	m.HandleFunc("GET /favicon.svg", s.static)
-	m.HandleFunc("GET /assets/", s.static)
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
-	return s.headers(m, s.opts.PublicURL)
+	return s.headers(m, s.opts.UserOrigin)
 }
 
 func (s *Server) legacyClientGate(next http.Handler) http.Handler {
@@ -130,6 +122,44 @@ func (s *Server) legacyClientGate(next http.Handler) http.Handler {
 
 func (s *Server) headers(m http.Handler, origin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		browserAPI := strings.HasPrefix(r.URL.Path, "/api/") && (origin == s.opts.AdminOrigin || strings.HasPrefix(r.URL.Path, "/api/v1/user/"))
+		if browserAPI {
+			w.Header().Add("Vary", "Origin")
+			supplied := r.Header.Get("Origin")
+			if supplied != "" && supplied != origin {
+				fail(w, 403, "请求来源无效")
+				return
+			}
+			if supplied == origin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Expose-Headers", "ETag, Content-Disposition")
+			}
+			if r.Method == http.MethodOptions {
+				if supplied != origin {
+					fail(w, 403, "请求来源无效")
+					return
+				}
+				method := r.Header.Get("Access-Control-Request-Method")
+				if !strings.Contains(" GET POST PUT PATCH DELETE HEAD ", " "+method+" ") || method == "" {
+					fail(w, 405, "不支持的请求方式")
+					return
+				}
+				for _, header := range strings.Split(r.Header.Get("Access-Control-Request-Headers"), ",") {
+					switch strings.ToLower(strings.TrimSpace(header)) {
+					case "", "content-type", "x-csrf-token", "if-none-match":
+					default:
+						fail(w, 403, "请求头不允许")
+						return
+					}
+				}
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, If-None-Match")
+				w.Header().Set("Access-Control-Max-Age", "600")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -142,11 +172,6 @@ func (s *Server) headers(m http.Handler, origin string) http.Handler {
 		}
 		m.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) turnstilePage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	s.static(w, r)
 }
 
 func reply(w http.ResponseWriter, status int, v any) {
@@ -385,40 +410,4 @@ func (s *Server) password(w http.ResponseWriter, r *http.Request) {
 	s.setCookie(w, token, 43200)
 	s.Store.Audit("password.changed", "admin")
 	reply(w, 200, map[string]bool{"ok": true})
-}
-
-func (s *Server) static(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" && r.Method != "HEAD" {
-		fail(w, 405, "不支持的请求方式")
-		return
-	}
-	if s.opts.Assets == nil {
-		fail(w, 503, "网站资源尚未构建")
-		return
-	}
-	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "" {
-		path = "index.html"
-	}
-	if !fs.ValidPath(path) {
-		fail(w, 404, "页面不存在")
-		return
-	}
-	if info, err := fs.Stat(s.opts.Assets, path); err == nil && !info.IsDir() {
-		if path == "index.html" {
-			w.Header().Set("Cache-Control", "no-cache")
-		} else if strings.HasPrefix(path, "assets/") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		}
-		http.FileServer(http.FS(s.opts.Assets)).ServeHTTP(w, r)
-		return
-	}
-	data, err := fs.ReadFile(s.opts.Assets, "index.html")
-	if err != nil {
-		fail(w, 503, "网站资源尚未构建")
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(data)
 }

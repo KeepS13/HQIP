@@ -155,22 +155,9 @@ Package internal/provision exports `New(Options) *Runner`, `CheckServer`, `Inspe
 
 Installer 为每个节点建立独立 `/etc/hqip-nodes/<id>`、`/var/lib/hqip-nodes/<id>`、`hqip-agent-<id>.service`、`hqip-hysteria-<id>.service`。HY2 监听选定 IPv4，direct 出站 `bindIPv4` 固定同一地址，失败不能回落默认出口。本机鉴权/统计端口由数据库事务分配，二进制按内容摘要不可变存放。同服务器任务互斥；部署前确认 IP 已绑定，拒绝共享 H-ui、容器或归属不明服务的自动接管。真实代理探测仍验证出口 IP，同控制机部署还要求外部验证。固定 amd64/arm64 产物及校验和继续由 release manifest 管理。
 
-## 飞书机器人通知
 
-以下接口只在管理员监听注册，要求管理员会话；写入执行来源检查、CSRF、审计。用户、客户端和 Agent 凭据无效。所有配置响应均不返回原始 Webhook 或签名密钥。
+## 三域名与站内预警
 
-| 请求 | 输入与结果 |
-| --- | --- |
-| `GET /api/v1/settings/feishu` | 返回 `FeishuSettings`，包括脱敏配置和队列状态 |
-| `PUT /api/v1/settings/feishu` | `{enabled,webhook?,secret?,clearCredentials?,categories,expectedRevision}` → 更新后的 `FeishuSettings`；版本冲突 409 |
-| `POST /api/v1/settings/feishu/test` | 使用已保存配置排队固定测试消息 → `NotificationRecord`；允许总开关关闭时测试，每 30 秒最多一次 |
-| `GET /api/v1/notifications?page=1&pageSize=20` | `{items:NotificationRecord[],total,page,pageSize}` |
-| `POST /api/v1/notifications/{id}/retry` | 手工重试仍有效的失败通知；失效、已取消或不允许投递的记录不能重新发送 |
+API 根地址 https://api-hqip.5202345.xyz；用户来源 https://hqip.5202345.xyz；管理员来源 https://cms-hqip.5202345.xyz。浏览器使用 credentials:include；管理与用户 API 分别精确验证 Origin，CSRF 与两类会话保持隔离。新客户端 authorizationUrl 指向用户域名。
 
-`FeishuSettings` 字段为 `enabled,webhookConfigured,webhookMasked,secretConfigured,categories,revision,lastSuccessAt,lastError,queueDepth`。`categories` 为 `{system,capacity,certificate,package,recovery}` 五个布尔值；新安装默认全选，总开关默认关闭。时间使用 RFC3339，尚无记录的时间可为 `null`。
-
-保存时省略 `webhook/secret` 或提交空值保留已存凭据；非空值替换对应凭据。启用必须同时存在 Webhook 和签名密钥。`clearCredentials:true` 必须同时 `enabled:false` 且不得提交非空新凭据；历史投递记录保留。停用或更换 Webhook 取消旧待发任务。客户端必须保存自己的读取版本，遇到 409 重新读取并由管理员核对，不能静默覆盖。
-
-`NotificationRecord` 包括 `id,category,level,title,message,detailPath,status,attempts,createdAt,nextAttempt,lastError,canRetry`。`status` 为 `pending/sending/retry/sent/failed/cancelled`，`sent` 仅表示飞书业务响应 `code == 0`。测试也是异步投递；返回记录并不表示成功，调用方通过列表轮询查看结果。`detailPath` 为管理员详情路径，提示、标题和错误均需作为纯文本显示。自动通知不发送原始日志或任何连接凭据。
-
-投递每秒最多一个批次；固定事件编号可用于识别超时导致的重复消息。单次超时 10 秒，初次尝试后最多 5 次自动重试，基础间隔为 30 秒、2 分钟、10 分钟、30 分钟、2 小时并附加最多 10% 抖动。队列上限 1,000 条，记录保留 90 天。签名与配置错误不自动重试。详情见 [飞书通知配置与运维](notifications.md)。
+预警接口与数据语义见 [站内预警中心](notifications.md)。旧 /api/v1/settings/feishu、/api/v1/notifications 及投递重试接口已移除。

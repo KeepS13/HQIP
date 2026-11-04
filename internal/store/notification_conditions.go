@@ -55,7 +55,7 @@ func (s *Store) CollectNotificationConditions() ([]model.NotificationCondition, 
 			continue
 		}
 		name := notificationName(n.node.Name, "节点")
-		path := "/admin/nodes/" + url.PathEscape(n.node.ID)
+		path := "/nodes/" + url.PathEscape(n.node.ID)
 		if n.managed {
 			c := model.NotificationCondition{Key: "node.health:" + n.node.ID, Category: "system", Kind: "node.health", ResourceID: n.node.ID, Title: name + " 运行异常", DetailPath: path, Level: "danger", Stage: 1, Continuous: true, RecoverySeconds: 30}
 			last := n.seen
@@ -160,7 +160,7 @@ func notificationServers(tx *sql.Tx, nodes []notificationNodeSnapshot, now time.
 			return nil, err
 		}
 		name := notificationName(server.Name, "服务器")
-		path := "/admin/servers/" + url.PathEscape(id)
+		path := "/servers/" + url.PathEscape(id)
 		var used int64
 		var host *notificationNodeSnapshot
 		for i := range nodes {
@@ -214,7 +214,7 @@ func notificationCertificates(tx *sql.Tx, now time.Time) ([]model.NotificationCo
 			return nil, err
 		}
 		name := notificationName(node.Name, "节点")
-		path := "/admin/nodes/" + url.PathEscape(id)
+		path := "/nodes/" + url.PathEscape(id)
 		if after > 0 {
 			if stage, days := notificationExpiry(now, time.Unix(after, 0), []int{14, 7, 3}); stage > 0 {
 				message := fmt.Sprintf("节点证书将于北京时间 %s 到期（剩余不超过 %d 天）。", notificationDate(after), days)
@@ -269,7 +269,7 @@ func notificationPackages(tx *sql.Tx, now time.Time) ([]model.NotificationCondit
 			return nil, errors.New("invalid notification entitlement totals")
 		}
 		name := notificationEmail(email)
-		path := "/admin/users/" + url.PathEscape(id)
+		path := "/users/" + url.PathEscape(id)
 		if c, ok := notificationQuota("package.quota", id, name, path, strconv.FormatInt(epoch, 10), up.Int64+down.Int64, plan.QuotaBytes, []int{80, 90, 100}); ok {
 			c.Category = "package"
 			c.Title = name + " 套餐流量提醒"
