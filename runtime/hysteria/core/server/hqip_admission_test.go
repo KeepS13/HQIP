@@ -88,13 +88,17 @@ func TestHQIPExpiryDisconnectsIdleConnectionAndCannotResume(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("idle connection survived expiry")
 	}
-	if closed.Load() != 1 {
-		t.Fatal("not an exact connection close")
+	// fail cancels the context before invoking the close callback, while holding
+	// mu. Context cancellation alone does not mean that callback has completed.
+	l.mu.Lock()
+	leaseClosed, closeCalls, g := l.closed, closed.Load(), l.grant
+	l.mu.Unlock()
+	if !leaseClosed || closeCalls != 1 {
+		t.Fatalf("not an exact connection close: leaseClosed=%t calls=%d", leaseClosed, closeCalls)
 	}
 	if l.consume(true, 1) == nil {
 		t.Fatal("expired connection forwarded payload")
 	}
-	g := l.grant
 	g.ExpiresAt = time.Now().Add(time.Hour)
 	if l.acceptGrant(g, time.Now(), false) == nil {
 		t.Fatal("closed lease revived")
