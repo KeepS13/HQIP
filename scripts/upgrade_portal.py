@@ -4,7 +4,11 @@ Does not activate account migration or change node services. First upgrade and
 verify all owned node cores, then activate through the authenticated admin API.
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, pathlib, shutil, subprocess
+import argparse, hashlib, json, os, pathlib, shutil, subprocess, sys
+
+# The release manifest covers every payload file. Importing a sibling module
+# must not create unmanifested __pycache__ files inside that verified release.
+sys.dont_write_bytecode = True
 import upgrade_control as control
 
 SITE=pathlib.Path('/etc/nginx/sites-available/hqip.conf')

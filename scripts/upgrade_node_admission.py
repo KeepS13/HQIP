@@ -40,7 +40,11 @@ def verify_units(node,config,units,check_effective=True):
             if '--config '+argument not in effective:raise ValueError('Effective service configuration points outside this node')
 
 def digest(path):
-    with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+    checksum=hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda:f.read(1024*1024),b''):
+            checksum.update(chunk)
+    return checksum.hexdigest()
 
 def command(*args,check=True):
     return subprocess.run(args,check=check,capture_output=True,text=True)

@@ -137,6 +137,25 @@ class NodeUpgradeTests(unittest.TestCase):
         self.recovered()
         self.assertEqual((self.state / 'cache.json').read_bytes(), b'new-traffic-do-not-rewind')
 
+    def test_file_checksums_without_python311_file_digest(self):
+        samples = [b'', bytes(range(256)) * 8193 + b'partial-final-block']
+        with patch.dict(hashlib.__dict__):
+            hashlib.__dict__.pop('file_digest', None)
+            self.assertFalse(hasattr(hashlib, 'file_digest'))
+            for index, sample in enumerate(samples):
+                with self.subTest(size=len(sample)):
+                    path = self.root / f'checksum-sample-{index}'
+                    path.write_bytes(sample)
+                    self.assertEqual(upgrade.digest(path), hashlib.sha256(sample).hexdigest())
+
+    def test_upgrade_without_python311_file_digest(self):
+        with patch.dict(hashlib.__dict__):
+            hashlib.__dict__.pop('file_digest', None)
+            upgrade.upgrade(self.node, self.artifacts)
+        self.assertTrue(all(self.running.values()))
+        self.assertEqual(json.loads((self.backup() / 'state.json').read_text())['phase'], 'active')
+        self.assertEqual(self.other.read_bytes(), b'another-node-must-remain-unchanged')
+
     def test_false_capability_never_reports_upgrade_success(self):
         self.capability = {'admission': False}
         with self.assertRaisesRegex(RuntimeError, 'did not prove admission'):

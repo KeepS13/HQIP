@@ -1,13 +1,63 @@
 """Portal rollback ordering, with an isolated filesystem and mocked services."""
 import io
+import hashlib
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stdout
 from unittest.mock import patch
 
 import upgrade_portal as portal
+
+
+class PortalReleaseInvocationTests(unittest.TestCase):
+    def test_real_release_invocation_does_not_create_unmanifested_bytecode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            release = root / 'control/releases/verified'
+            scripts = release / 'scripts'
+            scripts.mkdir(parents=True)
+            for name in ('upgrade_portal.py', 'upgrade_control.py'):
+                shutil.copyfile(Path(__file__).parent / name, scripts / name)
+            (release / 'hqip').write_bytes(b'fixture binary')
+            (release / 'artifacts').mkdir()
+            (release / 'artifacts/manifest.json').write_text('{}')
+            manifest = {
+                'sourceSHA': 'a' * 40,
+                'sha256': {
+                    path.relative_to(release).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in release.rglob('*') if path.is_file()
+                },
+            }
+            (release / 'release.json').write_text(json.dumps(manifest))
+            entry = scripts / 'upgrade_portal.py'
+            # -E ignores an inherited PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX;
+            # no -B flag is used. This exercises the shipped script's own guard.
+            invocation = subprocess.run([sys.executable, '-E', str(entry), '--help'], cwd=root,
+                                        capture_output=True, text=True, timeout=15)
+            self.assertEqual(invocation.returncode, 0, invocation.stderr)
+            self.assertFalse(list(release.rglob('__pycache__')))
+            self.assertFalse(list(release.rglob('*.pyc')))
+            # Import and use the actual manifest verifier in another fresh process.
+            # Only its fixed installation base changes to the isolated test tree.
+            verify = (
+                "import pathlib,runpy,sys; "
+                "entry=pathlib.Path(sys.argv[1]); sys.path.insert(0,str(entry.parent)); "
+                "module=runpy.run_path(str(entry)); control=module['control']; "
+                "release=entry.parent.parent; control.BASE=release.parent.parent; "
+                "control.verify_release(release)"
+            )
+            verified = subprocess.run([sys.executable, '-E', '-c', verify, str(entry)], cwd=root,
+                                      capture_output=True, text=True, timeout=15)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            self.assertEqual(
+                {path.relative_to(release).as_posix() for path in release.rglob('*') if path.is_file()},
+                set(manifest['sha256']) | {'release.json'},
+            )
 
 
 class PortalUpgradeTests(unittest.TestCase):
