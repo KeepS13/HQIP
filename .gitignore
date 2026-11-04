@@ -19,3 +19,4 @@ desktop/frontend/node_modules/
 desktop/frontend/dist/
 desktop/frontend/*.tsbuildinfo
 desktop/*.exe
+desktop/*.syso
