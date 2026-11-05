@@ -1,0 +1,286 @@
+/* Admin account pages own these styles; do not depend on the user portal entry. */
+.stats-grid.account-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.account-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--subtle);
+}
+.account-search input {
+  height: 36px;
+  width: 210px;
+  font-size: 12px;
+}
+.account-plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.account-plan-card {
+  padding: 25px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.account-plan-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.account-plan-card > h2 {
+  font-size: 23px;
+  margin: 25px 0 10px;
+}
+.account-plan-card > p {
+  color: var(--muted);
+  font-size: 11px;
+}
+.account-plan-card dl,
+.account-entitlement dl {
+  display: grid;
+  gap: 17px;
+  padding: 24px 0;
+  margin: 20px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.account-plan-card dl > div,
+.account-entitlement dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+}
+.account-plan-card dt,
+.account-entitlement dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.account-plan-card dd,
+.account-entitlement dd {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.account-detail-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 22px;
+  margin: 22px 0;
+}
+.account-detail-grid .panel {
+  margin: 0;
+}
+.account-entitlement {
+  padding: 0 25px 25px;
+}
+.account-entitlement h2 {
+  font-size: 24px;
+}
+.account-entitlement > p {
+  font-size: 11px;
+  margin-top: 14px;
+  line-height: 1.7;
+}
+.account-control {
+  padding: 0 25px 25px;
+}
+.account-control > strong {
+  font-size: 13px;
+}
+.account-control p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.8;
+  margin-bottom: 18px;
+}
+.account-control > strong + p {
+  margin-top: 10px;
+}
+.account-divider {
+  border-top: 1px solid var(--border);
+  margin: 25px 0;
+}
+.account-plan-summary {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.account-plan-summary span {
+  font-size: 11px;
+  color: #b9aadf;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #ab95ec12;
+}
+.account-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.account-checkbox input,
+.account-node-picker input {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  accent-color: #ae99ef;
+}
+.account-checkbox span {
+  display: grid;
+  gap: 6px;
+}
+.account-checkbox strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.account-checkbox small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.account-node-picker {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 16px 10px;
+  margin: 0;
+  max-height: 270px;
+  overflow: auto;
+}
+.account-node-picker legend {
+  font-size: 12px;
+  padding: 0 5px;
+}
+.account-node-picker legend span {
+  color: var(--muted);
+  margin-left: 10px;
+}
+.account-node-picker > label {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid #ffffff08;
+}
+.account-node-picker > label > span:not(.badge) {
+  flex: 1;
+}
+.account-node-picker strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+}
+.account-node-picker small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+.account-registration {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  justify-content: space-between;
+}
+.account-registration strong {
+  font-size: 14px;
+}
+.account-registration p {
+  margin: 10px 0 0;
+}
+.account-plan-card .portal-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  background: #a390f41a;
+  color: #b7a5fa;
+  border: 1px solid #a390f41c;
+  border-radius: 14px;
+}
+.portal-records {
+  padding: 0 25px 15px;
+}
+.portal-records > div:not(.empty-state) {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 19px 0;
+  border-top: 1px solid var(--border);
+}
+.portal-records > div:first-child {
+  border-top: 0;
+}
+.portal-records section {
+  flex: 1;
+  min-width: 0;
+}
+.portal-records strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.portal-records p {
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.account-impact-details {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.account-impact-details summary {
+  padding: 14px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.account-impact-details summary:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: -3px;
+}
+.account-impact-details[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 1150px) {
+  .account-plans-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 850px) {
+  .account-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .stats-grid.account-stats {
+    gap: 10px;
+  }
+}
+@media (max-width: 560px) {
+  .account-plans-grid,
+  .stats-grid.account-stats {
+    grid-template-columns: 1fr;
+  }
+  .account-search input {
+    width: 150px;
+  }
+  .account-registration {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .portal-records {
+    padding: 0 18px 15px;
+  }
+  .portal-records > div:not(.empty-state) {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .portal-records section {
+    min-width: 140px;
+  }
+  .portal-records .badge {
+    font-size: 9px;
+  }
+}

@@ -26,7 +26,7 @@ function AlertDetail({id,onClose,onChange}:{id:string;onClose:()=>void;onChange:
    <div className="center-detail-title"><Badge tone={tone(data)}>{statuses[data.status]}</Badge><Badge tone={data.acknowledged?"muted":"warning"}>{data.acknowledged?"已确认":"未确认"}</Badge></div>
    <h3>{data.condition.title}</h3><p className="center-message">{data.condition.message}</p>
    <dl className="center-facts"><div><dt>首次发生</dt><dd>{date(data.firstSeen)}</dd></div><div><dt>最近检查</dt><dd>{date(data.lastSeen)}</dd></div><div><dt>{data.status==="resolved"?"恢复时间":"结束时间"}</dt><dd>{data.endedAt?date(data.endedAt):"持续跟踪中"}</dd></div><div><dt>确认人</dt><dd>{data.acknowledged?`${data.acknowledgedBy} · ${date(data.acknowledgedAt)}`:"尚未确认"}</dd></div><div><dt>事件编号</dt><dd><code>{data.id}</code></dd></div></dl>
-   <Link className="button secondary" to={detailLink(data.condition.detailPath)} onClick={onClose}>查看相关对象 <ArrowUpRight size={15}/></Link>
+   <Link className="button button-secondary" to={detailLink(data.condition.detailPath)} onClick={onClose}>查看相关对象 <ArrowUpRight size={15}/></Link>
    <form className="form-stack" onSubmit={(e:FormEvent)=>{e.preventDefault();void save(false)}}>
     <label className="field"><span>处理备注</span><textarea rows={3} value={note} onChange={e=>{if(draftRevision===null)setDraftRevision(data.revision);setNote(e.target.value)}} placeholder="记录排查结果或后续处理安排"/></label>
     {draftRevision!==null&&draftRevision!==data.revision&&<Notice>状态已更新。请核对详情后<button type="button" className="text-button" onClick={()=>{setDraftRevision(data.revision);setFailure("")}}>使用最新版本继续</button>；已填写备注会保留。</Notice>}

@@ -1,4 +1,5 @@
 import { passwordError } from "../config";
+import "./accounts.css";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
