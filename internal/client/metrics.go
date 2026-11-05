@@ -211,6 +211,10 @@ func (c *Controller) sampleMetrics(ctx context.Context) {
 }
 
 func (c *Controller) MeasureDelay() error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	engine, ok := c.engine.(delayEngine)
 	if !ok {
 		return errors.New("当前内核不支持延迟检测")
@@ -223,7 +227,7 @@ func (c *Controller) MeasureDelay() error {
 	g := c.generation
 	c.view.Metrics.DelayPending = true
 	c.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
 	defer cancel()
 	delay, err := engine.Delay(ctx)
 	c.mu.Lock()

@@ -20,6 +20,10 @@ type Controller struct {
 	applyMu             sync.Mutex
 	routeMu             sync.Mutex
 	reportMu            sync.Mutex
+	workers             sync.WaitGroup
+	closeOnce           sync.Once
+	workCtx             context.Context
+	cancelWork          context.CancelFunc
 	dir                 string
 	platform            Platform
 	engine              Engine
@@ -89,6 +93,7 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 			}
 		}
 	}
+	c.workCtx, c.cancelWork = context.WithCancel(context.Background())
 	return c, nil
 }
 func (c *Controller) View() View {
@@ -101,6 +106,9 @@ func (c *Controller) View() View {
 	return v
 }
 func (c *Controller) persistLocked() error {
+	if c.closed {
+		return context.Canceled
+	}
 	if c.api != nil {
 		c.saved.Tokens = c.api.Tokens()
 	}
@@ -137,6 +145,10 @@ func (c *Controller) Logout() error {
 }
 
 func (c *Controller) logoutFor(expected *API) error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
@@ -157,7 +169,7 @@ func (c *Controller) logoutFor(expected *API) error {
 	c.mu.Unlock()
 	_ = c.engine.Stop()
 	if api != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
 		_ = api.Logout(ctx)
 		cancel()
 	}
@@ -175,8 +187,14 @@ func (c *Controller) logoutFor(expected *API) error {
 	return c.persistLocked()
 }
 func (c *Controller) Run(ctx context.Context) {
-	go c.accountWatchdog(ctx)
-	go c.runMetrics(ctx)
+	if !c.beginWork() {
+		return
+	}
+	defer c.workers.Done()
+	ctx, cancel := c.workContext(ctx)
+	defer cancel()
+	c.launch(func() { c.accountWatchdog(ctx) })
+	c.launch(func() { c.runMetrics(ctx) })
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	delay := 5 * time.Second
@@ -215,6 +233,12 @@ func (c *Controller) Refresh() error {
 	return c.Sync(ctx)
 }
 func (c *Controller) Sync(ctx context.Context) error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
+	ctx, cancel := c.workContext(ctx)
+	defer cancel()
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
 	c.mu.Lock()
@@ -369,7 +393,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 		return e
 	}
 	if apply {
-		go c.applyLatest()
+		c.launch(c.applyLatest)
 	} else {
 		c.report()
 	}
@@ -420,6 +444,10 @@ func (c *Controller) syncFailure(e error) error {
 	return e
 }
 func (c *Controller) Connect() error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	c.mu.Lock()
 	if c.api == nil {
 		c.mu.Unlock()
@@ -448,10 +476,14 @@ func (c *Controller) Connect() error {
 		c.cancelApply()
 	}
 	c.mu.Unlock()
-	go c.applyLatest()
+	c.launch(c.applyLatest)
 	return nil
 }
 func (c *Controller) Disconnect() error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
@@ -472,6 +504,10 @@ func (c *Controller) Disconnect() error {
 	return e
 }
 func (c *Controller) Select(id string) error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	c.mu.Lock()
 	if c.view.SelectionPending {
 		c.mu.Unlock()
@@ -499,11 +535,15 @@ func (c *Controller) Select(id string) error {
 	e := c.persistLocked()
 	c.mu.Unlock()
 	if e == nil && on {
-		go c.applyLatest()
+		c.launch(c.applyLatest)
 	}
 	return e
 }
 func (c *Controller) SetMode(mode string, tun bool) error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	if mode != "rule" && mode != "global" {
 		return errors.New("模式无效")
 	}
@@ -520,7 +560,7 @@ func (c *Controller) SetMode(mode string, tun bool) error {
 	e := c.persistLocked()
 	c.mu.Unlock()
 	if e == nil && on {
-		go c.applyLatest()
+		c.launch(c.applyLatest)
 	}
 	return e
 }
@@ -548,7 +588,7 @@ func (c *Controller) applyLatest() {
 		c.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 135*time.Second)
+	ctx, cancel := context.WithTimeout(c.workCtx, 135*time.Second)
 	c.cancelApply = cancel
 	c.view.RunState = "connecting"
 	c.view.LastError = ""
@@ -612,37 +652,45 @@ func (c *Controller) fail(message string) {
 	c.mu.Unlock()
 }
 func (c *Controller) report() {
+	if !c.beginWork() {
+		return
+	}
+	defer c.workers.Done()
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()
 	c.mu.Lock()
 	api := c.api
 	s := c.view.Status
 	c.mu.Unlock()
-	if api == nil {
+	if api == nil || c.workCtx.Err() != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
 	defer cancel()
 	_ = api.Report(ctx, s)
 	c.mu.Lock()
-	if c.api == api {
+	if c.api == api && !c.closed {
 		_ = c.persistLocked()
 	}
 	c.mu.Unlock()
 }
 func (c *Controller) Close() {
-	c.CancelLogin()
-	c.mu.Lock()
-	c.closed = true
-	c.generation++
-	c.selectionGeneration++
-	if c.cancelSelection != nil {
-		c.cancelSelection()
-	}
-	if c.cancelApply != nil {
-		c.cancelApply()
-	}
-	c.view.ConnectionIntent = false
-	c.mu.Unlock()
-	_ = c.engine.Stop()
+	c.closeOnce.Do(func() {
+		c.CancelLogin()
+		c.mu.Lock()
+		c.closed = true
+		c.cancelWork()
+		c.generation++
+		c.selectionGeneration++
+		if c.cancelSelection != nil {
+			c.cancelSelection()
+		}
+		if c.cancelApply != nil {
+			c.cancelApply()
+		}
+		c.view.ConnectionIntent = false
+		c.mu.Unlock()
+		_ = c.engine.Stop()
+		c.workers.Wait()
+	})
 }

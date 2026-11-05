@@ -71,6 +71,10 @@ func (c *Controller) restoreRemembered(api *API, p Profile) {
 // SelectSubscription changes only this native session. The worker serializes
 // all core changes, while cancellation and local disconnect remain immediate.
 func (c *Controller) SelectSubscription(id string) error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	c.mu.Lock()
 	if c.api == nil || c.closed {
 		c.mu.Unlock()
@@ -99,7 +103,7 @@ func (c *Controller) SelectSubscription(id string) error {
 	if c.cancelSelection != nil {
 		c.cancelSelection()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(c.workCtx, 150*time.Second)
 	c.cancelSelection = cancel
 	c.view.SelectionPending = true
 	c.view.DesiredSubscriptionID = id
@@ -110,7 +114,9 @@ func (c *Controller) SelectSubscription(id string) error {
 	}
 	api := c.api
 	c.mu.Unlock()
-	go c.changeSubscription(ctx, cancel, api, id, g)
+	if !c.launch(func() { c.changeSubscription(ctx, cancel, api, id, g) }) {
+		cancel()
+	}
 	return nil
 }
 
@@ -256,8 +262,8 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 	c.mu.Unlock()
 	c.routeMu.Unlock()
 	if on {
-		go c.applyLatest()
+		c.launch(c.applyLatest)
 	} else {
-		go c.report()
+		c.launch(c.report)
 	}
 }

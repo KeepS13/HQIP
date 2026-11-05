@@ -168,6 +168,10 @@ func (a *API) BrowserLogin(ctx context.Context, installationID, clientName strin
 }
 
 func (c *Controller) LoginBrowser(server string, open func(string) error) error {
+	if !c.beginWork() {
+		return context.Canceled
+	}
+	defer c.workers.Done()
 	a, err := NewAPI(strings.TrimRight(server, "/"), Tokens{})
 	if err != nil {
 		return err
@@ -177,7 +181,7 @@ func (c *Controller) LoginBrowser(server string, open func(string) error) error 
 		c.mu.Unlock()
 		return errors.New("已有登录会话或正在等待浏览器，请先退出或取消")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Minute)
 	c.loginGeneration++
 	generation := c.loginGeneration
 	c.authCancel = cancel
