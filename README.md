@@ -25,3 +25,5 @@ python -m unittest discover -s scripts -p "test_*.py"
 ```
 
 生产使用 Nginx／Certbot 与 systemd，不运行旧 Caddy 引导脚本接管其他站点。发布前备份一致性数据库和配套主密钥；回退只切换代码与路由，不覆盖实时用量账本。
+
+推送到 `main` 后的 GitHub Actions 自动上线与 Secret 配置见 [自动部署](docs/automatic-deployment.md)。

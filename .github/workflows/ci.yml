@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -35,6 +36,14 @@ jobs:
       - run: python3 scripts/build.py --skip-web --skip-download
       - run: go test -race ./core/server ./core/internal/integration_tests ./app/cmd
         working-directory: runtime/hysteria
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            dist/hqip-linux-amd64
+            admin-web/dist
+            user-web/dist
+          if-no-files-found: error
   windows:
     runs-on: windows-latest
     steps:
@@ -72,3 +81,43 @@ jobs:
       - run: go test ./...
         working-directory: desktop
       - run: python scripts/build_desktop.py --skip-web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/HQIP-Windows-x64.zip
+            dist/desktop-manifest.json
+          if-no-files-found: error
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [check, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: hqip-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://hqip.5202345.xyz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: dist
+      - name: Deploy tested commit with backup and health checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: python3 scripts/deploy_ci.py
