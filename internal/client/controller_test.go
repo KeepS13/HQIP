@@ -74,20 +74,23 @@ func waitState(t *testing.T, c *Controller, want string) {
 func setupClient(t *testing.T) (*Controller, *fakeEngine, func(Profile)) {
 	t.Helper()
 	var mu sync.Mutex
-	p := Profile{Entitlement: &Entitlement{Status: "active", ExpiresAt: time.Now().Add(time.Hour), MaxConnections: 2}, DeviceID: "device", Name: "computer", Enabled: true, Revision: 1, DefaultNodeID: "A", Nodes: []Node{{ID: "A", Name: "A", Ready: true}, {ID: "B", Name: "B", Ready: true}}}
+	p := Profile{SubscriptionID: "sub-a", SelectionRevision: 1, Subscription: &Subscription{ID: "sub-a", Status: "active", ExpiresAt: time.Now().Add(time.Hour), MaxConnections: 2}, DeviceID: "device", Name: "computer", Enabled: true, Revision: 1, DefaultNodeID: "A", Nodes: []Node{{ID: "A", Name: "A", Ready: true}, {ID: "B", Name: "B", Ready: true}}}
+	p.Subscriptions = []Subscription{*p.Subscription}
 	bundle := rules.Default()
 	data, _ := rules.Canonical(bundle)
 	hash, _ := rules.Hash(bundle)
-	p.Rules = RulesRef{Version: 1, Hash: hash, URL: "/api/v2/client/rules/" + hash}
+	p.Rules = RulesRef{Version: 1, Hash: hash, URL: "/api/v3/client/rules/" + hash}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch r.URL.Path {
-		case "/api/v2/client/profile":
+		case "/api/v3/client/profile":
 			w.Header().Set("ETag", time.Now().String())
 			_ = json.NewEncoder(w).Encode(p)
-		case "/api/v2/client/rules/" + hash:
+		case "/api/v3/client/rules/" + hash:
 			w.Write(data)
+		case "/api/v3/client/connections":
+			_ = json.NewEncoder(w).Encode(Connections{SubscriptionID: p.SubscriptionID, SelectionRevision: p.SelectionRevision, Connections: []Connection{}})
 		default:
 			w.Write([]byte(`{"ok":true}`))
 		}
@@ -109,7 +112,10 @@ func setupClient(t *testing.T) (*Controller, *fakeEngine, func(Profile)) {
 	return c, e, func(next Profile) {
 		mu.Lock()
 		defer mu.Unlock()
-		next.Entitlement = p.Entitlement
+		next.Subscription = p.Subscription
+		next.SubscriptionID = p.SubscriptionID
+		next.Subscriptions = p.Subscriptions
+		next.SelectionRevision = p.SelectionRevision
 		next.Rules = p.Rules
 		next.DeviceID = p.DeviceID
 		next.Enabled = true
@@ -204,11 +210,11 @@ func TestStaleSyncResponsesCannotMutateReplacementSession(t *testing.T) {
 			started := make(chan struct{})
 			release := make(chan struct{})
 			oldServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v2/client/refresh" {
+				if r.URL.Path == "/api/v3/client/refresh" {
 					w.WriteHeader(http.StatusUnauthorized)
 					return
 				}
-				if r.URL.Path != "/api/v2/client/profile" {
+				if r.URL.Path != "/api/v3/client/profile" {
 					t.Errorf("unexpected request %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
 					return
@@ -279,7 +285,7 @@ func TestManualSelectionDuringProfileRefreshWinsDefaultChange(t *testing.T) {
 	p.Revision = 2
 	p.DefaultNodeID = "B"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v2/client/profile" {
+		if r.URL.Path != "/api/v3/client/profile" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -321,7 +327,7 @@ func TestConcurrentReportsUseCurrentStatus(t *testing.T) {
 	firstArrived := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v2/client/status" {
+		if r.URL.Path != "/api/v3/client/status" {
 			t.Errorf("unexpected request %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return

@@ -44,7 +44,7 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 		t.Skip("HQIP_E2E_CORE, HQIP_SINGBOX and HQIP_MIHOMO required")
 	}
 	f := newPortalE2E(t, core)
-	u, plan, passwords := f.account("shared", 8<<20, 2)
+	u, subscription, passwords := f.account("shared", 8<<20, 2)
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count, _ := strconv.Atoi(r.URL.Query().Get("bytes"))
 		if count <= 0 {
@@ -111,7 +111,7 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 		response.Body.Close()
 		t.Fatal("third process bypassed shared connection cap")
 	}
-	e, err := f.db.Entitlement(u.ID)
+	e, err := f.db.UserSubscription(u.ID, subscription.ID)
 	if err != nil || e.Occupied != 2 {
 		t.Fatal("cross-node occupied count incorrect", err)
 	}
@@ -121,7 +121,7 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 	second.stop()
 	// Forced process termination sends no QUIC close; the server must retain the
 	// slot until QUIC idle detection confirms closure, rather than reuse it early.
-	f.wait(45*time.Second, func() bool { e, _ := f.db.Entitlement(u.ID); return e != nil && e.Occupied == 1 }, "crashed second real connection did not release after QUIC idle closure")
+	f.wait(45*time.Second, func() bool { e, _ := f.db.UserSubscription(u.ID, subscription.ID); return e != nil && e.Occupied == 1 }, "crashed second real connection did not release after QUIC idle closure")
 	f.wait(12*time.Second, func() bool {
 		leases, _ := f.db.PortalConnections(u.ID, "")
 		for _, l := range leases {
@@ -167,7 +167,7 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 	if unchanged != expiry {
 		t.Fatal("disconnected controller somehow extended authorization")
 	}
-	oldEntitlement, _ := f.db.Entitlement(u.ID)
+	oldEntitlement, _ := f.db.UserSubscription(u.ID, subscription.ID)
 	if oldEntitlement.ReservedBytes == 0 {
 		t.Fatal("unconfirmed final release incorrectly reused reserved quota")
 	}
@@ -189,7 +189,7 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 		_ = f.db.DB.QueryRow("SELECT closed FROM portal_leases WHERE id=?", expiredLeaseID).Scan(&closed)
 		return closed == 1
 	}, "Agent did not replay durable final usage after control recovered")
-	settled, _ := f.db.Entitlement(u.ID)
+	settled, _ := f.db.UserSubscription(u.ID, subscription.ID)
 	if settled.ReservedBytes >= oldEntitlement.ReservedBytes+(1<<20) {
 		t.Fatal("confirmed old final did not return its unused reservation")
 	}
@@ -197,7 +197,7 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 	first.stop()
 	// A separate entitlement drives both real nodes to quota exhaustion. No
 	// resets/time travel are used, and payload allowance is measured centrally.
-	quotaUser, _, quotaPasswords := f.account("quota", 1536<<10, 2)
+	quotaUser, quotaSubscription, quotaPasswords := f.account("quota", 1536<<10, 2)
 	qa := f.client("sing-box", singbox, 0, quotaPasswords[0], target.Certificate())
 	defer qa.stop()
 	qb := f.client("mihomo", mihomo, 1, quotaPasswords[1], target.Certificate())
@@ -220,8 +220,11 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 	bodyBytes += <-results
 	qa.stop()
 	qb.stop()
-	f.wait(45*time.Second, func() bool { e, _ := f.db.Entitlement(quotaUser.ID); return e != nil && e.Occupied == 0 }, "quota-exhausted sessions remained active")
-	qe, err := f.db.Entitlement(quotaUser.ID)
+	f.wait(45*time.Second, func() bool {
+		e, _ := f.db.UserSubscription(quotaUser.ID, quotaSubscription.ID)
+		return e != nil && e.Occupied == 0
+	}, "quota-exhausted sessions remained active")
+	qe, err := f.db.UserSubscription(quotaUser.ID, quotaSubscription.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,10 +232,111 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 		t.Fatalf("shared quota violated: used=%d reserved=%d delivered=%d", qe.UsedBytes, qe.ReservedBytes, bodyBytes)
 	}
 	t.Logf("two-node quota: used=%d reserved=%d, plaintext delivered=%d; cap=%d", qe.UsedBytes, qe.ReservedBytes, bodyBytes, 1536<<10)
-	_ = plan
 }
 
 type zeroE2EReader struct{}
+
+func TestPortalSameTemplateCopiesRealClients(t *testing.T) {
+	core, singbox, mihomo := os.Getenv("HQIP_E2E_CORE"), os.Getenv("HQIP_SINGBOX"), os.Getenv("HQIP_MIHOMO")
+	if core == "" || singbox == "" || mihomo == "" {
+		t.Skip("HQIP_E2E_CORE, HQIP_SINGBOX and HQIP_MIHOMO required")
+	}
+	f := newPortalE2E(t, core)
+	u, firstSubscription, firstPasswords := f.account("same-template", 8<<20, 1)
+	u, err := f.db.PortalUser(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := f.db.SubscriptionTemplate(firstSubscription.TemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSubscription, err := f.db.AssignSubscription(u.ID, template.ID, "second-copy", u.Revision, template.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.db.PortalSubscription(u.ID, secondSubscription.ID, "create"); err != nil {
+		t.Fatal(err)
+	}
+	secondPassword, err := f.db.PortalCredential(u.ID, secondSubscription.ID, f.nodes[1].ID, "subscription")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count, _ := strconv.Atoi(r.URL.Query().Get("bytes"))
+		if count <= 0 {
+			count = 64
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(count))
+		_, _ = io.CopyN(w, zeroE2EReader{}, int64(count))
+	}))
+	defer target.Close()
+	a := f.client("sing-box", singbox, 0, firstPasswords[0], target.Certificate())
+	defer a.stop()
+	b := f.client("mihomo", mihomo, 1, secondPassword, target.Certificate())
+	defer b.stop()
+	f.fetch(a, target.URL+"?bytes=65536", 65536)
+	f.fetch(b, target.URL+"?bytes=131072", 131072)
+	f.wait(12*time.Second, func() bool {
+		first, _ := f.db.UserSubscription(u.ID, firstSubscription.ID)
+		second, _ := f.db.UserSubscription(u.ID, secondSubscription.ID)
+		return first != nil && second != nil && first.UsedBytes > 65536 && second.UsedBytes > 131072
+	}, "real usage was not charged into both independent subscriptions")
+	leases, err := f.db.PortalConnections(u.ID, "")
+	if err != nil || len(leases) != 2 {
+		t.Fatal("independent copies did not each receive a real connection", err)
+	}
+	if leases[0].AccountingID == leases[1].AccountingID || leases[0].SubscriptionID == leases[1].SubscriptionID {
+		t.Fatal("identical template purchases reused accounting identity")
+	}
+	for _, l := range leases {
+		if l.BandwidthBytesPerSecond != 100000 || l.RatePending {
+			t.Fatalf("different subscription took part of this copy's bandwidth: %+v", l)
+		}
+	}
+	extra := f.client("sing-box", singbox, 1, firstPasswords[1], target.Certificate())
+	defer extra.stop()
+	extra.http.Timeout = 4 * time.Second
+	if response, e := extra.http.Get(target.URL); e == nil {
+		response.Body.Close()
+		t.Fatal("same subscription bypassed its single connection cap across nodes")
+	}
+	extra.stop()
+	firstCurrent, err := f.db.UserSubscription(u.ID, firstSubscription.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.db.RevokeSubscription(u.ID, firstSubscription.ID, firstCurrent.Revision); err != nil {
+		t.Fatal(err)
+	}
+	f.wait(12*time.Second, func() bool {
+		own, _ := f.db.PortalConnections(u.ID, "", firstSubscription.ID)
+		return len(own) == 1 && own[0].Closed
+	}, "removing first copy did not precisely close its real connection")
+	f.fetch(b, target.URL+"?bytes=32768", 32768)
+	active, err := f.db.UserSubscription(u.ID, secondSubscription.ID)
+	if err != nil || active.Status != "active" || active.Occupied != 1 {
+		t.Fatal("removing first copy disturbed second copy", err)
+	}
+	if err = f.db.RevokeSubscription(u.ID, secondSubscription.ID, active.Revision); err != nil {
+		t.Fatal(err)
+	}
+	f.wait(12*time.Second, func() bool {
+		own, _ := f.db.PortalConnections(u.ID, "", secondSubscription.ID)
+		return len(own) == 1 && own[0].Closed
+	}, "second copy final usage was not settled")
+	for _, sub := range []model.UserSubscription{firstSubscription, secondSubscription} {
+		settled, err := f.db.UserSubscription(u.ID, sub.ID)
+		if err != nil || settled.ReservedBytes != 0 {
+			t.Fatal("closed copy retained an unconfirmed budget", err)
+		}
+		own, err := f.db.PortalConnections(u.ID, "", sub.ID)
+		if err != nil || len(own) != 1 || settled.UsedBytes != own[0].UploadBytes+own[0].DownloadBytes {
+			t.Fatal("subscription usage did not match its own final core counters", err)
+		}
+		t.Logf("copy %s: confirmed=%d reserved=%d; precise final receipt matches own core", sub.ID, settled.UsedBytes, settled.ReservedBytes)
+	}
+}
 
 func (zeroE2EReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
 
@@ -347,7 +451,7 @@ func newPortalE2E(t *testing.T, core string) *portalE2E {
 	return f
 }
 
-func (f *portalE2E) account(label string, quota int64, slots int) (model.PortalUser, model.Plan, []string) {
+func (f *portalE2E) account(label string, quota int64, slots int) (model.PortalUser, model.UserSubscription, []string) {
 	f.t.Helper()
 	u, e := f.db.RegisterPortal(label+"@example.invalid", secure.Token())
 	if e != nil {
@@ -355,25 +459,31 @@ func (f *portalE2E) account(label string, quota int64, slots int) (model.PortalU
 	}
 	rate := 0.8
 	ids := []string{f.nodes[0].ID, f.nodes[1].ID}
-	p, e := f.db.SavePlan("", model.Plan{Name: label, Enabled: true, SaleEnabled: true, NodeIDs: ids, DefaultNodeID: ids[0], BandwidthMbps: &rate, QuotaBytes: &quota, MaxConnections: slots})
+	p, e := f.db.SaveSubscriptionTemplate("", model.SubscriptionTemplate{Name: label, Enabled: true, Listed: true, ValidityDays: 1, NodeIDs: ids, DefaultNodeID: ids[0], BandwidthMbps: &rate, QuotaBytes: &quota, MaxConnections: slots}, 0)
 	if e != nil {
 		f.t.Fatal(e)
 	}
-	if e = f.db.AssignPortal(u.ID, p.ID, time.Now().Add(time.Hour), false); e != nil {
+	subscription, e := f.db.AssignSubscription(u.ID, p.ID, "initial-subscription", u.Revision, p.Revision)
+	if e != nil {
 		f.t.Fatal(e)
 	}
-	if _, e = f.db.PortalSubscription(u.ID, "create"); e != nil {
+	if _, e = f.db.PortalSubscription(u.ID, subscription.ID, "create"); e != nil {
 		f.t.Fatal(e)
 	}
 	passwords := []string{}
 	for _, id := range ids {
-		password, e := f.db.PortalCredential(u.ID, id, "subscription")
+		password, e := f.db.PortalCredential(u.ID, subscription.ID, id, "subscription")
 		if e != nil {
 			f.t.Fatal(e)
 		}
 		passwords = append(passwords, password)
 	}
-	return u, p, passwords
+	current, e := f.db.UserSubscription(u.ID, subscription.ID)
+	if e != nil {
+		f.t.Fatal(e)
+	}
+	subscription = *current
+	return u, subscription, passwords
 }
 
 type portalE2EClient struct {

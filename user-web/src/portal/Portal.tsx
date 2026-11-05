@@ -6,71 +6,54 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
-  Link,
-  NavLink,
-  Route,
-  Routes,
-  useLocation,
-} from "react-router-dom";
-import {
-  Activity,
-  ArrowDownToLine,
   ArrowRight,
   ArrowUpRight,
-  Cable,
-  Check,
   CircleHelp,
-  Clock3,
   Download,
-  Gauge,
   Globe2,
   Info,
-  KeyRound,
   LayoutDashboard,
   Link2,
   LockKeyhole,
   LogOut,
   Menu,
   Monitor,
-  RefreshCw,
   ShieldCheck,
-  Unplug,
   UserRound,
   Wifi,
   X,
 } from "lucide-react";
 import {
-  Badge,
   Button,
   CopyButton,
   Empty,
   ErrorNotice,
   Field,
   Loading,
-  Meter,
-  Modal,
   Notice,
   PageHeader,
   Panel,
   ToastContext,
   bytes,
   date,
-  useToast,
 } from "../components";
 import { setUserCSRF, userAPI, useUserData } from "./api";
 import { Turnstile } from "./Turnstile";
-import {
-  connectionActive,
-  connectionState,
-  normalizeProfile,
-  type Entitlement,
-  type PortalConfig,
-  type Release,
-  type UserProfile,
-  type UserProfileResponse,
-  type UserSessionResponse,
+import type {
+  PortalConfig,
+  Release,
+  UserProfile,
+  UserSessionResponse,
 } from "./types";
+import { AccountSettings } from "./AccountSettings";
+import {
+  OwnedSubscriptions,
+  SubscriptionCatalog,
+  UserOverview,
+  UserSubscriptionDetail,
+} from "./SubscriptionPages";
 import "./portal.css";
 
 export function PortalBrand() {
@@ -87,28 +70,6 @@ export function PortalBrand() {
         <small>YOUR CONNECTION</small>
       </div>
     </div>
-  );
-}
-export const entitlementLabels: Record<string, string> = {
-  active: "使用中",
-  expired: "已到期",
-  exhausted: "流量已用尽",
-  unassigned: "待开通",
-  disabled: "已停用",
-};
-export function EntitlementBadge({ value }: { value?: Entitlement }) {
-  return (
-    <Badge
-      tone={
-        value?.status === "active"
-          ? "success"
-          : value?.status === "unassigned"
-            ? "muted"
-            : "warning"
-      }
-    >
-      {entitlementLabels[value?.status || "unassigned"] || "待同步"}
-    </Badge>
   );
 }
 function Auth({
@@ -134,7 +95,10 @@ function Auth({
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!ready || !token || busy) return;
-    if (register && passwordError(password)) { setError(passwordError(password)); return; }
+    if (register && passwordError(password)) {
+      setError(passwordError(password));
+      return;
+    }
     if (register && password !== confirm) {
       setError("两次输入的密码不一致");
       return;
@@ -173,7 +137,7 @@ function Auth({
           <p>
             从一个账户出发，连接属于你的网络。
             <br />
-            套餐、节点、每一份用量，清晰可见。
+            订阅、节点、每一份用量，清晰可见。
           </p>
           <div className="portal-orbits" aria-hidden="true">
             <span />
@@ -206,7 +170,7 @@ function Auth({
           <h2>{register ? "创建你的账户" : "欢迎回来"}</h2>
           <p>
             {register
-              ? "注册后，联系管理员开通适合你的套餐。"
+              ? "注册后选择订阅，管理员确认开通即可使用。"
               : "登录后，继续你的连接。"}
           </p>
           <div className="portal-auth-tabs">
@@ -338,418 +302,6 @@ function Auth({
     </div>
   );
 }
-function Summary({ profile }: { profile: UserProfile }) {
-  const entitlement = profile.entitlement;
-  const assigned = !!entitlement.planId;
-  const remaining =
-    entitlement.quotaBytes === null
-      ? null
-      : Math.max(0, entitlement.quotaBytes - entitlement.usedBytes);
-  return (
-    <>
-      <div className="portal-welcome">
-        <div>
-          <span className="eyebrow">YOUR CONNECTION, AT A GLANCE</span>
-          <h1>连接世界，从容一点。</h1>
-          <p>你的套餐与连接状态，都在这里。</p>
-        </div>
-        <div className="portal-welcome-icon">
-          <Globe2 size={64} strokeWidth={1} />
-          <span />
-          <i />
-        </div>
-      </div>
-      <div className="portal-summary-grid">
-        <section className="portal-plan-card">
-          <div className="portal-card-label">
-            <span>
-              <ShieldCheck size={17} /> 我的套餐
-            </span>
-            <EntitlementBadge value={entitlement} />
-          </div>
-          <h2>{entitlement.planName || "还没有套餐"}</h2>
-          <p>
-            {entitlement.status === "unassigned"
-              ? "联系管理员开通后，即可开始连接。"
-              : `有效期至 ${date(entitlement.expiresAt)}`}
-          </p>
-          <div className="portal-plan-footer">
-            <span>
-              <Globe2 size={15} /> {profile.nodes.length} 个可用节点
-            </span>
-            <Link to="/nodes">
-              查看节点 <ArrowRight size={15} />
-            </Link>
-          </div>
-        </section>
-        <section className="portal-usage-card">
-          <div className="portal-card-label">
-            <span>
-              <Activity size={17} /> 一次性流量
-            </span>
-            <span>上传 + 下载</span>
-          </div>
-          <div className="portal-usage-number">
-            {!assigned
-              ? "待开通"
-              : remaining === null
-                ? "不限量"
-                : bytes(remaining)}
-            <small>
-              {!assigned
-                ? "流量额度"
-                : remaining === null
-                  ? "流量额度"
-                  : "剩余额度"}
-            </small>
-          </div>
-          <Meter value={entitlement.usedBytes} max={entitlement.quotaBytes} />
-          <div className="portal-usage-footer">
-            <span>已用 {bytes(entitlement.usedBytes)}</span>
-            <span>
-              共{" "}
-              {!assigned
-                ? "—"
-                : entitlement.quotaBytes === null
-                  ? "不限量"
-                  : bytes(entitlement.quotaBytes)}
-            </span>
-          </div>
-          <p>
-            额度不按月重置
-            {entitlement.reservedBytes > 0
-              ? ` · ${bytes(entitlement.reservedBytes)} 正在连接中预留`
-              : ""}
-          </p>
-        </section>
-      </div>
-      <div className="portal-mini-grid">
-        <div>
-          <span className="portal-mini-icon">
-            <Gauge />
-          </span>
-          <section>
-            <span>共享带宽</span>
-            <strong>
-              {!assigned
-                ? "待开通"
-                : entitlement.bandwidthMbps === null
-                  ? "不限速"
-                  : `${entitlement.bandwidthMbps} Mbps`}
-            </strong>
-            <small>所有设备与节点共享</small>
-          </section>
-        </div>
-        <div>
-          <span className="portal-mini-icon">
-            <Cable />
-          </span>
-          <section>
-            <span>连接名额</span>
-            <strong>
-              {profile.entitlement.occupied}
-              <em> / {entitlement.maxConnections || 0}</em>
-            </strong>
-            <small>每个 VPN 连接占一个名额</small>
-          </section>
-        </div>
-        <div>
-          <span className="portal-mini-icon">
-            <Clock3 />
-          </span>
-          <section>
-            <span>有效期</span>
-            <strong className="portal-expiry">
-              {entitlement.expiresAt ? date(entitlement.expiresAt) : "等待开通"}
-            </strong>
-            <small>到期或流量用尽后停止服务</small>
-          </section>
-        </div>
-      </div>
-      {entitlement.status !== "active" && (
-        <Notice tone="warning">
-          {entitlement.status === "unassigned"
-            ? "账户已准备好。请联系管理员分配套餐并设置有效期。"
-            : `当前套餐${entitlementLabels[entitlement.status] || "不可用"}，请联系管理员处理后再连接。`}
-        </Notice>
-      )}
-      <Panel
-        title="下一次连接，很简单"
-        subtitle="使用官方客户端，或导入第三方订阅"
-      >
-        <div className="portal-start-grid">
-          <Link to="/downloads">
-            <span>
-              <Monitor size={25} />
-            </span>
-            <div>
-              <h3>下载 HQIP 客户端</h3>
-              <p>在浏览器安全登录，一键连接节点。</p>
-            </div>
-            <ArrowUpRight size={19} />
-          </Link>
-          <Link to="/subscriptions">
-            <span>
-              <Link2 size={25} />
-            </span>
-            <div>
-              <h3>使用订阅连接</h3>
-              <p>支持 Clash / Mihomo，按你的习惯连接。</p>
-            </div>
-            <ArrowUpRight size={19} />
-          </Link>
-        </div>
-      </Panel>
-      <Panel title="连接须知">
-        <div className="portal-help-grid">
-          <div>
-            <Check size={17} />
-            <p>登录账户不会占用连接名额；建立 VPN 连接才会计数。</p>
-          </div>
-          <div>
-            <Check size={17} />
-            <p>达到连接上限时，新连接会被拒绝。可在账户页面断开已有连接。</p>
-          </div>
-          <div>
-            <Check size={17} />
-            <p>节点与控制服务失联超过 120 秒后，连接停止；恢复后可重新连接。</p>
-          </div>
-        </div>
-      </Panel>
-    </>
-  );
-}
-function UserNodes({ profile }: { profile: UserProfile }) {
-  return (
-    <>
-      <PageHeader
-        eyebrow="YOUR NODES"
-        title="我的节点"
-        description="套餐包含的可用节点。默认节点仅在当前选择被移除时接替。"
-      />
-      {profile.nodes.length ? (
-        <div className="portal-node-grid">
-          {profile.nodes.map((node) => (
-            <section className="portal-node-card" key={node.id}>
-              <div className="portal-node-top">
-                <span className="portal-icon">
-                  <Globe2 size={22} />
-                </span>
-                <Badge tone={node.ready ? "success" : "warning"}>
-                  {node.ready ? "可以连接" : "同步中"}
-                </Badge>
-              </div>
-              <h2>{node.name}</h2>
-              <p>
-                {node.id === profile.entitlement.defaultNodeId
-                  ? "套餐默认节点"
-                  : "套餐可选节点"}
-              </p>
-              <div className="portal-node-bottom">
-                <ShieldCheck size={14} /> Hysteria 2 · 加密连接
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <Panel title="可用节点">
-          <Empty
-            icon={Globe2}
-            title="暂时没有可用节点"
-            description="开通套餐并完成节点配置后，它们会显示在这里。"
-          />
-        </Panel>
-      )}
-    </>
-  );
-}
-function ConfirmAction({
-  title,
-  description,
-  onClose,
-  action,
-  label = "确认",
-}: {
-  title: string;
-  description: string;
-  onClose: () => void;
-  action: () => Promise<void>;
-  label?: string;
-}) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  return (
-    <Modal
-      title={title}
-      description={description}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <ErrorNotice message={error} />
-      <div className="modal-actions">
-        <Button variant="secondary" disabled={busy} onClick={onClose}>
-          取消
-        </Button>
-        <Button
-          variant="danger"
-          busy={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await action();
-              onClose();
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {label}
-        </Button>
-      </div>
-    </Modal>
-  );
-}
-function Subscriptions({
-  profile,
-  refresh,
-}: {
-  profile: UserProfile;
-  refresh: () => Promise<void>;
-}) {
-  const [confirm, setConfirm] = useState<"rotate" | "revoke" | null>(null),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const toast = useToast(),
-    url = profile.subscriptionUrl || "";
-  async function create() {
-    setBusy(true);
-    setError("");
-    try {
-      await userAPI("/subscription", "POST", {});
-      await refresh();
-      toast("订阅已创建");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  const clash = `clash://install-config?url=${encodeURIComponent(url)}&name=${encodeURIComponent("HQIP")}`;
-  return (
-    <>
-      <PageHeader
-        eyebrow="SUBSCRIPTIONS"
-        title="我的订阅"
-        description="将套餐内的节点导入你喜欢的客户端。"
-      />
-      <ErrorNotice message={error} />
-      <Panel
-        title="Clash / Mihomo 订阅"
-        subtitle="订阅链接包含连接凭据，请妥善保存"
-        action={
-          <Badge tone={url ? "success" : "muted"}>
-            {url ? "已创建" : "未创建"}
-          </Badge>
-        }
-      >
-        {url ? (
-          <div className="portal-subscription">
-            <label htmlFor="subscription-url">你的专属订阅链接</label>
-            <input
-              id="subscription-url"
-              className="mono"
-              readOnly
-              value={url}
-              onFocus={(e) => e.currentTarget.select()}
-            />
-            <div className="portal-actions">
-              <CopyButton value={url} />
-              <a className="button button-primary" href={clash}>
-                <ArrowDownToLine size={16} /> 一键导入 Clash
-              </a>
-              <Button
-                variant="secondary"
-                icon={RefreshCw}
-                onClick={() => setConfirm("rotate")}
-              >
-                轮换链接
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirm("revoke")}>
-                撤销订阅
-              </Button>
-            </div>
-            <Notice>
-              导入后请在客户端更新订阅，再选择节点。共享链接会消耗你的流量与连接名额。
-            </Notice>
-          </div>
-        ) : (
-          <Empty
-            icon={Link2}
-            title="为你的客户端创建订阅"
-            description="兼容支持 Hysteria 2 的 Clash / Mihomo 客户端。"
-            action={
-              <Button
-                busy={busy}
-                icon={Link2}
-                disabled={profile.entitlement.status !== "active"}
-                onClick={() => void create()}
-              >
-                创建订阅
-              </Button>
-            }
-          />
-        )}
-      </Panel>
-      <Panel title="开始使用">
-        <ol className="portal-steps">
-          <li>
-            <span>01</span>
-            <div>
-              <h3>安装兼容客户端</h3>
-              <p>选择支持 Hysteria 2 的 Clash / Mihomo 客户端。</p>
-            </div>
-          </li>
-          <li>
-            <span>02</span>
-            <div>
-              <h3>导入你的订阅</h3>
-              <p>点击一键导入，或复制链接粘贴到客户端的订阅设置。</p>
-            </div>
-          </li>
-          <li>
-            <span>03</span>
-            <div>
-              <h3>选择节点，连接网络</h3>
-              <p>连接上限、共享带宽和总流量与官方客户端共同计算。</p>
-            </div>
-          </li>
-        </ol>
-      </Panel>
-      {confirm && (
-        <ConfirmAction
-          title={confirm === "rotate" ? "轮换订阅链接" : "撤销订阅"}
-          description={
-            confirm === "rotate"
-              ? "旧订阅链接与对应凭据将失效。请将新链接重新导入第三方客户端。"
-              : "订阅链接与对应连接权限将失效。之后可以重新创建订阅。"
-          }
-          label={confirm === "rotate" ? "确认轮换" : "撤销订阅"}
-          onClose={() => setConfirm(null)}
-          action={async () => {
-            await userAPI(`/subscription/${confirm}`, "POST", {});
-            await refresh();
-            toast(
-              confirm === "rotate" ? "新订阅已生成，请重新导入" : "订阅已撤销",
-            );
-          }}
-        />
-      )}
-    </>
-  );
-}
 function Downloads() {
   const releases = useUserData<{ releases: Release[] }>("/releases", 60000);
   return (
@@ -839,252 +391,6 @@ function Downloads() {
     </>
   );
 }
-function Password({
-  onClose,
-  onDone,
-}: {
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [current, setCurrent] = useState(""),
-    [password, setPassword] = useState(""),
-    [confirm, setConfirm] = useState(""),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (passwordError(password)) { setError(passwordError(password)); return; }
-    if (password !== confirm) {
-      setError("两次输入的新密码不一致");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await userAPI("/password", "POST", {
-        currentPassword: current,
-        newPassword: password,
-      });
-      onDone();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal
-      title="修改账户密码"
-      description="修改后会撤销登录会话，请使用新密码重新登录。"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form className="form-stack" onSubmit={submit}>
-        <Field label="当前密码">
-          <input
-            type="password"
-            autoComplete="current-password"
-            required
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-          />
-        </Field>
-        <Field label="新密码" hint="至少 6 个字符">
-          <input
-            type="password"
-            required
-            minLength={6}
-            maxLength={1024}
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </Field>
-        <Field label="确认新密码">
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-          />
-        </Field>
-        <ErrorNotice message={error} />
-        <Button type="submit" busy={busy}>
-          保存新密码
-        </Button>
-      </form>
-    </Modal>
-  );
-}
-function Account({
-  profile,
-  refresh,
-  onLogout,
-}: {
-  profile: UserProfile;
-  refresh: () => Promise<void>;
-  onLogout: () => void;
-}) {
-  const [password, setPassword] = useState(false),
-    [confirm, setConfirm] = useState<{
-      path: string;
-      title: string;
-      description: string;
-    } | null>(null);
-  const toast = useToast();
-  return (
-    <>
-      <PageHeader
-        eyebrow="ACCOUNT & SECURITY"
-        title="账户与连接"
-        description="管理登录记录、密码和当前 VPN 连接。"
-      />
-      <Panel title="账户信息">
-        <div className="portal-account-row">
-          <span className="portal-account-avatar">
-            {profile.user.email[0]?.toUpperCase()}
-          </span>
-          <div>
-            <strong>{profile.user.email}</strong>
-            <p>注册于 {date(profile.user.createdAt)}</p>
-          </div>
-          <Button
-            variant="secondary"
-            icon={KeyRound}
-            onClick={() => setPassword(true)}
-          >
-            修改密码
-          </Button>
-        </div>
-      </Panel>
-      <Panel
-        title="VPN 连接记录"
-        subtitle={`占用 ${profile.entitlement.occupied} / ${profile.entitlement.maxConnections || 0} 个名额；断开中连接确认关闭前仍占用名额`}
-      >
-        {profile.connections.length ? (
-          <div className="portal-records">
-            {profile.connections.map((connection) => (
-              <div key={connection.id}>
-                <span className="portal-record-icon">
-                  <Wifi size={19} />
-                </span>
-                <section>
-                  <strong>
-                    {connection.nodeName ||
-                      profile.nodes.find((n) => n.id === connection.nodeId)
-                        ?.name ||
-                      "节点连接"}
-                  </strong>
-                  <p>建立于 {date(connection.createdAt)}</p>
-                </section>
-                <Badge
-                  tone={
-                    connectionActive(connection)
-                      ? connection.ratePending
-                        ? "warning"
-                        : "success"
-                      : "muted"
-                  }
-                >
-                  {connectionState(connection)}
-                </Badge>
-                <Button
-                  variant="secondary"
-                  disabled={!connectionActive(connection)}
-                  icon={Unplug}
-                  onClick={() =>
-                    setConfirm({
-                      path: `/connections/${encodeURIComponent(connection.id)}/revoke`,
-                      title: "断开这个连接",
-                      description:
-                        "连接将被撤销。客户端可能尝试重新连接；如需停止自动重连，请同时关闭客户端。",
-                    })
-                  }
-                >
-                  断开
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Empty
-            icon={Wifi}
-            title="当前没有 VPN 连接"
-            description="从官方客户端或订阅客户端连接后，会显示在这里。"
-          />
-        )}
-      </Panel>
-      <Panel title="登录会话" subtitle="退出不再使用的设备，保护你的账户">
-        {profile.sessions.length ? (
-          <div className="portal-records">
-            {profile.sessions.map((session) => (
-              <div key={session.id}>
-                <span className="portal-record-icon">
-                  <Monitor size={19} />
-                </span>
-                <section>
-                  <strong>
-                    {session.clientName ||
-                      (session.kind === "browser"
-                        ? "网页浏览器"
-                        : "HQIP 客户端")}
-                  </strong>
-                  <p>最近活动 {date(session.lastSeen)}</p>
-                </section>
-                {session.current && <Badge tone="info">当前会话</Badge>}
-                {session.revoked && <Badge tone="muted">已退出</Badge>}
-                <Button
-                  variant="ghost"
-                  disabled={session.revoked}
-                  onClick={() =>
-                    setConfirm({
-                      path: `/sessions/${encodeURIComponent(session.id)}/revoke`,
-                      title: "退出这个会话",
-                      description: session.current
-                        ? "将退出当前浏览器。再次访问需要重新登录。"
-                        : "这个客户端需要重新登录才能访问账户。",
-                    })
-                  }
-                >
-                  退出
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Empty
-            icon={Monitor}
-            title="暂无登录记录"
-            description="登录信息同步后会显示在这里。"
-          />
-        )}
-      </Panel>
-      <Notice>邮箱当前只作为登录名。忘记密码时，请联系管理员重置。</Notice>
-      {password && (
-        <Password
-          onClose={() => setPassword(false)}
-          onDone={() => {
-            setPassword(false);
-            onLogout();
-          }}
-        />
-      )}
-      {confirm && (
-        <ConfirmAction
-          {...confirm}
-          onClose={() => setConfirm(null)}
-          action={async () => {
-            await userAPI(confirm.path, "POST", {});
-            await refresh();
-            toast("操作已完成");
-          }}
-        />
-      )}
-    </>
-  );
-}
 function Authorize() {
   const request =
     new URLSearchParams(useLocation().search).get("request") || "";
@@ -1164,23 +470,26 @@ function Authorize() {
   );
 }
 function PortalHome({ onLogout }: { onLogout: () => void }) {
-  const profile = useUserData<UserProfileResponse>("/profile");
-  const config = useUserData<PortalConfig>("/config", 30000);
-  if (profile.loading) return <Loading />;
+  const profile = useUserData<UserProfile>("/profile", 5000),
+    config = useUserData<PortalConfig>("/config", 30000);
   if (!profile.data)
-    return (
+    return profile.loading ? (
+      <Loading />
+    ) : (
       <ErrorNotice
         message={profile.error}
         retry={() => void profile.refresh()}
       />
     );
-  const data = normalizeProfile(profile.data);
+  const data = {
+    ...profile.data,
+    subscriptions: profile.data.subscriptions || [],
+    sessions: profile.data.sessions || [],
+  };
   return (
     <>
       {config.data?.recoveryHold && (
-        <Notice tone="warning">
-          备份恢复核对中，暂停新连接。管理员完成核对后即可恢复使用。
-        </Notice>
+        <Notice tone="warning">备份恢复核对中，暂时不能建立新连接。</Notice>
       )}
       <ErrorNotice
         message={
@@ -1189,17 +498,15 @@ function PortalHome({ onLogout }: { onLogout: () => void }) {
         retry={() => void profile.refresh()}
       />
       <Routes>
-        <Route path="/" element={<Summary profile={data} />} />
-        <Route path="/nodes" element={<UserNodes profile={data} />} />
-        <Route
-          path="/subscriptions"
-          element={<Subscriptions profile={data} refresh={profile.refresh} />}
-        />
+        <Route path="/" element={<UserOverview profile={data} />} />
+        <Route path="/catalog" element={<SubscriptionCatalog />} />
+        <Route path="/subscriptions" element={<OwnedSubscriptions />} />
+        <Route path="/subscriptions/:id" element={<UserSubscriptionDetail />} />
         <Route path="/downloads" element={<Downloads />} />
         <Route
           path="/account"
           element={
-            <Account
+            <AccountSettings
               profile={data}
               refresh={profile.refresh}
               onLogout={onLogout}
@@ -1233,7 +540,9 @@ export default function Portal() {
     [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     location = useLocation();
-  const authPage = ["/login", "/register", "/authorize"].includes(location.pathname);
+  const authPage = ["/login", "/register", "/authorize"].includes(
+    location.pathname,
+  );
   const logout = () => {
     setUserCSRF("");
     setSession({ authenticated: false });
@@ -1265,7 +574,9 @@ export default function Portal() {
     if (session?.authenticated === false && !authPage) {
       // Reload the document so the login page receives its Turnstile CSP.
       const returnTo = location.pathname + location.search;
-      window.location.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+      window.location.replace(
+        `/login?returnTo=${encodeURIComponent(returnTo)}`,
+      );
     }
   }, [session, authPage, location.pathname, location.search]);
   const notify = (message: string) => {
@@ -1291,15 +602,27 @@ export default function Portal() {
         onSession={(value) => {
           setSession(value);
           if (["/login", "/register"].includes(location.pathname)) {
-            const requested = new URLSearchParams(location.search).get("returnTo") || "/";
+            const requested =
+              new URLSearchParams(location.search).get("returnTo") || "/";
             let destination = "/";
             try {
               const target = new URL(requested, window.location.origin);
               if (
                 target.origin === window.location.origin &&
-                ["/", "/nodes", "/subscriptions", "/downloads", "/account", "/authorize"].includes(target.pathname)
-              ) destination = target.pathname + target.search;
-            } catch { /* Invalid return URLs use the account overview. */ }
+                ([
+                  "/",
+                  "/catalog",
+                  "/subscriptions",
+                  "/downloads",
+                  "/account",
+                  "/authorize",
+                ].includes(target.pathname) ||
+                  /^\/subscriptions\/[A-Za-z0-9_-]+$/.test(target.pathname))
+              )
+                destination = target.pathname + target.search;
+            } catch {
+              /* Invalid return URLs use the account overview. */
+            }
             window.location.replace(destination);
           }
         }}
@@ -1307,10 +630,10 @@ export default function Portal() {
     );
   const links: { to: string; name: string; icon: ReactNode }[] = [
     { to: "/", name: "账户概览", icon: <LayoutDashboard size={19} /> },
-    { to: "/nodes", name: "我的节点", icon: <Globe2 size={19} /> },
+    { to: "/catalog", name: "订阅商城", icon: <Globe2 size={19} /> },
     { to: "/subscriptions", name: "我的订阅", icon: <Link2 size={19} /> },
     { to: "/downloads", name: "客户端下载", icon: <Download size={19} /> },
-    { to: "/account", name: "账户与连接", icon: <UserRound size={19} /> },
+    { to: "/account", name: "账户设置", icon: <UserRound size={19} /> },
   ];
   return (
     <ToastContext.Provider value={notify}>
@@ -1352,7 +675,7 @@ export default function Portal() {
               <CircleHelp size={20} />
               <strong>需要帮助？</strong>
               <p>
-                套餐开通与密码重置，
+                订阅开通与密码重置，
                 <br />
                 请联系你的管理员。
               </p>
@@ -1379,7 +702,9 @@ export default function Portal() {
               <span className="topbar-slash">/</span>
               <strong>
                 {links.find((link) => link.to === location.pathname)?.name ||
-                  "客户端授权"}
+                  (location.pathname.startsWith("/subscriptions/")
+                    ? "订阅详情"
+                    : "客户端授权")}
               </strong>
             </div>
             <div className="topbar-right">

@@ -27,18 +27,15 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 			if _, err = s.Store.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]' WHERE id=?", n.ID); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := s.Store.SavePlan("", model.Plan{Name: "test", Enabled: true, SaleEnabled: true, NodeIDs: []string{n.ID}, DefaultNodeID: n.ID, MaxConnections: 2})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = s.Store.AssignPortal(u.ID, plan.ID, s.Store.Now().Add(time.Hour), false); err != nil {
-				t.Fatal(err)
-			}
-			oldURL, err := s.Store.PortalSubscription(u.ID, "create")
+			sub := subscriptionFixture(t, s, u, []string{n.ID}, n.ID, 2)
+			oldURL, err := s.Store.PortalSubscription(u.ID, sub.ID, "create")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err = s.Store.ActivatePortal(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.Store.Rules(); err != nil {
 				t.Fatal(err)
 			}
 			// The first Now call occurs after token resolution but before the
@@ -65,12 +62,12 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 				t.Fatal("subscription request did not reach profile barrier")
 			}
 			if action == "revoke-and-create" {
-				_, err = s.Store.PortalSubscription(u.ID, "revoke")
+				_, err = s.Store.PortalSubscription(u.ID, sub.ID, "revoke")
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			newURL, err := s.Store.PortalSubscription(u.ID, "rotate")
+			newURL, err := s.Store.PortalSubscription(u.ID, sub.ID, "rotate")
 			if err != nil {
 				t.Fatal(err)
 			}

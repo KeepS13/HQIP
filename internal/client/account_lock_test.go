@@ -18,7 +18,7 @@ func TestSlowAccountRequestCannotBlockLocalDisconnect(t *testing.T) {
 	arrived, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v2/client/connections" {
+		if r.URL.Path == "/api/v3/client/connections" {
 			once.Do(func() { close(arrived) })
 			<-release
 		}

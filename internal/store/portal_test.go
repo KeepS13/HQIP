@@ -13,7 +13,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/model"
 )
 
-func portalFixture(t *testing.T, slots int, quota *int64) (*Store, *time.Time, model.PortalUser, model.Plan, model.Node, string) {
+func portalFixture(t *testing.T, slots int, quota *int64) (*Store, *time.Time, model.PortalUser, model.SubscriptionTemplate, model.Node, string) {
 	t.Helper()
 	s, now := fixture(t)
 	n := newNode(t, s, "portal-node")
@@ -26,23 +26,25 @@ func portalFixture(t *testing.T, slots int, quota *int64) (*Store, *time.Time, m
 		t.Fatal(e)
 	}
 	bandwidth := float64(8)
-	p, e := s.SavePlan("", model.Plan{Name: "套餐", Enabled: true, SaleEnabled: true, NodeIDs: []string{n.ID}, DefaultNodeID: n.ID, BandwidthMbps: &bandwidth, QuotaBytes: quota, MaxConnections: slots})
+	p, e := s.SaveSubscriptionTemplate("", model.SubscriptionTemplate{Name: "订阅", Enabled: true, Listed: true, ValidityDays: 1, NodeIDs: []string{n.ID}, DefaultNodeID: n.ID, BandwidthMbps: &bandwidth, QuotaBytes: quota, MaxConnections: slots}, 0)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = s.AssignPortal(u.ID, p.ID, now.Add(24*time.Hour), false); e != nil {
+	sub, e := s.AssignSubscription(u.ID, p.ID, "fixture-grant", 1, p.Revision)
+	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.PortalSubscription(u.ID, "create"); e != nil {
+	if _, e = s.PortalSubscription(u.ID, sub.ID, "create"); e != nil {
 		t.Fatal(e)
 	}
-	password, e := s.PortalCredential(u.ID, n.ID, "subscription")
+	password, e := s.PortalCredential(u.ID, sub.ID, n.ID, "subscription")
 	if e != nil {
 		t.Fatal(e)
 	}
 	if e = s.ActivatePortal(); e != nil {
 		t.Fatal(e)
 	}
+	u, _ = s.PortalUser(u.ID)
 	return s, now, u, p, n, password
 }
 func acquire(t *testing.T, s *Store, n model.Node, password, conn string) model.ConnectionLease {
@@ -122,7 +124,7 @@ func TestPortalLeaseConcurrentSlotsAndBudgetConservation(t *testing.T) {
 	if len(leases) != 2 {
 		t.Fatalf("slots oversubscribed: %d", len(leases))
 	}
-	e, _ := s.Entitlement(u.ID)
+	e, _ := s.UserSubscription(u.ID, u.Subscriptions[0].ID)
 	if e.ReservedBytes > q || e.Occupied != 2 {
 		t.Fatalf("budget/slot invariant %+v", e)
 	}
@@ -176,7 +178,7 @@ func TestPortalBudgetReplayExpiryAndLateSettlement(t *testing.T) {
 	l := acquire(t, s, n, password, "a")
 	l = renew(t, s, l, 100, 200, false)
 	l = renew(t, s, l, 100, 200, false)
-	e, _ := s.Entitlement(u.ID)
+	e, _ := s.UserSubscription(u.ID, u.Subscriptions[0].ID)
 	if e.UsedBytes != 300 || e.ReservedBytes != 724 {
 		t.Fatalf("duplicate usage charged %+v", e)
 	}
@@ -189,7 +191,7 @@ func TestPortalBudgetReplayExpiryAndLateSettlement(t *testing.T) {
 	}
 	l = renew(t, s, l, 150, 250, true)
 	_ = renew(t, s, l, 150, 250, true)
-	e, _ = s.Entitlement(u.ID)
+	e, _ = s.UserSubscription(u.ID, u.Subscriptions[0].ID)
 	if e.UsedBytes != 400 || e.ReservedBytes != 0 {
 		t.Fatalf("late settlement not exact %+v", e)
 	}
@@ -202,41 +204,6 @@ func TestPortalBudgetReplayExpiryAndLateSettlement(t *testing.T) {
 	}
 	if _, err := s.RenewLease("another-node", next.ID, model.LeaseUsage{}); !errors.Is(err, ErrNotFound) {
 		t.Fatal("cross node settlement accepted")
-	}
-}
-func TestPortalPlanLiveEditsAndExplicitReset(t *testing.T) {
-	s, now, u, p, n, password := portalFixture(t, 2, nil)
-	l := acquire(t, s, n, password, "a")
-	l = renew(t, s, l, 20, 30, false)
-	p.NodeIDs = []string{}
-	p.DefaultNodeID = ""
-	if _, e := s.SavePlan(p.ID, p); e != nil {
-		t.Fatal(e)
-	}
-	if _, e := s.AcquireLease(n.ID, strings.Repeat("b", 32), password); !errors.Is(e, ErrEntitlement) {
-		t.Fatal("removed node admitted")
-	}
-	if _, e := s.RenewLease(n.ID, l.ID, model.LeaseUsage{UploadBytes: 20, DownloadBytes: 30}); !errors.Is(e, ErrEntitlement) {
-		t.Fatal("removed node renewed")
-	}
-	if e := s.AssignPortal(u.ID, p.ID, now.Add(48*time.Hour), false); e != nil {
-		t.Fatal(e)
-	}
-	ent, _ := s.Entitlement(u.ID)
-	if ent.UsedBytes != 50 || ent.Epoch != 1 {
-		t.Fatal("renewal reset accounting")
-	}
-	if e := s.AssignPortal(u.ID, p.ID, now.Add(48*time.Hour), true); e != nil {
-		t.Fatal(e)
-	}
-	ent, _ = s.Entitlement(u.ID)
-	if ent.UsedBytes != 0 || ent.Epoch != 2 {
-		t.Fatal("explicit reopen did not reset")
-	}
-	_ = renew(t, s, l, 40, 60, true)
-	ent, _ = s.Entitlement(u.ID)
-	if ent.UsedBytes != 0 {
-		t.Fatal("old generation charged new quota")
 	}
 }
 func TestPortalTrafficFeedsNodeLedgerWithoutQuotaDoubleCharge(t *testing.T) {
@@ -259,7 +226,7 @@ func TestPortalTrafficFeedsNodeLedgerWithoutQuotaDoubleCharge(t *testing.T) {
 	if e != nil || totals.TotalUpload != 80 || totals.TotalDownload != 120 {
 		t.Fatal("server aggregate omitted portal traffic")
 	}
-	ent, _ := s.Entitlement(u.ID)
+	ent, _ := s.UserSubscription(u.ID, u.Subscriptions[0].ID)
 	if ent.UsedBytes != 200 {
 		t.Fatal("Agent report double charged quota")
 	}
@@ -320,11 +287,12 @@ func TestPortalPKCERefreshReplayAndScopeIsolation(t *testing.T) {
 func TestPortalSubscriptionRevocationLeavesNativeCredentialsIndependent(t *testing.T) {
 	s, _, u, _, n, password := portalFixture(t, 2, nil)
 	l := acquire(t, s, n, password, "a")
-	native, e := s.PortalCredential(u.ID, n.ID, "fake-native-scope")
+	session := nativeSubscriptionSession(t, s, u.ID, u.Subscriptions[0].ID)
+	native, e := s.PortalCredential(u.ID, u.Subscriptions[0].ID, n.ID, session)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.PortalSubscription(u.ID, "rotate"); e != nil {
+	if _, e = s.PortalSubscription(u.ID, u.Subscriptions[0].ID, "rotate"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = s.AcquireLease(n.ID, strings.Repeat("b", 32), password); !errors.Is(e, ErrUnauthorized) {
@@ -333,7 +301,7 @@ func TestPortalSubscriptionRevocationLeavesNativeCredentialsIndependent(t *testi
 	if _, e = s.RenewLease(n.ID, l.ID, model.LeaseUsage{}); !errors.Is(e, ErrEntitlement) {
 		t.Fatal("old subscription connection not revoked")
 	}
-	same, e := s.PortalCredential(u.ID, n.ID, "fake-native-scope")
+	same, e := s.PortalCredential(u.ID, u.Subscriptions[0].ID, n.ID, session)
 	if e != nil || same != native {
 		t.Fatal("rotation changed unrelated native credential")
 	}
@@ -347,21 +315,21 @@ func TestPortalRestoreRequiresFinalLedgerReviewAndNeverReleasesReservations(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, _ := s.Entitlement(u.ID)
+	before, _ := s.UserSubscription(u.ID, u.Subscriptions[0].ID)
 	if err = s.ReconcileRestore(); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err = s.PortalIdentity(tokens.AccessToken, "browser"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatal("restore revived browser session")
 	}
-	if link, _ := s.PortalSubscription(u.ID, "get"); link != "" {
+	if link, _ := s.PortalSubscription(u.ID, u.Subscriptions[0].ID, "get"); link != "" {
 		t.Fatal("restore revived subscription")
 	}
 	state, err := s.PortalRecovery()
 	if err != nil || !state.Hold || state.Ready {
 		t.Fatalf("restore recovery not held %+v %v", state, err)
 	}
-	if err = s.ResumePortalRecovery(state.Epoch, true, []RecoveryTotal{{u.ID, 30}}); err == nil {
+	if err = s.ResumePortalRecovery(state.Epoch, true, []RecoveryTotal{{UserID: u.ID, SubscriptionID: u.Subscriptions[0].ID, UsedBytes: 30}}); err == nil {
 		t.Fatal("recovery bypassed old lease wait")
 	}
 	*now = now.Add(121 * time.Second)
@@ -383,10 +351,10 @@ func TestPortalRestoreRequiresFinalLedgerReviewAndNeverReleasesReservations(t *t
 	if s.PortalSetting("portal_recovery_hold") != "true" {
 		t.Fatal("activation bypassed recovery review")
 	}
-	if err = s.ResumePortalRecovery("wrong-epoch", true, []RecoveryTotal{{u.ID, 100}}); err == nil {
+	if err = s.ResumePortalRecovery("wrong-epoch", true, []RecoveryTotal{{UserID: u.ID, SubscriptionID: u.Subscriptions[0].ID, UsedBytes: 100}}); err == nil {
 		t.Fatal("wrong recovery epoch accepted")
 	}
-	if err = s.ResumePortalRecovery(state.Epoch, true, []RecoveryTotal{{u.ID, 99}}); err == nil {
+	if err = s.ResumePortalRecovery(state.Epoch, true, []RecoveryTotal{{UserID: u.ID, SubscriptionID: u.Subscriptions[0].ID, UsedBytes: 99}}); err == nil {
 		t.Fatal("usage rollback accepted")
 	}
 	// Activating again increments desired revision; a fresh node ACK is required.
@@ -394,61 +362,15 @@ func TestPortalRestoreRequiresFinalLedgerReviewAndNeverReleasesReservations(t *t
 	if err = s.Report(n.ID, model.AgentReport{Revision: desired.Revision, CoreHealthy: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.ResumePortalRecovery(state.Epoch, true, []RecoveryTotal{{u.ID, 100}}); err != nil {
+	if err = s.ResumePortalRecovery(state.Epoch, true, []RecoveryTotal{{UserID: u.ID, SubscriptionID: u.Subscriptions[0].ID, UsedBytes: 100}}); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := s.Entitlement(u.ID)
+	after, _ := s.UserSubscription(u.ID, u.Subscriptions[0].ID)
 	if after.UsedBytes != 100 || after.ReservedBytes != before.ReservedBytes {
 		t.Fatalf("recovery lost known usage or returned uncertain budget %+v", after)
 	}
 	if s.PortalSetting("portal_recovery_hold") != "false" {
 		t.Fatal("review did not resume")
-	}
-}
-
-func TestPortalSaleStopCASAndConnectionImpact(t *testing.T) {
-	s, now, u, p, n, password := portalFixture(t, 2, nil)
-	l := acquire(t, s, n, password, "a")
-	p.SaleEnabled = false
-	updated, err := s.SavePlan(p.ID, p, p.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.SavePlan(p.ID, p, p.Revision); !errors.Is(err, ErrConflict) {
-		t.Fatal("stale plan overwrite accepted")
-	}
-	before, _ := s.PortalUser(u.ID)
-	if err = s.AssignPortal(u.ID, p.ID, now.Add(48*time.Hour), false, before.Revision-1); !errors.Is(err, ErrConflict) {
-		t.Fatal("stale assignment accepted")
-	}
-	if err = s.AssignPortal(u.ID, p.ID, now.Add(48*time.Hour), false, before.Revision); err != nil {
-		t.Fatal("existing stopped-sale plan cannot extend", err)
-	}
-	ent, _ := s.Entitlement(u.ID)
-	if ent.Status != "active" {
-		t.Fatal("sale stop disabled current entitlement")
-	}
-	if err = s.AssignPortal(u.ID, p.ID, now.Add(48*time.Hour), true); err == nil {
-		t.Fatal("stopped-sale plan reopened")
-	}
-	another, err := s.RegisterPortal("another@example.com", "another-safe-password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.AssignPortal(another.ID, p.ID, now.Add(24*time.Hour), false); err == nil {
-		t.Fatal("new user assigned stopped-sale plan")
-	}
-	_ = renew(t, s, l, 0, 0, false)
-	updated.Enabled = false
-	impact, err := s.PreviewPortalPlan(p.ID, updated)
-	if err != nil || impact.AffectedUsers != 1 || len(impact.ConnectionsToClose) != 1 || impact.ConnectionsToClose[0].ID != l.ID {
-		t.Fatalf("preview omitted exact closing connection %+v %v", impact, err)
-	}
-	if _, err = s.SavePlan(p.ID, updated, updated.Revision); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.RenewLease(n.ID, l.ID, model.LeaseUsage{}); !errors.Is(err, ErrEntitlement) {
-		t.Fatal("disabled plan renewed")
 	}
 }
 

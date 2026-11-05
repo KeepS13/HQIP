@@ -17,7 +17,16 @@ func migrate(db *sql.DB) error {
 	if err = tx.QueryRow("SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil {
 		return err
 	}
+	if version == "5" {
+		if _, err = tx.Exec("DROP INDEX IF EXISTS one_pending_subscription_request"); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if version == "4" {
+		if err = migrateSubscriptions(tx); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	if version != "1" && version != "2" && version != "3" {

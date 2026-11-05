@@ -20,8 +20,10 @@ import (
 
 func (s *Server) registerPortalAdmin(m *http.ServeMux) {
 	for pattern, handler := range map[string]http.HandlerFunc{
-		"GET /api/v1/plans": s.portalPlans, "POST /api/v1/plans": s.portalSavePlan, "PUT /api/v1/plans/{id}": s.portalSavePlan, "POST /api/v1/plans/{id}/preview": s.portalPlanPreview,
-		"GET /api/v1/users": s.portalUsers, "GET /api/v1/users/{id}": s.portalAdminUser, "PATCH /api/v1/users/{id}": s.portalAdminEnabled, "POST /api/v1/users/{id}/assignment": s.portalAdminAssignment, "POST /api/v1/users/{id}/password": s.portalAdminPassword,
+		"GET /api/v1/subscription-templates": s.subscriptionTemplates, "POST /api/v1/subscription-templates": s.saveSubscriptionTemplate, "PUT /api/v1/subscription-templates/{id}": s.saveSubscriptionTemplate, "POST /api/v1/subscription-templates/{id}/preview": s.previewSubscriptionTemplate,
+		"GET /api/v1/subscription-requests": s.adminSubscriptionRequests, "POST /api/v1/subscription-requests/{id}/approve": s.decideSubscriptionRequest, "POST /api/v1/subscription-requests/{id}/reject": s.decideSubscriptionRequest,
+		"GET /api/v1/users/{id}/subscriptions": s.adminUserSubscriptions, "POST /api/v1/users/{id}/subscriptions": s.adminAssignSubscription, "DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}": s.adminRemoveSubscription,
+		"GET /api/v1/users": s.portalUsers, "GET /api/v1/users/{id}": s.portalAdminUser, "PATCH /api/v1/users/{id}": s.portalAdminEnabled, "POST /api/v1/users/{id}/password": s.portalAdminPassword,
 		"POST /api/v1/users/{id}/sessions/{sessionId}/revoke": s.portalAdminRevokeSession, "POST /api/v1/users/{id}/connections/{leaseId}/revoke": s.portalAdminRevokeConnection,
 		"GET /api/v1/settings/turnstile": s.portalTurnstileSettings, "PUT /api/v1/settings/turnstile": s.portalTurnstileSettings, "GET /api/v1/settings/portal": s.portalSettings, "PUT /api/v1/settings/portal": s.portalSettings, "POST /api/v1/settings/portal/activate": s.portalActivate,
 		"GET /api/v1/settings/portal/recovery": s.portalRecovery, "POST /api/v1/settings/portal/recovery/resume": s.portalResume,
@@ -39,20 +41,24 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("GET /downloads/HQIP-Windows-x64.zip", s.portalDownload)
 	for pattern, handler := range map[string]portalHandler{
 		"GET /api/v1/user/profile": s.portalProfile, "POST /api/v1/user/logout": s.portalLogout, "POST /api/v1/user/password": s.portalPassword,
-		"POST /api/v1/user/subscription": s.portalSubscription, "POST /api/v1/user/subscription/rotate": s.portalSubscription, "POST /api/v1/user/subscription/revoke": s.portalSubscription,
+		"GET /api/v1/user/catalog": s.userCatalog, "GET /api/v1/user/subscription-requests": s.userSubscriptionRequests, "POST /api/v1/user/subscription-requests": s.userSubscriptionRequests, "POST /api/v1/user/subscription-requests/{id}/cancel": s.cancelSubscriptionRequest,
+		"GET /api/v1/user/subscriptions": s.userSubscriptions, "GET /api/v1/user/subscriptions/{id}": s.userSubscriptionDetail,
+		"POST /api/v1/user/subscriptions/{id}/import-link": s.portalSubscription, "POST /api/v1/user/subscriptions/{id}/import-link/rotate": s.portalSubscription, "POST /api/v1/user/subscriptions/{id}/import-link/revoke": s.portalSubscription,
 		"GET /api/v1/user/sessions": s.portalSessions, "POST /api/v1/user/sessions/{id}/revoke": s.portalRevokeSession,
-		"GET /api/v1/user/connections": s.portalConnections, "POST /api/v1/user/connections/{id}/revoke": s.portalRevokeConnection,
 		"GET /api/v1/user/authorize/{id}": s.portalAuthorize, "POST /api/v1/user/authorize/{id}": s.portalAuthorize,
 	} {
 		m.Handle(pattern, s.portalAuth("browser", handler))
 	}
 	m.HandleFunc("GET /usub/{token}", s.portalYAML)
-	m.HandleFunc("POST /api/v2/client/authorize", s.nativeBegin)
-	m.HandleFunc("POST /api/v2/client/token", s.nativeToken)
-	m.HandleFunc("POST /api/v2/client/refresh", s.nativeRefresh)
+	m.HandleFunc("/api/v2/client/", func(w http.ResponseWriter, r *http.Request) {
+		fail(w, http.StatusUpgradeRequired, "请升级 HQIP 多订阅客户端后重新登录")
+	})
+	m.HandleFunc("POST /api/v3/client/authorize", s.nativeBegin)
+	m.HandleFunc("POST /api/v3/client/token", s.nativeToken)
+	m.HandleFunc("POST /api/v3/client/refresh", s.nativeRefresh)
 	for pattern, handler := range map[string]portalHandler{
-		"POST /api/v2/client/logout": s.portalLogout, "GET /api/v2/client/profile": s.nativeProfile, "POST /api/v2/client/status": s.nativeStatus, "GET /api/v2/client/rules/{hash}": s.nativeRules,
-		"GET /api/v2/client/connections": s.portalConnections, "POST /api/v2/client/connections/drain": s.nativeDrain,
+		"POST /api/v3/client/logout": s.portalLogout, "GET /api/v3/client/profile": s.nativeProfile, "POST /api/v3/client/subscription": s.nativeSelectSubscription, "POST /api/v3/client/status": s.nativeStatus, "GET /api/v3/client/rules/{hash}": s.nativeRules,
+		"GET /api/v3/client/connections": s.portalConnections, "POST /api/v3/client/connections/drain": s.nativeDrain,
 	} {
 		m.Handle(pattern, s.portalAuth("native", handler))
 	}
@@ -336,28 +342,19 @@ func (s *Server) portalProfileData(user, session string) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	sub, err := s.Store.PortalSubscription(user, "get")
-	if err != nil {
-		return nil, err
-	}
 	sessions, err := s.Store.PortalSessions(user, session)
 	if err != nil {
 		return nil, err
 	}
-	connections, err := s.Store.PortalConnections(user, "")
-	if err != nil {
-		return nil, err
-	}
-	nodes := []map[string]any{}
-	if u.Entitlement != nil {
-		for _, id := range u.Entitlement.NodeIDs {
-			n, e := s.Store.Node(id)
-			if e == nil {
-				nodes = append(nodes, map[string]any{"id": n.ID, "name": n.Name, "server": n.PublicIP, "publicIp": n.PublicIP, "port": n.Port, "sni": n.Domain, "ready": n.Status == "ready"})
-			}
+	v := map[string]any{"user": u, "subscriptions": u.Subscriptions, "sessions": sessions}
+	if session == "" { // Only the authenticated administrator view includes VPN history.
+		connections, err := s.Store.PortalConnections(user, "")
+		if err != nil {
+			return nil, err
 		}
+		v["connections"] = connections
 	}
-	return map[string]any{"user": u, "entitlement": u.Entitlement, "subscriptionUrl": sub, "sessions": sessions, "connections": connections, "nodes": nodes}, nil
+	return v, nil
 }
 func (s *Server) portalSubscription(w http.ResponseWriter, r *http.Request, user, session string) {
 	action := "create"
@@ -367,8 +364,8 @@ func (s *Server) portalSubscription(w http.ResponseWriter, r *http.Request, user
 	if strings.HasSuffix(r.URL.Path, "/revoke") {
 		action = "revoke"
 	}
-	link, err := s.Store.PortalSubscription(user, action)
-	portalResult(w, map[string]string{"subscriptionUrl": link}, err)
+	link, err := s.Store.PortalSubscription(user, r.PathValue("id"), action)
+	portalResult(w, map[string]string{"url": link}, err)
 }
 func (s *Server) portalSessions(w http.ResponseWriter, r *http.Request, user, session string) {
 	v, e := s.Store.PortalSessions(user, session)
@@ -377,23 +374,24 @@ func (s *Server) portalSessions(w http.ResponseWriter, r *http.Request, user, se
 func (s *Server) portalRevokeSession(w http.ResponseWriter, r *http.Request, user, session string) {
 	portalResult(w, map[string]bool{"ok": true}, s.Store.RevokePortalSession(user, r.PathValue("id")))
 }
-func (s *Server) portalRevokeConnection(w http.ResponseWriter, r *http.Request, user, session string) {
-	portalResult(w, map[string]bool{"ok": true}, s.Store.RevokePortalConnection(user, r.PathValue("id"), ""))
-}
 func (s *Server) portalConnections(w http.ResponseWriter, r *http.Request, user, session string) {
-	scope := ""
-	if strings.HasPrefix(r.URL.Path, "/api/v2/") {
-		scope = session
-	}
-	v, err := s.Store.PortalConnections(user, scope)
+	v, err := s.Store.PortalConnections(user, session)
 	if err != nil {
 		portalResult(w, nil, err)
 		return
 	}
-	e, err := s.Store.Entitlement(user)
+	id, selectionRevision, err := s.Store.SelectedSubscription(user, session)
 	if err != nil {
 		portalResult(w, nil, err)
 		return
+	}
+	var e *model.UserSubscription
+	if id != "" {
+		e, err = s.Store.UserSubscription(user, id)
+		if err != nil {
+			portalResult(w, nil, err)
+			return
+		}
 	}
 	max, occupied := 0, 0
 	if e != nil {
@@ -402,13 +400,13 @@ func (s *Server) portalConnections(w http.ResponseWriter, r *http.Request, user,
 	}
 	code, message := "", ""
 	if e == nil || e.Status != "active" {
-		code = "ENTITLEMENT_UNAVAILABLE"
-		message = "套餐尚未开通、已到期或额度已用完"
+		code = "SUBSCRIPTION_UNAVAILABLE"
+		message = "请选择有效订阅；当前订阅可能已到期、移除或流量耗尽"
 	} else if occupied >= max {
 		code = "CONNECTION_LIMIT"
-		message = "在线连接数已达套餐上限，请先断开其他连接并等待节点确认"
+		message = "在线连接数已达此订阅上限，请先断开使用此订阅的其他连接"
 	}
-	reply(w, 200, map[string]any{"connections": v, "maxConnections": max, "occupied": occupied, "admissionErrorCode": code, "message": message})
+	reply(w, 200, map[string]any{"subscriptionId": id, "selectionRevision": selectionRevision, "connections": v, "maxConnections": max, "occupied": occupied, "admissionErrorCode": code, "message": message})
 }
 func (s *Server) portalAuthorize(w http.ResponseWriter, r *http.Request, user, session string) {
 	if r.Method == "GET" {
@@ -465,7 +463,12 @@ func (s *Server) nativeRefresh(w http.ResponseWriter, r *http.Request) {
 	portalResult(w, t, e)
 }
 func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, session string) {
-	p, e, err := s.Store.PortalClientProfile(user, session)
+	id, selectionRevision, err := s.Store.SelectedSubscription(user, session)
+	if err != nil {
+		portalResult(w, nil, err)
+		return
+	}
+	p, e, err := s.Store.PortalClientProfile(user, session, id)
 	if err != nil {
 		portalResult(w, nil, err)
 		return
@@ -475,11 +478,23 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 		portalResult(w, nil, err)
 		return
 	}
+	p.SubscriptionID = id
+	p.SelectionRevision = selectionRevision
+	latestID, latestSelection, err := s.Store.SelectedSubscription(user, session)
+	if err != nil {
+		portalResult(w, nil, err)
+		return
+	}
+	if latestID != id || latestSelection != selectionRevision {
+		portalResult(w, nil, store.ErrConflict)
+		return
+	}
 	v := struct {
 		model.ClientProfile
-		User        model.PortalUser   `json:"user"`
-		Entitlement *model.Entitlement `json:"entitlement"`
-	}{p, u, e}
+		User          model.PortalUser         `json:"user"`
+		Subscription  *model.UserSubscription  `json:"subscription"`
+		Subscriptions []model.UserSubscription `json:"subscriptions"`
+	}{p, u, e, u.Subscriptions}
 	raw, _ := json.Marshal(v)
 	sum := sha256.Sum256(raw)
 	etag := "\"" + hex.EncodeToString(sum[:]) + "\""
@@ -513,25 +528,37 @@ func (s *Server) nativeRules(w http.ResponseWriter, r *http.Request, user, sessi
 	_, _ = w.Write(raw)
 }
 func (s *Server) nativeDrain(w http.ResponseWriter, r *http.Request, user, session string) {
-	portalResult(w, map[string]bool{"ok": true}, s.Store.RevokePortalConnection(user, "", session))
+	var b struct {
+		SubscriptionID   string `json:"subscriptionId"`
+		ExpectedRevision int64  `json:"expectedRevision"`
+	}
+	if !readJSON(w, r, &b) {
+		return
+	}
+	portalResult(w, map[string]bool{"ok": true}, s.Store.DrainSubscriptionSession(user, session, b.SubscriptionID, b.ExpectedRevision))
 }
 func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 	if !s.Store.PortalEnabled() {
 		fail(w, 404, "订阅不可用")
 		return
 	}
-	user, err := s.Store.ResolvePortalSubscription(r.PathValue("token"))
+	user, subscription, err := s.Store.ResolvePortalSubscription(r.PathValue("token"))
 	if err != nil {
 		fail(w, 404, "订阅不存在或已撤销")
 		return
 	}
-	p, e, err := s.Store.PortalClientProfile(user, "subscription")
+	p, e, err := s.Store.PortalClientProfile(user, "subscription", subscription)
 	if err != nil {
+		currentUser, currentSubscription, tokenErr := s.Store.ResolvePortalSubscription(r.PathValue("token"))
+		if tokenErr != nil || currentUser != user || currentSubscription != subscription {
+			fail(w, 404, "订阅不存在或已撤销")
+			return
+		}
 		portalResult(w, nil, err)
 		return
 	}
 	if e == nil || e.Status != "active" {
-		fail(w, 403, "套餐尚未开通或已失效")
+		fail(w, 403, "此订阅已失效")
 		return
 	}
 	proxies := []map[string]any{}
@@ -553,7 +580,7 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(proxies) == 0 {
-		fail(w, 503, "套餐尚无可用节点")
+		fail(w, 503, "此订阅尚无可用节点")
 		return
 	}
 	v, err := s.Store.Rules()
@@ -580,8 +607,8 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 	}
 	// Profile construction can span a subscription rotation. Never deliver
 	// replacement credentials to a request authenticated by the previous URL.
-	current, err := s.Store.ResolvePortalSubscription(r.PathValue("token"))
-	if err != nil || current != user {
+	current, currentSubscription, err := s.Store.ResolvePortalSubscription(r.PathValue("token"))
+	if err != nil || current != user || currentSubscription != subscription {
 		fail(w, 404, "订阅不存在或已撤销")
 		return
 	}

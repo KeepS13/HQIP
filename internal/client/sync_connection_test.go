@@ -55,7 +55,7 @@ func TestRefreshPreservesFailureUntilUserActs(t *testing.T) {
 		t.Fatalf("refresh concealed connection failure: %+v", got)
 	}
 	p := c.saved.Profile
-	p.Entitlement.ExpiresAt = time.Now().Add(-time.Second)
+	p.Subscription.ExpiresAt = time.Now().Add(-time.Second)
 	if err := c.cacheUnavailable(c.api, p); err != nil {
 		t.Fatal(err)
 	}

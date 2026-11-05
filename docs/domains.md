@@ -6,7 +6,7 @@
 | 管理网页 | https://cms-hqip.5202345.xyz |
 | API、订阅、客户端下载 | https://api-hqip.5202345.xyz |
 
-管理端页面没有 `/admin` 前缀。旧用户域名上的 API、订阅和下载文件接口返回 410，旧 `/admin` 返回 404。浏览器需重新登录，账号和密码保持原值；第三方客户端需从用户端复制新订阅地址。Windows 3.1 自动迁移旧官方服务地址，自定义地址保持原值。
+管理端页面没有 `/admin` 前缀。旧用户域名上的 API、订阅和下载文件接口返回 410，旧 `/admin` 返回 404。客户端使用 API 域名、用户浏览器授权使用用户域名；自定义客户端地址保持原值。订阅升级清理旧开发账户，需使用新注册账户与独立订阅实例。
 
 ## 开发与构建
 
@@ -47,6 +47,8 @@ python3 /opt/hqip-control/releases/<SHA>/scripts/upgrade_domains.py upgrade --re
 
 ## 回退
 
+数据库 schema 5 的多订阅发布不能回退至只支持 schema 4 的旧单套餐程序。脚本会在停止服务前检查目标版本；不兼容时保留新版本和当前数据，改用兼容版本修复。数据库快照不用于抹去升级后产生的流量。
+
 先恢复站点代码／路由，再按节点备份恢复 Agent 地址：
 
 ```bash
@@ -55,3 +57,14 @@ python3 /path/to/migrate_agent_api.py rollback --backup /root/backups/hqip-agent
 ```
 
 控制服务回退保留当前数据库与全部新增用量，不以旧快照覆盖。飞书保持关闭，机器人凭据不会恢复。数据库快照仅用于经过核对的灾难恢复。退回旧版本后客户端服务地址需重新设回旧入口。
+
+## 多订阅开发数据清理门禁
+
+仅首次从旧 schema 4 开发环境升级时执行。日常 schema 5 发布不再重置用户。先完成构建、隔离联调和 CI，再准备清理；所有目录必须是 `/root/backups/` 下新的私有目录。
+
+1. 在控制机执行 `python3 subscription_migration.py hold --state /root/backups/hqip-subscriptions-<时间>`。脚本备份一致性数据库与主密钥，保存原注册开关，关闭旧用户新准入、撤销旧会话和连接。节点继续报告最终用量。
+2. 等待所有节点最终结算，在每个活动受管节点执行 `python3 subscription_migration.py node-receipt --node-id <ID> --state /root/backups/hqip-subscriptions-node-<时间>`。若有未关闭或未确认的最终账本，脚本拒绝继续。成功时备份节点配置和 SQLite 账本，生成 receipt；不清空采样基线。
+3. 将各节点 receipt 放在控制机受限 JSON 数组文件中，执行 `python3 subscription_migration.py confirm --state <hold目录> --receipts <文件>`。节点集合、配套主密钥、时间及最终用量必须匹配，才写入升级就绪标记。receipt 需在 hold 后取得且不超过 15 分钟。
+4. 发布包含 schema 5 的版本。升级脚本再次检查门禁；数据库事务归档监控身份和已结算租约，删除旧开发用户、套餐、会话与导入凭据，创建新的多订阅表。服务器、节点、地址、证书、规则、管理员和基础设施监控不重置。
+
+如果尚未迁移且决定取消清理，执行 `abort-hold --state <hold目录>` 可恢复原用户启用状态与注册开关；旧登录会话仍需重新登录。schema 已升级后该操作会拒绝执行。不要手工删除待结算队列或把就绪标记当作跳过节点核对的开关。

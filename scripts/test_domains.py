@@ -16,6 +16,7 @@ class DomainReleaseTests(unittest.TestCase):
   self.assertIn('return 410;',text)
   self.assertIn('root /opt/hqip-control/current/user-web',text)
   self.assertIn('root /opt/hqip-control/current/admin-web',text)
+  self.assertIn('api/v[23]/client',text)
   self.assertIn('real_ip_header CF-Connecting-IP',text)
   self.assertNotIn('*.5202345.xyz',text)
   self.assertIn('map $request_uri $hqip_user_csp',text)
@@ -33,6 +34,19 @@ class DomainReleaseTests(unittest.TestCase):
  def test_state_must_be_direct_private_backup(self):
   for path in [Path('relative'),Path('/tmp/random'),Path('/root/backups/nested/state')]:
    with self.assertRaises(ValueError):deploy.check_state(path)
+ def test_subscription_upgrade_requires_settled_migration_marker(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=Path(folder)
+   with closing(sqlite3.connect(root/'hqip.db')) as db,db:
+    db.executescript("CREATE TABLE metadata(key TEXT PRIMARY KEY,value);INSERT INTO metadata VALUES('schema_version','4');CREATE TABLE portal_leases(closed);INSERT INTO portal_leases VALUES(0);")
+   with patch.object(control,'DATA',root):
+    with self.assertRaisesRegex(ValueError,'not been prepared'):deploy.subscription_migration_ready()
+    with closing(sqlite3.connect(root/'hqip.db')) as db,db:db.execute("INSERT INTO metadata VALUES('subscriptions_reset_ready','true')")
+    with self.assertRaisesRegex(ValueError,'Unsettled'):deploy.subscription_migration_ready()
+    with closing(sqlite3.connect(root/'hqip.db')) as db,db:db.execute('UPDATE portal_leases SET closed=1')
+    deploy.subscription_migration_ready()
+    with closing(sqlite3.connect(root/'hqip.db')) as db,db:db.execute("UPDATE metadata SET value='5' WHERE key='schema_version'")
+    deploy.subscription_migration_ready()
  def test_rollback_keeps_new_accounting_and_disables_robot(self):
   with tempfile.TemporaryDirectory() as folder,ExitStack() as mocks:
    root=Path(folder).resolve();data=root/'data';data.mkdir();base=root/'base';base.mkdir();backups=root/'backups';backups.mkdir();state=backups/'release';state.mkdir()
@@ -52,5 +66,20 @@ class DomainReleaseTests(unittest.TestCase):
    key.write_bytes(b'unexpected-key');run.reset_mock()
    with self.assertRaisesRegex(ValueError,'Master key changed'):deploy.rollback(state)
    run.assert_not_called()
+
+ def test_rollback_refuses_schema_advance_during_stop(self):
+  with tempfile.TemporaryDirectory() as folder,ExitStack() as mocks:
+   root=Path(folder).resolve();base=root/'base';base.mkdir();backups=root/'backups';backups.mkdir();state=backups/'release';state.mkdir()
+   previous=base/'previous';previous.mkdir();release=base/'release';release.mkdir();(base/'current').symlink_to(release,target_is_directory=True)
+   (state/'domains-state.json').write_text(json.dumps({'previous':str(previous),'release':str(release),'masterSHA256':'paired-key'}))
+   mocks.enter_context(patch.object(control,'BASE',base));mocks.enter_context(patch.object(deploy,'BACKUPS',backups))
+   mocks.enter_context(patch.object(control,'verify_release',return_value=(previous,{'schemaVersion':4})))
+   mocks.enter_context(patch.object(deploy,'data_identity',return_value='paired-key'))
+   mocks.enter_context(patch.object(deploy,'schema_version',side_effect=[4,5]))
+   run=mocks.enter_context(patch.object(control,'run'));point=mocks.enter_context(patch.object(control,'point_current'))
+   with self.assertRaisesRegex(ValueError,'Schema advanced while stopping'):deploy.rollback(state)
+   point.assert_not_called()
+   self.assertEqual(run.call_args_list[0].args,('systemctl','stop',control.SERVICE))
+   self.assertEqual(run.call_args_list[1].args,('systemctl','start',control.SERVICE))
 
 if __name__=='__main__':unittest.main()

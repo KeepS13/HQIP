@@ -30,6 +30,8 @@ type ClientSession struct {
 	RevocationPending       bool       `json:"revocationPending"`
 }
 type ClientStatus struct {
+	DesiredSubscriptionID   string `json:"desiredSubscriptionId"`
+	ActualSubscriptionID    string `json:"actualSubscriptionId"`
 	AppliedConfigRevision   int64  `json:"appliedConfigRevision"`
 	ProcessedConfigRevision int64  `json:"processedConfigRevision"`
 	DesiredNodeID           string `json:"desiredNodeId"`
@@ -57,14 +59,16 @@ type RuleReference struct {
 	URL     string `json:"url"`
 }
 type ClientProfile struct {
-	DeviceID        string        `json:"deviceId"`
-	Name            string        `json:"name"`
-	Enabled         bool          `json:"enabled"`
-	Revision        int64         `json:"revision"`
-	DefaultNodeID   string        `json:"defaultNodeId"`
-	Nodes           []ClientNode  `json:"nodes"`
-	Rules           RuleReference `json:"rules"`
-	SubscriptionURL string        `json:"subscriptionUrl"`
+	SubscriptionID    string        `json:"subscriptionId"`
+	SelectionRevision int64         `json:"selectionRevision"`
+	DeviceID          string        `json:"deviceId"`
+	Name              string        `json:"name"`
+	Enabled           bool          `json:"enabled"`
+	Revision          int64         `json:"revision"`
+	DefaultNodeID     string        `json:"defaultNodeId"`
+	Nodes             []ClientNode  `json:"nodes"`
+	Rules             RuleReference `json:"rules"`
+	SubscriptionURL   string        `json:"subscriptionUrl"`
 }
 type ClientTokens struct {
 	AccessToken      string    `json:"accessToken"`

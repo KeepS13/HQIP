@@ -73,7 +73,7 @@ map $uri $hqip_static_cache {{ default "no-store"; ~^/assets/ "public, max-age=3
  proxy_set_header Connection "";
  proxy_buffering off; proxy_cache off;
  proxy_read_timeout 3600s;
- location ~ ^/(api/v1/(client|agents|user)(/|$)|api/v2/client(/|$)|sub/|usub/|healthz$|downloads/) { proxy_pass http://127.0.0.1:18091; }
+ location ~ ^/(api/v1/(client|agents|user)(/|$)|api/v[23]/client(/|$)|sub/|usub/|healthz$|downloads/) { proxy_pass http://127.0.0.1:18091; }
  location /api/ { proxy_pass http://127.0.0.1:18090; }
  location / { return 404; }
 }

@@ -182,7 +182,7 @@ func TestLegacyRobotMigrationDisablesSecretsAndRetainsOnlyBusinessHistory(t *tes
 	notificationExec(t, s, "DELETE FROM metadata WHERE key='alerts_migrated'")
 	notificationExec(t, s, `CREATE TABLE feishu_settings(enabled INTEGER,webhook TEXT,secret TEXT);INSERT INTO feishu_settings VALUES(1,'encrypted-webhook','encrypted-secret');
  CREATE TABLE notifications(id TEXT,category TEXT,level TEXT,title TEXT,message TEXT,detail_path TEXT,created_at INTEGER,status TEXT,claim TEXT,claim_until INTEGER,next_attempt INTEGER,last_error TEXT);`)
-	for _, category := range []string{"system", "test"} {
+	for _, category := range []string{"system", "test", "package"} {
 		notificationExec(t, s, "INSERT INTO notifications VALUES(?,?,'danger','历史预警','原因','/admin/nodes/node',?,'pending','claim',1,1,'')", category, category, now.Unix())
 	}
 	if e := EnsureNotificationSchema(s.DB); e != nil {
@@ -202,5 +202,27 @@ func TestLegacyRobotMigrationDisablesSecretsAndRetainsOnlyBusinessHistory(t *tes
 	}
 	if len(alertList(t, s)) != 1 {
 		t.Fatal("migration duplicated history")
+	}
+}
+
+func TestUserAlertsAreRemovedWithActivityButInfrastructureRemains(t *testing.T) {
+	s, _ := fixture(t)
+	user := model.NotificationCondition{Key: "package.expiry:old", Category: "package", Kind: "package.expiry", ResourceID: "old", Title: "Old account", Message: "Expired", DetailPath: "/users/old", Level: "warning", Stage: 1}
+	node := user
+	node.Key, node.Category, node.Kind, node.DetailPath = "node.month:n:2026-10", "capacity", "node.month", "/nodes/n"
+	alertEval(t, s, user, node)
+	if len(alertList(t, s)) != 2 {
+		t.Fatal("fixture incidents missing")
+	}
+	if err := EnsureNotificationSchema(s.DB); err != nil {
+		t.Fatal(err)
+	}
+	items := alertList(t, s)
+	if len(items) != 1 || items[0].Condition.Category != "capacity" {
+		t.Fatalf("unexpected retained incidents: %+v", items)
+	}
+	var orphans int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM alert_activity WHERE alert_id NOT IN (SELECT id FROM alerts)").Scan(&orphans); err != nil || orphans != 0 {
+		t.Fatal("orphan incident notes", err, orphans)
 	}
 }

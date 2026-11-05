@@ -48,7 +48,7 @@ func EnsureNotificationSchema(db *sql.DB) error {
 		}
 	}
 	if migrated == 0 && exists > 0 {
-		rows, e := tx.Query("SELECT id,category,level,title,message,detail_path,created_at FROM notifications WHERE category IN ('system','capacity','certificate','package','recovery') ORDER BY created_at")
+		rows, e := tx.Query("SELECT id,category,level,title,message,detail_path,created_at FROM notifications WHERE category IN ('system','capacity','certificate','recovery') AND detail_path NOT LIKE '%/users/%' ORDER BY created_at")
 		if e != nil {
 			return e
 		}
@@ -91,6 +91,15 @@ func EnsureNotificationSchema(db *sql.DB) error {
 		}
 	}
 	if _, err = tx.Exec("INSERT OR IGNORE INTO metadata(key,value) VALUES('alerts_migrated','1')"); err != nil {
+		return err
+	}
+	// User subscription state belongs to that user's pages, never to the
+	// infrastructure alert center. Remove both incidents and attached notes.
+	const userAlert = `json_extract(condition,'$.category')='package' OR json_extract(condition,'$.kind') LIKE 'package.%' OR json_extract(condition,'$.detailPath') LIKE '%/users/%'`
+	if _, err = tx.Exec("DELETE FROM alert_activity WHERE alert_id IN (SELECT id FROM alerts WHERE " + userAlert + ")"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM alerts WHERE " + userAlert); err != nil {
 		return err
 	}
 	return tx.Commit()

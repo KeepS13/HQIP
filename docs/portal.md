@@ -1,106 +1,51 @@
-# 用户套餐、中央准入与运维
+# 用户账户、多份订阅与节点准入
 
-门户在公网根路径，管理员页面位于 `/admin`。用户 API 和 Agent API 只注册于 PublicHandler；旧管理 API 与新管理 API 仍只注册于 AdminHandler。部署反向代理须按路径把管理员请求转到管理员监听器，不能把 PublicHandler 的未知路径改成管理 API 回退。
+用户端为 `https://hqip.5202345.xyz`，管理端为 `https://cms-hqip.5202345.xyz`，API 为 `https://api-hqip.5202345.xyz`。用户通过邮箱和密码注册；密码至少 6 个 Unicode 字符、最多 1024 字节。注册和网页登录需要 Turnstile，未配置或验证服务不可用时不会绕过验证。用户登录本身不授予 VPN 权限。
 
-## 升级激活
+## 订阅模板与用户实例
 
-数据库 v4 迁移只建表，默认 `portal_enabled=false`，不会在启动时撤销生产设备。
+订阅模板由管理员维护，字段包括名称、有效天数、一次性流量、带宽、并发 VPN 连接上限、允许节点、默认节点，以及服务启用和是否展示给用户申请。`null` 带宽或流量表示无限。默认节点必须属于允许节点。用户可在订阅商城提交开通申请，由管理员批准后开通；管理员也可直接给用户添加实例。每次批准、分配均创建独立订阅实例，同一个模板可以重复持有。有效期从实际开通时开始，流量按该实例整个有效期内的上传加下载累计，不按月重置。
 
-1. 部署支持中央准入的新 Hysteria 核心和 Agent。每个活动节点须通过真实连接验收，并上报 `admission-v1`。
-2. 管理员登录后配置 Turnstile，允许域名必须精确匹配、不能使用通配符。确认用户注册、PKCE、订阅和节点准入均通过隔离验收。
-3. 显式调用 `POST /api/v1/settings/portal/activate`，JSON 为 `{"confirm":true}`，附管理会话及 `X-CSRF-Token`。任何活动节点未上报能力、30 秒内没有健康心跳或未确认当前配置都会返回 409。
-4. 激活事务禁用旧 devices、撤销旧客户端会话、提高节点配置版本。`AgentDesired.portalEnabled=true`，旧非探针设备无论管理员随后是否误启用都不能恢复节点鉴权。旧账本不删除。新用户需管理员另行分配套餐，用户注册本身不提供代理权益。
+修改模板时，节点授权、默认节点、带宽、流量与并发额度立即影响现有实例；已用流量和既有到期时间不变。有效天数只影响后续实例。模板停售仅停止新申请；停用模板会使已有实例失效。移除实例会撤销该实例自己的授权和连接，不影响用户的其他订阅。
 
-激活前保留旧客户端接口兼容；激活后所有公网 `/api/v1/client/*` 请求返回 HTTP 426，提示升级 HQIP 3.0 并使用邮箱账户在浏览器登录。新客户端使用 `/api/v2/client/*`。
+每份订阅单独计量、限速和占用并发名额。多台设备使用同一份订阅时共享这些限制；不同实例互相独立。并发数按真实 VPN 连接计数，等待节点确认关闭的连接继续占名额，不等同于物理设备数量。耗尽、到期、停用或移除时，客户端停止代理并恢复其接管的网络设置；用户可手动选择另一份有效订阅。
 
-### 脚本回退边界
+## 页面与 API
 
-`upgrade_portal.py` 与 `upgrade_control.py` 的自动失败回退、显式 rollback 只适用于激活之前。回退先停止本控制服务，再以只读方式检查当前 SQLite（包括已提交 WAL）的 `portal_enabled`、`portal_recovery_hold`，并检查可选的 `portal-stage.json` 激活标记。任一已激活/恢复等待标记、无法读取的数据库或不确定状态都会拒绝恢复旧快照，保留当前数据库和新发布目录，控制服务保持停止。即使目标备份也来自 v4，脚本也不允许激活后倒退用量、会话和权限。
+用户端包含账户总览、节点、订阅商城、我的订阅和账户设置。订阅卡片分别显示短编号、开通与到期时间、流量总量／已用／待结算预留／剩余量、状态，以及该订阅自己的 VPN 连接占用（例如 `1 / 3`）。占用数每 5 秒刷新；刷新失败保留已有数值并显示最近更新时间。节点授权按订阅实例展示。账户设置保留改密和登录会话管理，不提供 VPN 连接历史或逐条断开操作。
 
-节点 rollback 仅停止指定节点的 Agent/core，保留当前 ledger；等待 31 秒，使该节点的健康心跳超过激活接口的 30 秒门限，再读取 `agent.json` 指定的 SQLite `meta.credentials.portalEnabled`，并向当前控制端确认配置。缓存或中央任一处已激活、控制端无法访问、账本缺失/损坏均阻止旧 core 启动，两服务保持停止。脚本不会从节点快照恢复旧账本。升级、回退和激活应串行操作；旧脚本和手工替换二进制不受新脚本保护，不可用于绕过此限制。
+每份实例有独立的第三方 Clash/Mihomo 导入入口，可复制、轮换或撤销。撤销入口不会删除流量包，也不会撤销 HQIP 客户端专用凭据。第三方客户端同样受所属实例的带宽、流量、到期和并发限制；其刷新与节点切换体验由客户端软件负责。
 
-遇到拒绝回退时，停止全部用户节点连接，保存当前控制数据库、主密钥及每个节点的最新 ledger，人工协调修复支持中央准入的新版本。不要删除标记、改写激活字段、恢复激活前数据库或启动旧 core。需要从备份恢复时走下述恢复 hold 与最终账本核对流程，不能把快照回退当作暂停或取消激活。
+管理端的“订阅管理”负责模板及影响预览；“开通申请”负责批准、拒绝和队列处理；用户详情可分配或移除某一实例并查看用量与连接占用。写操作使用管理员或用户各自的会话、CSRF 校验及 `expectedRevision` 并发保护。用户接口按当前认证用户约束实例，不能通过请求参数切换用户身份。
 
-停售 `saleEnabled=false` 禁止新开通、重开、换入该套餐；已经持有此套餐的用户继续使用并可延长到期时间。停用 `enabled=false` 使现有权益失效。套餐更新立即改变用户引用的权益，不复制套餐快照。普通续期和换套餐保留本周期已用量；明确 `resetUsage=true` 才创建新计量代次，旧租约的最终上报仍记入旧代次。
+核心接口：
 
-## 管理接口
-
-所有管理写操作沿用管理员会话、Origin 和 CSRF 校验。
-
-| 接口 | 内容 |
+| 路径 | 用途 |
 | --- | --- |
-| `GET/POST /api/v1/plans` | 列出/创建套餐 |
-| `PUT /api/v1/plans/{id}` | 完整套餐加 `expectedRevision`，冲突 409 |
-| `POST /api/v1/plans/{id}/preview` | 拟定套餐；返回受影响用户、活跃连接数、逐个 `connectionsToClose` 及原因 |
-| `GET /api/v1/users` | 用户数组，含 revision 和权益 |
-| `GET /api/v1/users/{id}` | 用户完整管理视图 |
-| `PATCH /api/v1/users/{id}` | `{enabled,expectedRevision}`；revision 取 user.revision，缺失或冲突返回 409 |
-| `POST /api/v1/users/{id}/assignment` | `{planId,expiresAt,resetUsage,expectedRevision}`；revision 取 user.revision |
-| `POST /api/v1/users/{id}/password` | `{password}`；撤销全部用户会话、代理凭据和连接 |
-| `POST /api/v1/users/{id}/sessions/{sessionId}/revoke` | 撤销会话及关联连接 |
-| `POST /api/v1/users/{id}/connections/{leaseId}/revoke` | 请求断开指定真实连接 |
-| `GET/PUT /api/v1/settings/turnstile` | `{siteKey,allowedHostnames,secretKey?,expectedRevision}`；GET 不返回 Secret |
-| `GET/PUT /api/v1/settings/portal` | 注册开关 `{registrationEnabled}` |
+| `/api/v1/subscription-templates` | 管理订阅模板、预览影响 |
+| `/api/v1/subscription-requests` | 管理查看、批准或拒绝申请 |
+| `/api/v1/users/{id}/subscriptions` | 管理分配、查看或移除指定实例 |
+| `/api/v1/user/catalog` | 用户查看可申请的模板 |
+| `/api/v1/user/subscription-requests` | 用户申请、查看和取消申请 |
+| `/api/v1/user/subscriptions` | 用户查看自己的实例 |
+| `/api/v1/user/subscriptions/{id}` | 查看实例详情、节点及导入入口 |
+| `/api/v3/client/*` | Windows 客户端认证、订阅选择、配置及连接状态 |
+| `/usub/{token}` | 第三方客户端订阅配置 |
 
-套餐字段：`name,enabled,saleEnabled,nodeIds,defaultNodeId,bandwidthMbps,quotaBytes,maxConnections`。带宽与额度使用 `null` 表示无限。额度为一次性上传加下载总量；上下行分别可达套餐 Mbps，并按实际连接动态分配每个方向的带宽。
+旧单套餐用户与设备接口不再作为业务兼容层提供。迁移会保留基础设施和节点统计身份，但旧开发账户、旧套餐及导入凭据不会转换成新订阅。
 
-套餐节点必须处于 active 生命周期且已上报 `admission-v1`；未升级或已退役节点不能保存到套餐。已升级节点暂时离线不妨碍编辑套餐。默认节点必须属于该套餐。
+## Windows 客户端行为
 
-## 用户会话与订阅
+客户端首次登录后由用户选择一份订阅，再选择该订阅允许的节点；连接需要手动开启。订阅与节点选择保存在本机安装实例，不影响账户下的其他设备。每份订阅首次选择时使用其默认节点；之后只要所选节点仍获授权就保留该选择。
 
-`GET /api/v1/user/config` 返回注册开关、激活状态、恢复 hold 和 Turnstile 公钥。注册、登录分别 `POST /api/v1/user/register`、`/login`，JSON `{email,password,turnstileToken}`，Turnstile action 分别为 `register`、`login`。邮箱不要求邮件验证；密码至少 12 个字符、至多 1024 字节。任何验证码未配置、失败、网络错误、域名/action/时间不符或本地令牌重放均拒绝。
+活跃连接切换订阅或节点时，客户端先关闭旧连接并等待关闭确认，再获取目标凭据并连接。快速连续切换只应用最后选择；用户手动断开优先。关闭代理时仅保存选择。订阅数字刷新不会触发重连。目标订阅或默认节点不可用时，停止代理并恢复网络设置，不自动回退或另选目标。
 
-浏览器 cookie 名为 `hqip_user`，HttpOnly、Secure（HTTPS）、SameSite Strict，有效 24 小时；与管理员 cookie 和桌面令牌互不接受。登录响应为 `{authenticated,user,csrfToken}`，不返回 cookie token 或 refresh token。后续写操作必须带精确 Origin 和 `X-CSRF-Token`。登录同时按 IP 与规范化邮箱限流。
+仪表盘分别展示本机内核的实时上下行、近 60 秒速率曲线、本次连接流量与时长，以及服务端确认的订阅用量、待结算预留、期限、带宽和连接占用。本机采样流量与服务端计费流量会明确区分。客户端每秒采样内核指标、每 5 秒同步订阅状态；指标过期或读取失败时显示未知。延迟测试由用户手动触发，仅测试当前连接节点，所耗流量归入当前订阅。
 
-`GET /api/v1/user/session` 检查登录；`GET /profile` 返回 `{user,entitlement,subscriptionUrl,nodes,sessions,connections}`。无套餐时 entitlement 为 null，仍可登录。网页节点 DTO 不返回代理密码或 SSH 信息。`POST /logout`、`POST /password`、`POST /sessions/{id}/revoke`、`POST /connections/{id}/revoke` 都从当前会话取用户身份，不接受客户端指定其他用户。
+节点只在真实 HY2 准入能力升级并通过验证后才能分配给受限订阅。中央准入按 `subscriptionId` 隔离凭据、租约、预算、限速和账本；控制服务失联后，已建立连接最多继续 120 秒，节点随后停止转发，失联期间不批准新连接。
 
-`POST /api/v1/user/subscription` 创建或获取入口，`POST /subscription/rotate` 轮换，`POST /subscription/revoke` 撤销。匿名订阅是 `/usub/{token}`，只提供当前有效套餐中的就绪节点，保持 TLS 校验开启。轮换或撤销只清理 subscription scope 凭据和租约，不影响桌面会话独立凭据。订阅 URL 不进入访问日志；响应 `Cache-Control: no-store`。
+## 安全迁移
 
-第三方订阅把就绪的套餐默认节点放在选择列表首位，不添加自动切换分组。默认节点不可用时，首项为“默认节点不可用，请手动选择”，其目标为 REJECT；用户仍可手动选择其他就绪节点。全部节点不可用时订阅返回 503。轮换过程中已发起的旧 URL 请求会在输出前重新校验，不会获得替换后的连接凭据。
+生产数据重置前必须先建立恢复 hold、撤销旧开发用户的新连接权限，等待所有旧租约结清，再核对节点最终账本和基线。迁移保留服务器、地址、节点、域名、证书、规则、管理员和基础设施用量；清理旧业务账户与凭据不清空 Agent 流量基线。升级后只能回退到能读取当前数据库结构的程序，不能用旧快照覆盖新用量。
 
-连接列表保留最近 200 条历史，不能用数组长度当作在线数。`entitlement.occupied` 是尚未关闭且尚未到期的真实 QUIC 租约占位，包含等待节点确认的关闭请求。连接 state 为 active、closing、closed 或 expired；`ratePending=true` 表示等待安全带宽分配，期间不转发字节。
-
-## 桌面 PKCE
-
-1. `POST /api/v2/client/authorize`：`{codeChallenge,redirectUri,state,clientName,installationId}`。只允许 S256 的 43 位 challenge、`http://127.0.0.1:端口/callback`，授权请求有效 5 分钟。
-2. 返回 `{requestId,authorizationUrl,expiresAt}`，浏览器打开 `/authorize?request=...`。用户必须网页登录并明确确认。页面 GET `/api/v1/user/authorize/{id}` 显示客户端名称；POST 同路径返回 `{redirectUrl}`，含一次性 code 和原 state。
-3. `POST /api/v2/client/token`：`{code,codeVerifier,redirectUri,installationId}`，匹配 verifier、原 callback 与 installation 才消费 code。返回 access 15 分钟、refresh 自登录起绝对 30 天。
-4. `POST /refresh {refreshToken}` 原子轮换两个 token；重放旧 refresh 会撤销整个 session 及关联租约。`POST /logout` 使用 Bearer。
-5. `GET /profile` 保留原 ClientProfile 字段并增加 user、entitlement；每个 native session 的代理密码单独生成。规则地址为 `/api/v2/client/rules/{sha256}`，原始规范 JSON 字节与 hash 一致。
-6. `POST /connections/drain` 请求断开当前 native session 所有连接；不提前释放占位或预算。`GET /connections` 返回当前 session 连接、全用户 occupied/maxConnections；名额已满时返回 `admissionErrorCode=CONNECTION_LIMIT` 及清晰提示。客户端等待真实关闭确认或截止时间后才尝试新连接。
-
-自助改密、管理员重置密码或停用用户会在同一事务内撤销已经批准但尚未交换的一次性授权码；重新启用用户不会恢复旧码。批准授权时再次在事务内检查当前网页会话的归属、类型、有效期与撤销状态，入口鉴权后发生的退出或改密不能被迟到的批准请求绕过。
-
-## 中央租约、额度和带宽
-
-Agent 使用自己的节点 Bearer token。`POST /api/v1/agents/admission` 收 `{connectionId,password}`，每个真实 QUIC 连接生成全新随机 connectionId。重试同一连接 ID 幂等；不能跨连接复用。鉴权从该节点的用户凭据查出 user/session，再检查用户启用、套餐启用、到期、节点权限、连接数和余额，数据库事务原子占槽并预留预算。
-
-返回 `{leaseId,userId,accountingId,nodeId,sessionId,expiresAt,bandwidthBytesPerSecond,budgetBytes,consumedBytes,revision,rateVersion,ratePending}`。`accountingId=user_<id>` 用于节点历史统计。`budgetBytes` 是该租约累计准许的上传加下载上限，单次发放为有限块，最高 16 MiB。即使无限套餐也不发无限离线预算。
-
-`POST /api/v1/agents/leases/{leaseId}/renew` 收 `{uploadBytes,downloadBytes,closed,appliedRateVersion}`，两个字节数都是连接累计值，不是增量。上报不能回退或超过已授权预算。重复上报不重复扣款；未关闭时按需要补充剩余预算。最终 closed 可以在过期后补报，释放明确未消费的预算。过期租约不可复活；失联租约的未结算预算保留，不能再发给别的连接。超过 120 秒未获有效续租，核心必须断开。
-
-`bandwidthBytesPerSecond` 为**每个方向**的连接份额。单连接获得套餐全部 Mbps，多连接按实际数量分配。新增连接先暂停；旧连接降速后以 `appliedRateVersion` 确认，中央才释放可再分配份额。上调立刻占用中央安全上限，下降在确认前仍保留旧上限。`ratePending=true` 时 bandwidth 为零代表暂停；仅 pending=false 且 bandwidth=0 才代表无限。相同 rateVersion 的速率/暂停状态不变。节点核心必须先实际应用速率，再发送 ACK。
-
-通用 Agent daily/minute 报告接受该节点历史租约生成的 accountingId，供节点、服务器、历史曲线统计；套餐余额只由中央租约累计结算，不把 daily 流量再次扣到用户额度。
-
-## 恢复保护
-
-`hqip restore` 撤销网页/桌面会话、一次性授权码、订阅入口与代理凭据，给现有租约标记撤销，并置 `portal_recovery_hold=true`。已用量和预留预算保留。激活接口不会清除此 hold。
-
-`GET /api/v1/settings/portal/recovery` 返回恢复代次、等待状态和每用户最低已知量。只有等待至少 120 秒、所有活动节点提交恢复后的配置版本、近 30 秒新心跳且核心健康后，才进入可人工核对状态。管理员仍须确认所有节点最终账本（包括备份后增加或丢失的节点）；无法核对时继续 hold。
-
-`POST /api/v1/settings/portal/recovery/resume` 需要 `{recoveryEpoch,ledgerConfirmed:true,users:[{userId,usedBytes}]}`，必须涵盖全部用户且数值不低于已知最终账本。单独核对操作会记录审计，不自动退还不确定的预留预算。节点丢失或旧租约最终量无法取得时，不应猜测填写；保持 hold 或在人工确认损失后执行单独管理决策。
-
-## 官方客户端包
-
-发布目录固定 `HQIP-Windows-x64.zip` 与 `desktop-manifest.json`。manifest 为 `{version,sourceSHA,filename,sha256,size,dirty:false}`；必须完整 40 位源码 SHA、64 位 SHA256、正确大小，dirty 包不公开。GET `/api/v1/user/releases` 返回 releases 数组；`/api/v1/user/download` 返回单个版本元数据；实际下载固定 `/downloads/HQIP-Windows-x64.zip`，提供 Content-Length、ETag、Range。不接受任意文件名，不输出服务器本地路径。
-
-## 隔离真实联调夹具
-
-`internal/control/portal_integration_test.go` 只在显式设置 `HQIP_PORTAL_FIXTURE_OUTPUT` 时写入新测试目录，正常测试跳过。目录名必须包含 fixture、不能已存在。可设置 `HQIP_PORTAL_FIXTURE_PUBLIC_URL`、`HQIP_PORTAL_FIXTURE_NODE_IP`、`HQIP_PORTAL_FIXTURE_DOMAIN`，再运行：
-
-```text
-go test ./internal/control -run TestWritePortalIntegrationFixture -count=1
-```
-
-输出独立 SQLite、主密钥、私密测试用户/管理员/两个 native session 和两个节点 token。测试套餐 8 Mbps、128 MiB、最多 2 个连接；节点使用 9443/9444。夹具不会 SSH、启动服务或修改网络，不提供生产注册绕过接口。真实注册仍必须通过 Turnstile。使用隔离端口和目录运行控制服务/Agent/core，验收完成后停止测试进程并妥善清理夹具秘密。
+真实隔离联调夹具由 `TestWritePortalIntegrationFixture` 生成，只在设置 `HQIP_PORTAL_FIXTURE_OUTPUT` 时运行；输出含独立测试凭据，应保存在受限目录并在验收后清理。夹具不绕过生产注册的人机验证。

@@ -5,11 +5,27 @@ export interface PortalUser {
   createdAt: string;
   revision: number;
 }
-export interface Entitlement {
-  planId: string;
-  planName: string;
-  status: "active" | "expired" | "exhausted" | "unassigned" | "disabled";
-  expiresAt: string | null;
+export interface SubscriptionTemplate {
+  id: string;
+  name: string;
+  enabled: boolean;
+  listed: boolean;
+  validityDays: number;
+  nodeIds: string[];
+  defaultNodeId: string;
+  bandwidthMbps: number | null;
+  quotaBytes: number | null;
+  maxConnections: number;
+  revision: number;
+}
+export interface UserSubscription {
+  id: string;
+  userId: string;
+  templateId: string;
+  templateName: string;
+  createdAt: string;
+  expiresAt: string;
+  status: string;
   quotaBytes: number | null;
   usedBytes: number;
   reservedBytes: number;
@@ -17,22 +33,21 @@ export interface Entitlement {
   maxConnections: number;
   occupied: number;
   nodeIds: string[];
-  defaultNodeId?: string;
-  epoch: number;
+  defaultNodeId: string;
   revision: number;
 }
-export interface Plan {
+export interface SubscriptionRequest {
   id: string;
-  name: string;
-  enabled: boolean;
-  saleEnabled: boolean;
-  nodeIds: string[];
-  defaultNodeId: string;
-  bandwidthMbps: number | null;
-  quotaBytes: number | null;
-  maxConnections: number;
+  userId: string;
+  email: string;
+  templateId: string;
+  templateName: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  requestedAt: string;
+  decidedAt?: string | null;
+  note: string;
+  subscriptionId: string;
   revision: number;
-  userCount?: number;
 }
 export interface PortalNode {
   id: string;
@@ -41,7 +56,8 @@ export interface PortalNode {
   status?: string;
   domain?: string;
   server?: string;
-  default?: boolean;
+  publicIp?: string;
+  sni?: string;
 }
 export interface UserSession {
   id: string;
@@ -52,75 +68,6 @@ export interface UserSession {
   current?: boolean;
   kind?: string;
   revoked?: boolean;
-}
-export interface Connection {
-  id: string;
-  nodeId: string;
-  nodeName?: string;
-  clientName?: string;
-  createdAt?: string;
-  lastSeen?: string;
-  state?: string;
-  ratePending?: boolean;
-  closed?: boolean;
-}
-export interface UserProfile {
-  user: PortalUser;
-  entitlement: Entitlement;
-  subscriptionUrl?: string;
-  nodes: PortalNode[];
-  sessions: UserSession[];
-  connections: Connection[];
-}
-export type UserProfileResponse = Omit<UserProfile, "entitlement"> & {
-  entitlement: Entitlement | null;
-};
-export const emptyEntitlement: Entitlement = {
-  planId: "",
-  planName: "",
-  status: "unassigned",
-  expiresAt: null,
-  quotaBytes: null,
-  usedBytes: 0,
-  reservedBytes: 0,
-  bandwidthMbps: null,
-  maxConnections: 0,
-  occupied: 0,
-  nodeIds: [],
-  epoch: 0,
-  revision: 0,
-};
-export function normalizeProfile(value: UserProfileResponse): UserProfile {
-  return {
-    ...value,
-    entitlement: value.entitlement || emptyEntitlement,
-    nodes: value.nodes || [],
-    sessions: value.sessions || [],
-    connections: value.connections || [],
-  };
-}
-export function connectionState(value: Connection) {
-  return value.state === "closed" || value.closed
-    ? "已断开"
-    : value.state === "expired"
-      ? "已过期"
-      : value.state === "closing"
-        ? "断开中"
-        : value.ratePending
-          ? "等待带宽确认"
-          : "已连接";
-}
-export function connectionActive(value: Connection) {
-  return (
-    !value.closed &&
-    value.state !== "closed" &&
-    value.state !== "expired" &&
-    value.state !== "closing"
-  );
-}
-export interface UserRow extends PortalUser {
-  entitlement?: Entitlement;
-  connections?: number;
 }
 export interface UserSessionResponse {
   authenticated: boolean;
@@ -148,4 +95,69 @@ export interface TurnstileSettings {
   secretConfigured: boolean;
   allowedHostnames: string[];
   revision: number;
+}
+export const subscriptionLabels: Record<string, string> = {
+  active: "可使用",
+  expired: "已到期",
+  exhausted: "流量用尽",
+  disabled: "已停用",
+  revoked: "已移除",
+  removed: "已移除",
+};
+export const requestLabels: Record<string, string> = {
+  pending: "待审核",
+  approved: "已开通",
+  rejected: "未通过",
+  cancelled: "已取消",
+};
+
+export interface Connection {
+  id: string;
+  subscriptionId: string;
+  nodeId: string;
+  nodeName?: string;
+  clientName?: string;
+  createdAt?: string;
+  lastSeen?: string;
+  state?: string;
+  ratePending?: boolean;
+  closed?: boolean;
+}
+export interface UserProfile {
+  user: PortalUser;
+  subscriptions: UserSubscription[];
+  sessions: UserSession[];
+  connections: Connection[];
+}
+export interface UserRow extends PortalUser {
+  subscriptions: UserSubscription[];
+}
+export interface SubscriptionImpact {
+  affectedUsers: number;
+  affectedSubscriptions: number;
+  activeConnections: number;
+  connectionsToClose: {
+    id: string;
+    userId: string;
+    subscriptionId?: string;
+    nodeId: string;
+    reason: string;
+  }[];
+}
+export function connectionState(value: Connection) {
+  return value.state === "closed" || value.closed
+    ? "已断开"
+    : value.state === "expired"
+      ? "已过期"
+      : value.state === "closing"
+        ? "断开中"
+        : value.ratePending
+          ? "等待带宽确认"
+          : "已连接";
+}
+export function connectionActive(value: Connection) {
+  return (
+    !value.closed &&
+    !["closed", "expired", "closing"].includes(value.state || "")
+  );
 }

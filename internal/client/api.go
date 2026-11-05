@@ -16,6 +16,7 @@ import (
 )
 
 var ErrUnauthorized = errors.New("用户登录已失效，请重新登录")
+var ErrConflict = errors.New("订阅选择已变化，请刷新后重试")
 
 type API struct {
 	mu     sync.Mutex
@@ -39,7 +40,7 @@ func NewAPI(base string, tokens Tokens) (*API, error) {
 }
 func (a *API) Tokens() Tokens { a.mu.Lock(); defer a.mu.Unlock(); return a.tokens }
 func (a *API) request(ctx context.Context, method, path string, body any, token, etag string) ([]byte, string, int, error) {
-	if !strings.HasPrefix(path, "/api/v2/client/") || strings.Contains(path, "..") {
+	if !strings.HasPrefix(path, "/api/v3/client/") || strings.Contains(path, "..") {
 		return nil, "", 0, errors.New("拒绝非客户端接口")
 	}
 	var reader io.Reader
@@ -73,6 +74,9 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return nil, "", resp.StatusCode, ErrUnauthorized
 	}
+	if resp.StatusCode == http.StatusConflict {
+		return nil, "", resp.StatusCode, ErrConflict
+	}
 	if resp.StatusCode != 304 && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
 		var msg struct {
 			Error string `json:"error"`
@@ -86,11 +90,6 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	return b, resp.Header.Get("ETag"), resp.StatusCode, nil
 }
 
-// Login remains a source-compatible error for older diagnostic tools.
-// Authentication is performed in the trusted browser with Turnstile.
-func (a *API) Login(ctx context.Context, user, password, id, name string) error {
-	return errors.New("请使用新版浏览器登录，旧设备账号已停止使用")
-}
 func (a *API) auth(ctx context.Context, method, path string, body any, etag string) ([]byte, string, int, error) {
 	a.authMu.Lock()
 	defer a.authMu.Unlock()
@@ -113,7 +112,7 @@ func (a *API) auth(ctx context.Context, method, path string, body any, etag stri
 	return b, t, s, e
 }
 func (a *API) refresh(ctx context.Context) error {
-	b, _, _, e := a.request(ctx, "POST", "/api/v2/client/refresh", map[string]string{"refreshToken": a.Tokens().RefreshToken}, "", "")
+	b, _, _, e := a.request(ctx, "POST", "/api/v3/client/refresh", map[string]string{"refreshToken": a.Tokens().RefreshToken}, "", "")
 	if e != nil {
 		return e
 	}
@@ -130,12 +129,20 @@ func (a *API) refresh(ctx context.Context) error {
 	return nil
 }
 func (a *API) Profile(ctx context.Context, etag string) (Profile, string, bool, error) {
-	b, t, s, e := a.auth(ctx, "GET", "/api/v2/client/profile", nil, etag)
+	b, t, s, e := a.auth(ctx, "GET", "/api/v3/client/profile", nil, etag)
 	var p Profile
 	if e == nil && s != 304 {
 		e = json.Unmarshal(b, &p)
 	}
 	return p, t, s == 304, e
+}
+func (a *API) SelectSubscription(ctx context.Context, id string, revision int64) (Profile, error) {
+	b, _, _, err := a.auth(ctx, "POST", "/api/v3/client/subscription", map[string]any{"subscriptionId": id, "expectedRevision": revision}, "")
+	var p Profile
+	if err == nil {
+		err = json.Unmarshal(b, &p)
+	}
+	return p, err
 }
 func (a *API) Rules(ctx context.Context, path string) ([]byte, error) {
 	// Profiles carry an absolute rules URL. Only the configured controller may
@@ -150,7 +157,7 @@ func (a *API) Rules(ctx context.Context, path string) ([]byte, error) {
 			return nil, errors.New("规则下载地址不属于当前管理服务")
 		}
 	}
-	const prefix = "/api/v2/client/rules/"
+	const prefix = "/api/v3/client/rules/"
 	if !strings.HasPrefix(u.Path, prefix) {
 		return nil, errors.New("规则下载地址无效")
 	}
@@ -162,10 +169,10 @@ func (a *API) Rules(ctx context.Context, path string) ([]byte, error) {
 	return b, e
 }
 func (a *API) Report(ctx context.Context, s Status) error {
-	_, _, _, e := a.auth(ctx, "POST", "/api/v2/client/status", s, "")
+	_, _, _, e := a.auth(ctx, "POST", "/api/v3/client/status", s, "")
 	return e
 }
 func (a *API) Logout(ctx context.Context) error {
-	_, _, _, e := a.auth(ctx, "POST", "/api/v2/client/logout", nil, "")
+	_, _, _, e := a.auth(ctx, "POST", "/api/v3/client/logout", nil, "")
 	return e
 }

@@ -10,36 +10,36 @@ import (
 func TestPortalPlanRequiresUpgradedNodeButAllowsOfflineEditing(t *testing.T) {
 	s, _ := fixture(t)
 	n := newNode(t, s, "legacy-plan-node")
-	p := model.Plan{Name: "restricted", Enabled: true, SaleEnabled: true, NodeIDs: []string{n.ID}, DefaultNodeID: n.ID, MaxConnections: 1}
-	if _, err := s.SavePlan("", p); err == nil {
+	p := model.SubscriptionTemplate{ValidityDays: 1, Name: "restricted", Enabled: true, Listed: true, NodeIDs: []string{n.ID}, DefaultNodeID: n.ID, MaxConnections: 1}
+	if _, err := s.SaveSubscriptionTemplate("", p, 0); err == nil {
 		t.Fatal("plan accepted node without admission-v1")
 	}
 	if _, err := s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]',last_seen=0,core_healthy=0 WHERE id=?", n.ID); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.SavePlan("", p)
+	p, err := s.SaveSubscriptionTemplate("", p, 0)
 	if err != nil {
 		t.Fatal("upgraded offline node prevented plan save", err)
 	}
 	p.Name = "edited while offline"
-	if _, err = s.SavePlan(p.ID, p, p.Revision); err != nil {
+	if _, err = s.SaveSubscriptionTemplate(p.ID, p, p.Revision); err != nil {
 		t.Fatal("upgraded offline node prevented plan edit", err)
 	}
 	if _, err = s.DB.Exec("UPDATE nodes SET lifecycle='retired' WHERE id=?", n.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SavePlan("", p); err == nil {
+	if _, err = s.SaveSubscriptionTemplate("", p, 0); err == nil {
 		t.Fatal("plan accepted retired upgraded node")
 	}
 }
 
 func TestPortalEnabledCASDoesNotOverwriteNewerAssignment(t *testing.T) {
-	s, now, u, plan, _, _ := portalFixture(t, 1, nil)
+	s, _, u, plan, _, _ := portalFixture(t, 1, nil)
 	before, err := s.PortalUser(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.AssignPortal(u.ID, plan.ID, now.AddDate(0, 0, 2), false, before.Revision); err != nil {
+	if _, err = s.AssignSubscription(u.ID, plan.ID, "another-assignment", before.Revision, plan.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.SetPortalEnabled(u.ID, false, before.Revision); !errors.Is(err, ErrConflict) {
@@ -67,13 +67,13 @@ func TestPortalProfileRetainsUnavailableDefaultWithoutFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.NodeIDs = append(p.NodeIDs, other.ID)
-	if _, err := s.SavePlan(p.ID, p, p.Revision); err != nil {
+	if _, err := s.SaveSubscriptionTemplate(p.ID, p, p.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec("UPDATE nodes SET lifecycle='retired' WHERE id=?", primary.ID); err != nil {
 		t.Fatal(err)
 	}
-	profile, _, err := s.PortalClientProfile(u.ID, "subscription")
+	profile, _, err := s.PortalClientProfile(u.ID, "subscription", u.Subscriptions[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}

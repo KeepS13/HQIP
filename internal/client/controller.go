@@ -29,12 +29,15 @@ type Controller struct {
 	view                View
 	etag                string
 	generation          uint64
+	appliedGeneration   uint64
 	selectionGeneration uint64
 	cancelApply         context.CancelFunc
 	closed              bool
 	wake                chan struct{}
 	authCancel          context.CancelFunc
 	loginGeneration     uint64
+	cancelSelection     context.CancelFunc
+	restoreSelection    bool
 }
 
 func New(dir string, platform Platform, engine Engine) (*Controller, error) {
@@ -42,7 +45,7 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		return nil, e
 	}
 	c := &Controller{dir: dir, platform: platform, engine: engine, wake: make(chan struct{}, 1)}
-	c.saved = persisted{InstallationID: randomID(), Mode: "rule", ServerURL: "https://api-hqip.5202345.xyz"}
+	c.saved = persisted{AccountVersion: 3, InstallationID: randomID(), Mode: "rule", ServerURL: "https://api-hqip.5202345.xyz", Preferences: map[string]SelectionPreference{}}
 	if encrypted, e := os.ReadFile(filepath.Join(dir, "session.dat")); e == nil {
 		b, e := platform.Unprotect(encrypted)
 		if e != nil {
@@ -56,11 +59,16 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		c.saved.ServerURL = "https://api-hqip.5202345.xyz"
 	}
 	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{RunState: "disconnected", Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, CoreVersion: CoreVersion}}
-	if c.saved.AccountVersion != 2 {
+	if c.saved.AccountVersion != 3 {
 		c.saved.Tokens = Tokens{}
 		c.saved.Profile = Profile{}
 		c.saved.SelectedNodeID = ""
-		c.saved.AccountVersion = 2
+		c.saved.SelectedSubscriptionID = ""
+		c.saved.Preferences = map[string]SelectionPreference{}
+		c.saved.AccountVersion = 3
+	}
+	if c.saved.Preferences == nil {
+		c.saved.Preferences = map[string]SelectionPreference{}
 	}
 	if c.saved.Tokens.RefreshToken != "" {
 		a, e := NewAPI(c.saved.ServerURL, c.saved.Tokens)
@@ -71,6 +79,8 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		c.view.LoggedIn = true
 		c.view.DeviceName = c.saved.Profile.Name
 		c.view.DesiredNodeID = c.saved.SelectedNodeID
+		c.view.DesiredSubscriptionID = c.saved.SelectedSubscriptionID
+		c.restoreSelection = true
 		c.populateLocked(c.saved.Profile)
 		if b, e := os.ReadFile(filepath.Join(dir, "rules.json")); e == nil {
 			sum := sha256.Sum256(b)
@@ -86,6 +96,8 @@ func (c *Controller) View() View {
 	defer c.mu.Unlock()
 	v := c.view
 	v.Nodes = append([]NodeView{}, v.Nodes...)
+	v.Subscriptions = append([]Subscription{}, v.Subscriptions...)
+	v.Metrics.History = append([]MetricPoint{}, v.Metrics.History...)
 	return v
 }
 func (c *Controller) persistLocked() error {
@@ -111,14 +123,13 @@ func (c *Controller) populateLocked(p Profile) {
 	c.view.Revision = p.Revision
 	c.view.RulesVersion = p.Rules.Version
 	c.view.DefaultNodeID = p.DefaultNodeID
-	c.view.Entitlement = p.Entitlement
+	c.view.Subscription = p.Subscription
+	c.view.Subscriptions = append([]Subscription{}, p.Subscriptions...)
+	c.view.SelectionRevision = p.SelectionRevision
 	c.view.Nodes = []NodeView{}
 	for _, n := range p.Nodes {
 		c.view.Nodes = append(c.view.Nodes, NodeView{n.ID, n.Name, n.Ready})
 	}
-}
-func (c *Controller) Login(server, user, password string) error {
-	return errors.New("请在系统浏览器中登录用户账户，旧设备账号不再可用")
 }
 func (c *Controller) Logout() error {
 	c.CancelLogin()
@@ -135,6 +146,10 @@ func (c *Controller) logoutFor(expected *API) error {
 		return nil
 	}
 	c.generation++
+	c.selectionGeneration++
+	if c.cancelSelection != nil {
+		c.cancelSelection()
+	}
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -152,6 +167,7 @@ func (c *Controller) logoutFor(expected *API) error {
 	c.saved.Tokens = Tokens{}
 	c.saved.Profile = Profile{}
 	c.saved.SelectedNodeID = ""
+	c.saved.SelectedSubscriptionID = ""
 	c.bundle = rules.Bundle{}
 	c.etag = ""
 	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, RunState: "disconnected", CoreVersion: CoreVersion}}
@@ -160,6 +176,7 @@ func (c *Controller) logoutFor(expected *API) error {
 }
 func (c *Controller) Run(ctx context.Context) {
 	go c.accountWatchdog(ctx)
+	go c.runMetrics(ctx)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	delay := 5 * time.Second
@@ -203,14 +220,16 @@ func (c *Controller) Sync(ctx context.Context) error {
 	c.mu.Lock()
 	api := c.api
 	etag := c.etag
+	selection := c.selectionGeneration
+	pending := c.view.SelectionPending
 	c.mu.Unlock()
-	if api == nil {
+	if api == nil || pending {
 		return nil
 	}
 	p, newTag, unchanged, e := api.Profile(ctx, etag)
 	if e != nil {
 		c.mu.Lock()
-		current := c.api == api
+		current := c.api == api && c.selectionGeneration == selection
 		if current {
 			c.view.SyncError = e.Error()
 		}
@@ -222,7 +241,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 	}
 	if unchanged {
 		c.mu.Lock()
-		if c.api != api {
+		if c.api != api || selection != c.selectionGeneration {
 			c.mu.Unlock()
 			return nil
 		}
@@ -234,18 +253,26 @@ func (c *Controller) Sync(ctx context.Context) error {
 		c.report()
 		return nil
 	}
+	c.mu.Lock()
+	currentSelection := c.api == api && c.selectionGeneration == selection && !c.view.SelectionPending
+	c.mu.Unlock()
+	if !currentSelection {
+		return nil
+	}
 	if !p.Enabled {
 		return c.logoutFor(api)
 	}
-	if p.Entitlement == nil || p.Entitlement.Status != "active" || !p.Entitlement.ExpiresAt.After(time.Now()) {
-		return c.cacheUnavailable(api, p)
+	if !usableSubscription(p) {
+		err := c.cacheUnavailable(api, p)
+		c.restoreRemembered(api, p)
+		return err
 	}
 	c.mu.Lock()
 	old := c.saved.Profile
 	b := c.bundle
 	selected := c.saved.SelectedNodeID
 	c.mu.Unlock()
-	if p.Revision < old.Revision {
+	if p.SelectionRevision < old.SelectionRevision || (p.SubscriptionID == old.SubscriptionID && p.Revision < old.Revision) {
 		return nil
 	}
 	configurationChanged := connectionConfigurationChanged(old, p, selected)
@@ -268,7 +295,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 		// profile response cannot restore rules after the active session changed.
 		c.routeMu.Lock()
 		c.mu.Lock()
-		current := c.api == api
+		current := c.api == api && c.selectionGeneration == selection && !c.view.SelectionPending
 		c.mu.Unlock()
 		if !current {
 			c.routeMu.Unlock()
@@ -284,13 +311,16 @@ func (c *Controller) Sync(ctx context.Context) error {
 		}
 	}
 	c.mu.Lock()
-	if c.api != api {
+	if c.api != api || c.selectionGeneration != selection || c.view.SelectionPending {
 		c.mu.Unlock()
 		return nil
 	}
-	if p.Revision < old.Revision {
+	if p.SelectionRevision < c.saved.Profile.SelectionRevision || (p.SubscriptionID == c.saved.Profile.SubscriptionID && p.Revision < c.saved.Profile.Revision) {
 		c.mu.Unlock()
 		return nil
+	}
+	if p.SubscriptionID != c.saved.SelectedSubscriptionID {
+		c.saved.SelectedNodeID = c.rememberedNodeLocked(p)
 	}
 	allowed := false
 	for _, n := range p.Nodes {
@@ -302,6 +332,10 @@ func (c *Controller) Sync(ctx context.Context) error {
 		c.saved.SelectedNodeID = p.DefaultNodeID
 	}
 	c.saved.Profile = p
+	c.saved.SelectedSubscriptionID = p.SubscriptionID
+	c.view.DesiredSubscriptionID = p.SubscriptionID
+	c.rememberLocked()
+	c.restoreSelection = false
 	c.bundle = b
 	c.etag = newTag
 	c.populateLocked(p)
@@ -348,7 +382,7 @@ func (c *Controller) rejectProfile(api *API, p Profile, err error) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
-	if c.api != api {
+	if c.api != api || c.view.SelectionPending || p.SelectionRevision < c.saved.Profile.SelectionRevision {
 		c.mu.Unlock()
 		return err
 	}
@@ -358,11 +392,14 @@ func (c *Controller) rejectProfile(api *API, p Profile, err error) error {
 	}
 	c.saved.Profile = p
 	c.saved.SelectedNodeID = p.DefaultNodeID
+	c.saved.SelectedSubscriptionID = p.SubscriptionID
 	c.bundle = rules.Bundle{}
 	c.etag = ""
 	c.populateLocked(p)
 	c.view.DesiredNodeID = p.DefaultNodeID
+	c.view.DesiredSubscriptionID = p.SubscriptionID
 	c.view.ActualNodeID = ""
+	c.view.ActualSubscriptionID = ""
 	c.view.ProcessedConfigRevision = p.Revision
 	c.view.SyncError = err.Error()
 	c.view.LastError = err.Error()
@@ -388,9 +425,17 @@ func (c *Controller) Connect() error {
 		c.mu.Unlock()
 		return errors.New("请先登录用户账户")
 	}
-	if c.view.Entitlement == nil || c.view.Entitlement.Status != "active" || !c.view.Entitlement.ExpiresAt.After(time.Now()) {
+	if c.view.SelectionPending {
 		c.mu.Unlock()
-		return errors.New("套餐未开通、已到期或流量已用尽")
+		return errors.New("正在切换订阅，请稍后连接")
+	}
+	if c.view.DesiredSubscriptionID != c.saved.SelectedSubscriptionID {
+		c.mu.Unlock()
+		return errors.New("订阅切换尚未完成，请重新选择订阅后再连接")
+	}
+	if !usableSubscription(c.saved.Profile) {
+		c.mu.Unlock()
+		return errors.New("请先选择一份有效订阅；已到期或耗尽的订阅不可连接")
 	}
 	if len(c.bundle.Rules) == 0 {
 		c.mu.Unlock()
@@ -419,6 +464,7 @@ func (c *Controller) Disconnect() error {
 	e := c.engine.Stop()
 	c.mu.Lock()
 	c.view.ActualNodeID = ""
+	c.view.ActualSubscriptionID = ""
 	c.view.RunState = "disconnected"
 	c.view.LastError = ""
 	c.mu.Unlock()
@@ -427,6 +473,10 @@ func (c *Controller) Disconnect() error {
 }
 func (c *Controller) Select(id string) error {
 	c.mu.Lock()
+	if c.view.SelectionPending {
+		c.mu.Unlock()
+		return errors.New("请等待订阅切换完成后选择节点")
+	}
 	found := false
 	for _, n := range c.saved.Profile.Nodes {
 		if n.ID == id {
@@ -435,9 +485,10 @@ func (c *Controller) Select(id string) error {
 	}
 	if !found {
 		c.mu.Unlock()
-		return errors.New("节点未获此设备授权")
+		return errors.New("节点不属于本机当前订阅")
 	}
 	c.saved.SelectedNodeID = id
+	c.rememberLocked()
 	c.selectionGeneration++
 	c.view.DesiredNodeID = id
 	c.generation++
@@ -481,6 +532,10 @@ func (c *Controller) applyLatest() {
 		c.mu.Unlock()
 		return
 	}
+	if c.view.RunState == "connected" && c.appliedGeneration == c.generation {
+		c.mu.Unlock()
+		return
+	}
 	g := c.generation
 	p := c.saved.Profile
 	b := c.bundle
@@ -489,6 +544,10 @@ func (c *Controller) applyLatest() {
 	tun := c.saved.TUN
 	server := c.saved.ServerURL
 	api := c.api
+	if c.view.SelectionPending || !usableSubscription(p) {
+		c.mu.Unlock()
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 135*time.Second)
 	c.cancelApply = cancel
 	c.view.RunState = "connecting"
@@ -497,10 +556,10 @@ func (c *Controller) applyLatest() {
 	// Release the old transport before any candidate consumes another slot.
 	e := c.engine.Stop()
 	if e == nil {
-		e = api.Drain(ctx)
+		e = api.Drain(ctx, p.SubscriptionID, p.SelectionRevision)
 	}
 	if e == nil {
-		e = api.WaitDrained(ctx)
+		e = api.WaitDrained(ctx, p.SubscriptionID, p.SelectionRevision)
 	}
 	if e == nil {
 		e = c.engine.Apply(ctx, p, b, id, mode, tun, server)
@@ -526,14 +585,18 @@ func (c *Controller) applyLatest() {
 		c.view.RunState = "failed"
 		c.view.ConnectionIntent = false
 		c.view.ActualNodeID = ""
+		c.view.ActualSubscriptionID = ""
 		c.view.LastError = e.Error()
 		c.view.ProcessedConfigRevision = p.Revision
 	} else {
 		c.view.AppliedConfigRevision = p.Revision
 		c.view.ProcessedConfigRevision = p.Revision
 		c.view.ActualNodeID = id
+		c.view.ActualSubscriptionID = p.SubscriptionID
 		c.view.RunState = "connected"
+		c.appliedGeneration = g
 		c.view.LastError = ""
+		c.beginMetricsLocked()
 	}
 	c.mu.Unlock()
 	c.report()
@@ -544,6 +607,7 @@ func (c *Controller) fail(message string) {
 	c.view.RunState = "failed"
 	c.view.ConnectionIntent = false
 	c.view.ActualNodeID = ""
+	c.view.ActualSubscriptionID = ""
 	c.view.LastError = message
 	c.mu.Unlock()
 }
@@ -571,6 +635,10 @@ func (c *Controller) Close() {
 	c.mu.Lock()
 	c.closed = true
 	c.generation++
+	c.selectionGeneration++
+	if c.cancelSelection != nil {
+		c.cancelSelection()
+	}
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}

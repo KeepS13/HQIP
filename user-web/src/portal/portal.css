@@ -1130,10 +1130,14 @@
     display: none;
   }
   .portal-account-row {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 35px minmax(0, 1fr);
+    padding: 0 18px 20px;
   }
   .portal-account-row .button {
-    margin-left: 50px;
+    grid-column: 2;
+    justify-self: start;
+    margin-left: 0;
   }
   .portal-records {
     padding: 0 18px 15px;

@@ -28,7 +28,8 @@ func main() {
 	}
 }
 func run() error {
-	creds := flag.String("credentials", "", "owner-only device credentials JSON")
+	server := flag.String("server", "https://api-hqip.5202345.xyz", "account API origin")
+	subscription := flag.String("subscription", "", "subscription instance to use on this test installation")
 	corePath := flag.String("core", "dist/desktop/sing-box.exe", "fixed sing-box executable")
 	state := flag.String("state", ".local/client-check", "isolated state directory")
 	out := flag.String("output", ".local/client-check-status.json", "sanitized status JSON")
@@ -37,21 +38,6 @@ func run() error {
 	system := flag.Bool("system-proxy", false, "verify actual system proxy takeover and restoration")
 	connect := flag.Bool("connect", true, "connect after login")
 	flag.Parse()
-	var account struct {
-		ServerURL string `json:"serverUrl"`
-		Username  string `json:"username"`
-		Password  string `json:"password"`
-	}
-	b, e := os.ReadFile(*creds)
-	if e != nil {
-		return e
-	}
-	if e = json.Unmarshal(b, &account); e != nil {
-		return e
-	}
-	if account.ServerURL == "" {
-		account.ServerURL = "https://testvps.sharevps.online"
-	}
 	dir, e := filepath.Abs(*state)
 	if e != nil {
 		return e
@@ -77,10 +63,22 @@ func run() error {
 	if c.View().LoggedIn {
 		_ = c.Logout()
 	}
-	if e = c.Login(account.ServerURL, account.Username, account.Password); e != nil {
+	if e = c.LoginBrowser(*server, winclient.OpenBrowser); e != nil {
 		return e
 	}
 	defer c.Logout()
+	if *subscription != "" {
+		if e = c.SelectSubscription(*subscription); e != nil {
+			return e
+		}
+		until := time.Now().Add(150 * time.Second)
+		for c.View().SelectionPending && time.Now().Before(until) {
+			time.Sleep(100 * time.Millisecond)
+		}
+		if c.View().SelectionPending || c.View().DesiredSubscriptionID != *subscription || c.View().LastError != "" {
+			return errors.New("subscription selection did not complete")
+		}
+	}
 	if e = c.SetMode("rule", *tun); e != nil {
 		return e
 	}

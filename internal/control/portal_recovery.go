@@ -13,10 +13,10 @@ func (s *Server) portalResume(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		RecoveryEpoch   string                `json:"recoveryEpoch"`
 		LedgerConfirmed bool                  `json:"ledgerConfirmed"`
-		Users           []store.RecoveryTotal `json:"users"`
+		Subscriptions   []store.RecoveryTotal `json:"subscriptions"`
 	}
 	if !readJSON(w, r, &b) {
 		return
 	}
-	portalResult(w, map[string]bool{"ok": true}, s.Store.ResumePortalRecovery(b.RecoveryEpoch, b.LedgerConfirmed, b.Users))
+	portalResult(w, map[string]bool{"ok": true}, s.Store.ResumePortalRecovery(b.RecoveryEpoch, b.LedgerConfirmed, b.Subscriptions))
 }

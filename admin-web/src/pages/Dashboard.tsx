@@ -192,7 +192,7 @@ export function Dashboard() {
             </div>
           </div>
           <Link to="/users" className="panel-bottom-link">
-            管理用户套餐 <ArrowRight size={15} />
+            管理用户订阅 <ArrowRight size={15} />
           </Link>
         </Panel>
       </div>
@@ -291,7 +291,7 @@ export function Dashboard() {
         )}
       </Panel>
       {(data.alerts || []).length > 0 && (
-        <Panel title="需要关注" subtitle="服务器与节点容量提醒；用户套餐额度单独执行">
+        <Panel title="需要关注" subtitle="服务器与节点容量提醒；用户订阅额度分别执行">
           <div className="alerts-list">
             {data.alerts.map((alert, i) => (
               <div
@@ -316,7 +316,7 @@ export function Dashboard() {
         </span>
         <div>
           <strong>为用户开通属于他们的连接</strong>
-          <p>分配套餐与有效期，用户即可登录客户端或创建订阅。</p>
+          <p>分配独立订阅，用户即可在客户端选择流量包与节点。</p>
         </div>
         <Link to="/users" className="button button-secondary">
           管理用户 <ArrowRight size={15} />
@@ -332,7 +332,7 @@ export function Guide() {
       <PageHeader
         eyebrow="QUICK START"
         title="连接指南"
-        description="添加节点、创建套餐，为用户开通连接权限。"
+        description="添加节点、创建订阅模板，为用户开通独立流量包。"
       />
       <div className="guide-steps">
         <Panel title="01 · 添加服务器" subtitle="准备好可通过 SSH 连接的服务器">
@@ -345,29 +345,29 @@ export function Guide() {
           </p>
           <p>
             支持 Ubuntu 22.04 / 24.04、Debian 12，amd64 / arm64。首次部署需要
-            root 权限。服务器与节点的容量指标用于监控，用户套餐限制另行执行。
+            root 权限。服务器与节点的容量指标用于监控，用户订阅限制另行执行。
           </p>
           <Link className="text-link" to="/nodes?add=1">
             添加节点 <ArrowRight size={15} />
           </Link>
         </Panel>
         <Panel
-          title="02 · 创建套餐并开通用户"
-          subtitle="每个账户独立累计流量与使用权限"
+          title="02 · 设置订阅并确认开通"
+          subtitle="每份订阅独立累计流量与使用权限"
         >
           <span className="guide-icon green">
             <Monitor size={28} />
           </span>
           <p>
-            创建套餐并设置共享带宽、一次性流量、连接上限、可用节点和默认节点。
-            用户在网站首页注册邮箱账号后，由管理员分配套餐并单独设置到期时间。
+            创建订阅模板，设置共享带宽、一次性流量、有效天数、连接上限与可用节点。
+            用户注册后在商城申请，由管理员确认；也可在用户详情直接添加订阅。
           </p>
           <p>
-            套餐修改会同步到已分配用户；已用流量保留。明确选择重新开通后，
-            才会重置本次套餐使用量，历史统计继续保留。
+            每次开通都会新增一份独立流量包，有效期从开通时起算。
+            同名订阅可同时有效，额度、带宽与连接上限分别计算。
           </p>
-          <Link className="text-link" to="/plans">
-            管理套餐 <ArrowRight size={15} />
+          <Link className="text-link" to="/subscriptions">
+            管理订阅 <ArrowRight size={15} />
           </Link>
         </Panel>
         <Panel
@@ -423,8 +423,8 @@ export function Guide() {
             <div>
               <strong>额度与带宽</strong>
               <p>
-                套餐带宽在用户全部连接间共享，一次性流量不按月重置。
-                用户套餐到期或额度耗尽时停止服务；服务器容量提醒保持独立。
+                每份订阅的带宽在使用该订阅的连接间共享，一次性流量不按月重置。
+                订阅到期或额度耗尽时停止使用该订阅的连接；服务器容量提醒保持独立。
               </p>
             </div>
           </div>
@@ -462,7 +462,7 @@ export function Guide() {
       <Notice>
         <CheckCircle2 size={15} className="inline-icon" />{" "}
         日常使用前，请确认节点显示「运行正常」，客户端使用兼容 Mihomo
-        的最新稳定版，且用户套餐处于有效状态。
+        的最新稳定版，且所选订阅处于有效状态。
       </Notice>
     </>
   );

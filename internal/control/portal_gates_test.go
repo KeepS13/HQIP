@@ -26,7 +26,7 @@ func TestPortalActivationRequiresLegacyClientUpgrade(t *testing.T) {
 	if w := request(s.AdminHandler(), "GET", "/api/v1/client/profile", nil, "", ""); w.Code != 404 {
 		t.Fatal("legacy gate added route to admin surface")
 	}
-	if w := request(public, "GET", "/api/v2/client/profile", nil, "", ""); w.Code != http.StatusUnauthorized {
+	if w := request(public, "GET", "/api/v3/client/profile", nil, "", ""); w.Code != http.StatusUnauthorized {
 		t.Fatal("activation blocked v2 client API", w.Code)
 	}
 }

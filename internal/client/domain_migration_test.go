@@ -36,7 +36,7 @@ func TestOfficialAuthorizationOriginPair(t *testing.T) {
 func TestSavedOfficialURLMigrationLeavesCustomServerAndTokens(t *testing.T) {
 	for _, address := range []string{"https://hqip.5202345.xyz", "https://hqip.5202345.xyz/", "https://custom.example"} {
 		dir := t.TempDir()
-		saved := persisted{ServerURL: address, AccountVersion: 2, Mode: "rule", Tokens: Tokens{RefreshToken: "stored-refresh", AccessToken: "stored-access"}}
+		saved := persisted{ServerURL: address, AccountVersion: 3, Mode: "rule", Tokens: Tokens{RefreshToken: "stored-refresh", AccessToken: "stored-access"}}
 		b, _ := json.Marshal(saved)
 		if err := os.WriteFile(filepath.Join(dir, "session.dat"), b, 0600); err != nil {
 			t.Fatal(err)

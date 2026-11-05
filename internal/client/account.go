@@ -17,13 +17,16 @@ import (
 )
 
 type Connection struct {
-	ID        string    `json:"id"`
-	NodeID    string    `json:"nodeId"`
-	State     string    `json:"state"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	LastError string    `json:"lastError"`
+	SubscriptionID string    `json:"subscriptionId"`
+	ID             string    `json:"id"`
+	NodeID         string    `json:"nodeId"`
+	State          string    `json:"state"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	LastError      string    `json:"lastError"`
 }
 type Connections struct {
+	SubscriptionID     string       `json:"subscriptionId"`
+	SelectionRevision  int64        `json:"selectionRevision"`
 	Connections        []Connection `json:"connections"`
 	Occupied           int          `json:"occupied"`
 	MaxConnections     int          `json:"maxConnections"`
@@ -32,7 +35,7 @@ type Connections struct {
 }
 
 func connectionConfigurationChanged(old, next Profile, selected string) bool {
-	if old.Rules.Hash != next.Rules.Hash {
+	if old.SubscriptionID != next.SubscriptionID || old.Rules.Hash != next.Rules.Hash {
 		return true
 	}
 	var before, after Node
@@ -50,26 +53,29 @@ func connectionConfigurationChanged(old, next Profile, selected string) bool {
 }
 
 func (a *API) Connections(ctx context.Context) (Connections, error) {
-	b, _, _, err := a.auth(ctx, "GET", "/api/v2/client/connections", nil, "")
+	b, _, _, err := a.auth(ctx, "GET", "/api/v3/client/connections", nil, "")
 	var v Connections
 	if err == nil {
 		err = json.Unmarshal(b, &v)
 	}
 	return v, err
 }
-func (a *API) Drain(ctx context.Context) error {
-	_, _, _, err := a.auth(ctx, "POST", "/api/v2/client/connections/drain", map[string]any{}, "")
+func (a *API) Drain(ctx context.Context, subscriptionID string, revision int64) error {
+	_, _, _, err := a.auth(ctx, "POST", "/api/v3/client/connections/drain", map[string]any{"subscriptionId": subscriptionID, "expectedRevision": revision}, "")
 	return err
 }
-func (a *API) WaitDrained(ctx context.Context) error {
+func (a *API) WaitDrained(ctx context.Context, subscriptionID string, revision int64) error {
 	for {
 		v, err := a.Connections(ctx)
 		if err != nil {
 			return err
 		}
+		if v.SubscriptionID != subscriptionID || v.SelectionRevision != revision {
+			return ErrConflict
+		}
 		pending := false
 		for _, c := range v.Connections {
-			if c.State != "closed" && c.State != "expired" && c.State != "rejected" {
+			if c.SubscriptionID == subscriptionID && c.State != "closed" && c.State != "expired" && c.State != "rejected" {
 				pending = true
 			}
 		}
@@ -96,7 +102,7 @@ func (a *API) BrowserLogin(ctx context.Context, installationID, clientName strin
 	state, verifier := randomID()+randomID(), randomID()+randomID()
 	hash := sha256.Sum256([]byte(verifier))
 	input := map[string]string{"codeChallenge": base64.RawURLEncoding.EncodeToString(hash[:]), "redirectUri": redirect, "state": state, "clientName": clientName, "installationId": installationID}
-	raw, _, _, err := a.request(ctx, "POST", "/api/v2/client/authorize", input, "", "")
+	raw, _, _, err := a.request(ctx, "POST", "/api/v3/client/authorize", input, "", "")
 	if err != nil {
 		return err
 	}
@@ -144,7 +150,7 @@ func (a *API) BrowserLogin(ctx context.Context, installationID, clientName strin
 		return errors.New("登录已取消或超时，请重新登录")
 	case code = <-result:
 	}
-	raw, _, _, err = a.request(ctx, "POST", "/api/v2/client/token", map[string]string{"code": code, "codeVerifier": verifier, "redirectUri": redirect, "installationId": installationID}, "", "")
+	raw, _, _, err = a.request(ctx, "POST", "/api/v3/client/token", map[string]string{"code": code, "codeVerifier": verifier, "redirectUri": redirect, "installationId": installationID}, "", "")
 	if err != nil {
 		return err
 	}
@@ -198,10 +204,11 @@ func (c *Controller) LoginBrowser(server string, open func(string) error) error 
 	}
 	c.api = a
 	c.saved.ServerURL = a.base
-	c.saved.AccountVersion = 2
+	c.saved.AccountVersion = 3
 	c.saved.Tokens = a.Tokens()
 	c.view.ServerURL = a.base
 	c.view.LoggedIn = true
+	c.restoreSelection = true
 	c.etag = ""
 	err = c.persistLocked()
 	c.mu.Unlock()
@@ -225,7 +232,7 @@ func (c *Controller) cacheUnavailable(api *API, p Profile) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
-	if c.api != api || p.Revision < c.saved.Profile.Revision {
+	if c.api != api || c.view.SelectionPending || p.SelectionRevision < c.saved.Profile.SelectionRevision || (p.SubscriptionID == c.saved.Profile.SubscriptionID && p.Revision < c.saved.Profile.Revision) {
 		c.mu.Unlock()
 		return nil
 	}
@@ -236,10 +243,13 @@ func (c *Controller) cacheUnavailable(api *API, p Profile) error {
 	wasOn := c.view.ConnectionIntent || c.view.RunState == "connected"
 	c.view.ConnectionIntent = false
 	c.view.ActualNodeID = ""
+	c.view.ActualSubscriptionID = ""
 	if c.view.RunState != "failed" {
 		c.view.RunState = "cached"
 	}
 	c.saved.Profile = p
+	c.saved.SelectedSubscriptionID = p.SubscriptionID
+	c.view.DesiredSubscriptionID = p.SubscriptionID
 	c.populateLocked(p)
 	c.saved.SelectedNodeID = p.DefaultNodeID
 	c.view.DesiredNodeID = p.DefaultNodeID
@@ -249,7 +259,7 @@ func (c *Controller) cacheUnavailable(api *API, p Profile) error {
 	c.view.ProcessedConfigRevision = p.Revision
 	if wasOn {
 		c.view.RunState = "failed"
-		c.view.LastError = "套餐未开通、已到期或流量已用尽，VPN 已关闭"
+		c.view.LastError = "当前订阅已到期、耗尽或被移除，VPN 已关闭；请手动选择其他订阅"
 	}
 	err := c.persistLocked()
 	c.mu.Unlock()
@@ -259,6 +269,7 @@ func (c *Controller) cacheUnavailable(api *API, p Profile) error {
 func (c *Controller) checkAccountConnection(ctx context.Context) {
 	c.mu.Lock()
 	api := c.api
+	selection := c.selectionGeneration
 	c.mu.Unlock()
 	if api == nil {
 		return
@@ -272,12 +283,12 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 	c.routeMu.Lock()
 	c.mu.Lock()
 	stop := false
-	if c.api == api {
+	if c.api == api && selection == c.selectionGeneration && !c.view.SelectionPending && state.SubscriptionID == c.saved.SelectedSubscriptionID {
 		c.view.Connections = state
 		if c.view.RunState == "connected" {
 			active := false
 			for _, lease := range state.Connections {
-				if lease.State == "active" && lease.ExpiresAt.After(time.Now()) {
+				if lease.State == "active" && lease.SubscriptionID == c.view.ActualSubscriptionID && lease.NodeID == c.view.ActualNodeID && lease.ExpiresAt.After(time.Now()) {
 					active = true
 				}
 			}
@@ -288,8 +299,9 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 				}
 				c.view.ConnectionIntent = false
 				c.view.ActualNodeID = ""
+				c.view.ActualSubscriptionID = ""
 				c.view.RunState = "failed"
-				c.view.LastError = "服务器连接授权已结束，VPN 已关闭，请检查套餐或在线连接后手动重连"
+				c.view.LastError = "服务器连接授权已结束，VPN 已关闭，请检查订阅后手动重连"
 				stop = true
 			}
 		}
@@ -319,8 +331,18 @@ func (c *Controller) accountWatchdog(ctx context.Context) {
 			if c.view.LastSync == nil || time.Since(*c.view.LastSync) >= 120*time.Second {
 				message = "账户服务失联超过 120 秒，VPN 已关闭，请恢复后手动重连"
 			}
-			if c.view.Entitlement != nil && !c.view.Entitlement.ExpiresAt.After(time.Now()) {
-				message = "套餐已到期，VPN 已关闭"
+			selected := c.view.Subscription
+			if c.view.SelectionPending {
+				selected = nil
+				for _, item := range c.view.Subscriptions {
+					if item.ID == c.view.DesiredSubscriptionID {
+						selected = &item
+						break
+					}
+				}
+			}
+			if selected != nil && !selected.ExpiresAt.After(time.Now()) {
+				message = "当前订阅已到期，VPN 已关闭，请手动选择其他订阅"
 			}
 		}
 		if message != "" {
@@ -330,6 +352,7 @@ func (c *Controller) accountWatchdog(ctx context.Context) {
 			}
 			c.view.ConnectionIntent = false
 			c.view.ActualNodeID = ""
+			c.view.ActualSubscriptionID = ""
 			c.view.RunState = "failed"
 			c.view.LastError = message
 		}
@@ -350,4 +373,11 @@ func trustedAuthorizationOrigin(api, page *url.URL) bool {
 		return true
 	}
 	return api.Scheme == "https" && strings.EqualFold(api.Host, "api-hqip.5202345.xyz") && page.Scheme == "https" && strings.EqualFold(page.Host, "hqip.5202345.xyz") && page.Path == "/authorize"
+}
+
+func AccountURL(server string) string {
+	if strings.TrimRight(server, "/") == "https://api-hqip.5202345.xyz" {
+		return "https://hqip.5202345.xyz/subscriptions"
+	}
+	return strings.TrimRight(server, "/") + "/subscriptions"
 }

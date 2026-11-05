@@ -11,11 +11,10 @@ import (
 	"github.com/KeepS13/HQIP/internal/secure"
 )
 
-const leaseSelect = `SELECT id,node_id,user_id,session_id,epoch,revision,created_at,expires,bandwidth,budget,upload,download,closed,revoked,COALESCE((SELECT version FROM portal_rates WHERE lease_id=id),1),COALESCE((SELECT pending FROM portal_rates WHERE lease_id=id),1) FROM portal_leases `
+const leaseSelect = `SELECT id,node_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget,upload,download,closed,revoked,COALESCE((SELECT version FROM portal_rates WHERE lease_id=id),1),COALESCE((SELECT pending FROM portal_rates WHERE lease_id=id),1) FROM portal_leases `
 
 type storedLease struct {
 	model.ConnectionLease
-	epoch   int64
 	revoked bool
 }
 type rowScanner interface{ Scan(...any) error }
@@ -23,9 +22,9 @@ type rowScanner interface{ Scan(...any) error }
 func scanLease(row rowScanner) (storedLease, error) {
 	var l storedLease
 	var created, expires int64
-	err := row.Scan(&l.ID, &l.NodeID, &l.UserID, &l.SessionID, &l.epoch, &l.Revision, &created, &expires, &l.BandwidthBytesPerSecond, &l.BudgetBytes, &l.UploadBytes, &l.DownloadBytes, &l.Closed, &l.revoked, &l.RateVersion, &l.RatePending)
+	err := row.Scan(&l.ID, &l.NodeID, &l.UserID, &l.SessionID, &l.SubscriptionID, &l.Revision, &created, &expires, &l.BandwidthBytesPerSecond, &l.BudgetBytes, &l.UploadBytes, &l.DownloadBytes, &l.Closed, &l.revoked, &l.RateVersion, &l.RatePending)
 	l.LeaseID = l.ID
-	l.AccountingID = "user_" + l.UserID
+	l.AccountingID = "subscription_" + l.SubscriptionID
 	l.CreatedAt = time.Unix(created, 0).UTC()
 	l.ExpiresAt = time.Unix(expires, 0).UTC()
 	l.ConsumedBytes = l.UploadBytes + l.DownloadBytes
@@ -37,7 +36,7 @@ func scanLease(row rowScanner) (storedLease, error) {
 	}
 	return l, err
 }
-func entitlementAllows(e *model.Entitlement, node string) bool {
+func entitlementAllows(e *model.UserSubscription, node string) bool {
 	if e == nil || e.Status != "active" {
 		return false
 	}
@@ -48,7 +47,7 @@ func entitlementAllows(e *model.Entitlement, node string) bool {
 	}
 	return false
 }
-func leaseRate(e *model.Entitlement) int64 {
+func leaseRate(e *model.UserSubscription) int64 {
 	if e.BandwidthMbps == nil {
 		return 0
 	}
@@ -71,19 +70,19 @@ func leaseWindow(rate int64) int64 {
 	}
 	return n
 }
-func leaseExpiry(now time.Time, e *model.Entitlement) time.Time {
+func leaseExpiry(now time.Time, e *model.UserSubscription) time.Time {
 	end := now.Add(120 * time.Second)
-	if e.ExpiresAt != nil && end.After(*e.ExpiresAt) {
-		end = *e.ExpiresAt
+	if end.After(e.ExpiresAt) {
+		end = e.ExpiresAt
 	}
 	return end.UTC()
 }
-func activeCredentialSession(tx *sql.Tx, user, scope string, now time.Time) bool {
+func activeCredentialSession(tx *sql.Tx, user, subscription, scope string, now time.Time) bool {
 	var n int
 	if scope == "subscription" {
-		_ = tx.QueryRow("SELECT COUNT(*) FROM portal_users WHERE id=? AND subscription_hash!=''", user).Scan(&n)
+		_ = tx.QueryRow("SELECT COUNT(*) FROM portal_subscriptions WHERE id=? AND user_id=? AND subscription_hash!='' AND revoked=0", subscription, user).Scan(&n)
 	} else {
-		_ = tx.QueryRow("SELECT COUNT(*) FROM portal_sessions WHERE id=? AND user_id=? AND kind='native' AND revoked=0 AND expires>?", scope, user, now.Unix()).Scan(&n)
+		_ = tx.QueryRow("SELECT COUNT(*) FROM portal_sessions WHERE id=? AND user_id=? AND kind='native' AND revoked=0 AND expires>? AND selected_subscription_id=?", scope, user, now.Unix(), subscription).Scan(&n)
 	}
 	return n == 1
 }
@@ -106,15 +105,15 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 	if hold == "true" {
 		return empty, ErrEntitlement
 	}
-	var user, scope string
-	if err = tx.QueryRow("SELECT user_id,scope FROM portal_credentials WHERE node_id=? AND password_hash=?", node, secure.Hash(password)).Scan(&user, &scope); err != nil {
+	var user, scope, subscription string
+	if err = tx.QueryRow("SELECT user_id,scope,subscription_id FROM portal_credentials WHERE node_id=? AND password_hash=?", node, secure.Hash(password)).Scan(&user, &scope, &subscription); err != nil {
 		return empty, ErrUnauthorized
 	}
 	now := s.Now()
-	if !activeCredentialSession(tx, user, scope, now) {
+	if !activeCredentialSession(tx, user, subscription, scope, now) {
 		return empty, ErrUnauthorized
 	}
-	e, err := entitlement(tx, user, now)
+	e, err := userSubscription(tx, user, subscription, now)
 	if err != nil {
 		return empty, err
 	}
@@ -127,7 +126,7 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 	}
 	old, err := scanLease(tx.QueryRow(leaseSelect+"WHERE node_id=? AND connection_id=?", node, connection))
 	if err == nil {
-		if old.UserID != user || old.SessionID != scope || old.Closed || old.revoked || old.epoch != e.Epoch || !old.ExpiresAt.After(now) {
+		if old.UserID != user || old.SessionID != scope || old.Closed || old.revoked || old.SubscriptionID != e.ID || !old.ExpiresAt.After(now) {
 			return empty, ErrEntitlement
 		}
 		return old.ConnectionLease, nil
@@ -149,18 +148,21 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 	if budget <= 0 {
 		return empty, ErrEntitlement
 	}
-	l := model.ConnectionLease{ID: NewID(), UserID: user, AccountingID: "user_" + user, SessionID: scope, NodeID: node, CreatedAt: now.UTC(), ExpiresAt: leaseExpiry(now, e), BandwidthBytesPerSecond: rate, BudgetBytes: budget, Revision: e.Revision, State: "active"}
+	l := model.ConnectionLease{ID: NewID(), UserID: user, AccountingID: "subscription_" + subscription, SubscriptionID: subscription, SessionID: scope, NodeID: node, CreatedAt: now.UTC(), ExpiresAt: leaseExpiry(now, e), BandwidthBytesPerSecond: rate, BudgetBytes: budget, Revision: e.Revision, State: "active"}
 	l.LeaseID = l.ID
-	if _, err = tx.Exec("INSERT INTO portal_leases(id,node_id,connection_id,user_id,session_id,epoch,revision,created_at,expires,bandwidth,budget) VALUES(?,?,?,?,?,?,?,?,?,?,?)", l.ID, node, connection, user, scope, e.Epoch, e.Revision, now.Unix(), l.ExpiresAt.Unix(), 0, budget); err != nil {
+	if _, err = tx.Exec("INSERT INTO portal_leases(id,node_id,connection_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget) VALUES(?,?,?,?,?,?,?,?,?,?,?)", l.ID, node, connection, user, scope, subscription, e.Revision, now.Unix(), l.ExpiresAt.Unix(), 0, budget); err != nil {
 		return empty, err
 	}
-	if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE user_id=? AND epoch=?", budget, user, e.Epoch); err != nil {
+	if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", budget, subscription); err != nil {
 		return empty, err
 	}
 	if _, err = tx.Exec("INSERT INTO portal_rates(lease_id) VALUES(?)", l.ID); err != nil {
 		return empty, err
 	}
-	if err = rebalancePortalRates(tx, user, e, now); err != nil {
+	if _, err = tx.Exec("INSERT OR IGNORE INTO node_accounting_identities(node_id,accounting_id,subject_type,subject_id) VALUES(?,?,'subscription',?)", node, l.AccountingID, subscription); err != nil {
+		return empty, err
+	}
+	if err = rebalancePortalRates(tx, subscription, e, now); err != nil {
 		return empty, err
 	}
 	updated, err := scanLease(tx.QueryRow(leaseSelect+"WHERE id=?", l.ID))
@@ -182,6 +184,9 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 	}
 	defer tx.Rollback()
 	l, err := scanLease(tx.QueryRow(leaseSelect+"WHERE id=? AND node_id=?", id, node))
+	if errors.Is(err, sql.ErrNoRows) {
+		return settledLeaseReceipt(tx, node, id, u)
+	}
 	if err != nil {
 		return empty, notFound(err)
 	}
@@ -213,7 +218,7 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 		}
 	}
 	du, dd := u.UploadBytes-l.UploadBytes, u.DownloadBytes-l.DownloadBytes
-	if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE user_id=? AND epoch=?", du, dd, du+dd, l.UserID, l.epoch); err != nil {
+	if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", du, dd, du+dd, l.SubscriptionID); err != nil {
 		return empty, err
 	}
 	l.UploadBytes = u.UploadBytes
@@ -221,18 +226,18 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 	l.ConsumedBytes = consumed
 	// Final reports can arrive after expiry; settlement never resurrects leases.
 	if u.Closed {
-		if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE user_id=? AND epoch=?", l.BudgetBytes-consumed, l.UserID, l.epoch); err != nil {
+		if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", l.BudgetBytes-consumed, l.SubscriptionID); err != nil {
 			return empty, err
 		}
 		l.Closed = true
 		l.State = "closed"
 	} else {
 		now := s.Now()
-		e, eerr := entitlement(tx, l.UserID, now)
-		valid := eerr == nil && entitlementAllows(e, node) && e.Epoch == l.epoch && !l.revoked && l.ExpiresAt.After(now) && activeCredentialSession(tx, l.UserID, l.SessionID, now)
+		e, eerr := userSubscription(tx, l.UserID, l.SubscriptionID, now)
+		valid := eerr == nil && entitlementAllows(e, node) && !l.revoked && l.ExpiresAt.After(now) && activeCredentialSession(tx, l.UserID, l.SubscriptionID, l.SessionID, now)
 		if valid {
 			var rank int
-			err = tx.QueryRow("SELECT COUNT(*) FROM portal_leases WHERE user_id=? AND closed=0 AND expires>? AND (created_at<? OR (created_at=? AND id<=?))", l.UserID, now.Unix(), l.CreatedAt.Unix(), l.CreatedAt.Unix(), l.ID).Scan(&rank)
+			err = tx.QueryRow("SELECT COUNT(*) FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? AND (created_at<? OR (created_at=? AND rowid<=(SELECT rowid FROM portal_leases WHERE id=?)))", l.SubscriptionID, now.Unix(), l.CreatedAt.Unix(), l.CreatedAt.Unix(), l.ID).Scan(&rank)
 			if err != nil {
 				return empty, err
 			}
@@ -263,7 +268,7 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 			}
 		}
 		if needed > 0 {
-			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE user_id=? AND epoch=?", needed, l.UserID, l.epoch); err != nil {
+			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", needed, l.SubscriptionID); err != nil {
 				return empty, err
 			}
 			l.BudgetBytes += needed
@@ -281,12 +286,12 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 	if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,budget=?,bandwidth=?,revision=?,expires=?,closed=? WHERE id=?", l.UploadBytes, l.DownloadBytes, l.BudgetBytes, l.BandwidthBytesPerSecond, l.Revision, l.ExpiresAt.Unix(), l.Closed, id); err != nil {
 		return empty, err
 	}
-	e, err := entitlement(tx, l.UserID, s.Now())
+	e, err := userSubscription(tx, l.UserID, l.SubscriptionID, s.Now())
 	if err != nil {
 		return empty, err
 	}
 	if e != nil {
-		if err = rebalancePortalRates(tx, l.UserID, e, s.Now()); err != nil {
+		if err = rebalancePortalRates(tx, l.SubscriptionID, e, s.Now()); err != nil {
 			return empty, err
 		}
 	}
@@ -300,12 +305,67 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 	}
 	return l.ConnectionLease, nil
 }
-func (s *Store) PortalConnections(user, session string) ([]model.ConnectionLease, error) {
+
+func settledLeaseReceipt(tx *sql.Tx, node, id string, u model.LeaseUsage) (model.ConnectionLease, error) {
+	var l model.ConnectionLease
+	l.ID = id
+	l.LeaseID = id
+	l.NodeID = node
+	l.Closed = true
+	l.State = "closed"
+	err := tx.QueryRow("SELECT user_id,accounting_id,upload,download,budget,rate_version FROM settled_leases WHERE id=? AND node_id=?", id, node).Scan(&l.UserID, &l.AccountingID, &l.UploadBytes, &l.DownloadBytes, &l.BudgetBytes, &l.RateVersion)
+	if err != nil {
+		return l, notFound(err)
+	}
+	l.ConsumedBytes = l.UploadBytes + l.DownloadBytes
+	if !u.Closed || u.UploadBytes != l.UploadBytes || u.DownloadBytes != l.DownloadBytes || u.AppliedRateVersion < 0 || u.AppliedRateVersion > l.RateVersion {
+		return model.ConnectionLease{}, ErrConflict
+	}
+	return l, nil
+}
+
+func reconcileSubscriptionLeases(tx *sql.Tx, e *model.UserSubscription, now time.Time) error {
+	rows, err := tx.Query("SELECT id,node_id FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? ORDER BY created_at,rowid", e.ID, now.Unix())
+	if err != nil {
+		return err
+	}
+	type record struct{ id, node string }
+	leases := []record{}
+	for rows.Next() {
+		var r record
+		if err = rows.Scan(&r.id, &r.node); err != nil {
+			rows.Close()
+			return err
+		}
+		leases = append(leases, r)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	retained := 0
+	for _, l := range leases {
+		if !entitlementAllows(e, l.node) || retained >= e.MaxConnections || e.QuotaBytes != nil && e.UsedBytes+e.ReservedBytes > *e.QuotaBytes {
+			if _, err = tx.Exec("UPDATE portal_leases SET revoked=1 WHERE id=?", l.id); err != nil {
+				return err
+			}
+		} else {
+			retained++
+		}
+	}
+	return rebalancePortalRates(tx, e.ID, e, now)
+}
+func (s *Store) PortalConnections(user, session string, subscriptions ...string) ([]model.ConnectionLease, error) {
 	query := leaseSelect + "WHERE user_id=?"
 	args := []any{user}
 	if session != "" {
 		query += " AND session_id=?"
 		args = append(args, session)
+	}
+	if len(subscriptions) > 0 && subscriptions[0] != "" {
+		query += " AND subscription_id=?"
+		args = append(args, subscriptions[0])
 	}
 	query += " ORDER BY created_at DESC LIMIT 200"
 	rows, err := s.DB.Query(query, args...)
@@ -326,7 +386,7 @@ func (s *Store) PortalConnections(user, session string) ([]model.ConnectionLease
 	}
 	return out, rows.Err()
 }
-func (s *Store) RevokePortalConnection(user, id, session string) error {
+func (s *Store) RevokePortalConnection(user, id, session string, subscriptions ...string) error {
 	query := "UPDATE portal_leases SET revoked=1 WHERE user_id=?"
 	args := []any{user}
 	if id != "" {
@@ -336,6 +396,10 @@ func (s *Store) RevokePortalConnection(user, id, session string) error {
 	if session != "" {
 		query += " AND session_id=?"
 		args = append(args, session)
+	}
+	if len(subscriptions) > 0 && subscriptions[0] != "" {
+		query += " AND subscription_id=?"
+		args = append(args, subscriptions[0])
 	}
 	r, err := s.DB.Exec(query, args...)
 	if err != nil {

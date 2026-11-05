@@ -235,7 +235,8 @@ func (s *Store) ReconcileRestore() error {
 UPDATE portal_authorizations SET consumed=1;
 UPDATE portal_leases SET revoked=1;
 DELETE FROM portal_credentials;
-UPDATE portal_users SET subscription_hash='',subscription_secret='',revision=revision+1;`); err != nil {
+UPDATE portal_subscriptions SET subscription_hash='',subscription_secret='',revision=revision+1;
+UPDATE portal_users SET revision=revision+1;`); err != nil {
 		return err
 	}
 	for key, value := range map[string]string{"portal_recovery_hold": "true", "portal_recovery_epoch": NewID(), "portal_recovery_started": fmt.Sprint(s.Now().Unix())} {

@@ -121,13 +121,16 @@ func TestPortalCSRFAndCrossRoleIsolation(t *testing.T) {
 	user, cookie, csrf := portalLoginFixture(t, s, "user@example.com")
 	other, _, _ := portalLoginFixture(t, s, "other@example.com")
 	public := s.PublicHandler()
+	sub := subscriptionFixture(t, s, user, nil, "", 1)
+	foreignSub := subscriptionFixture(t, s, other, sub.NodeIDs, sub.DefaultNodeID, 1)
+	importPath := "/api/v1/user/subscriptions/" + sub.ID + "/import-link"
 	for _, test := range []struct{ origin, csrf string }{{"", csrf}, {"https://evil.invalid", csrf}, {s.opts.PublicURL, "wrong"}} {
-		w := portalRequest(public, "POST", "/api/v1/user/subscription", map[string]any{}, cookie, test.csrf, test.origin)
+		w := portalRequest(public, "POST", importPath, map[string]any{}, cookie, test.csrf, test.origin)
 		if w.Code != 403 {
 			t.Fatal("missing CSRF or origin accepted", w.Code)
 		}
 	}
-	if w := portalRequest(public, "POST", "/api/v1/user/subscription", map[string]any{}, cookie, csrf, s.opts.PublicURL); w.Code != 200 {
+	if w := portalRequest(public, "POST", importPath, map[string]any{}, cookie, csrf, s.opts.PublicURL); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	if w := request(s.AdminHandler(), "GET", "/api/v1/users", nil, cookie, csrf); w.Code != 401 {
@@ -136,11 +139,11 @@ func TestPortalCSRFAndCrossRoleIsolation(t *testing.T) {
 	if w := request(public, "GET", "/api/v1/user/profile", nil, adminCookie, adminCSRF); w.Code != 401 {
 		t.Fatal("admin cookie authorized user realm")
 	}
-	if w := portalRequest(public, "POST", "/api/v1/user/subscription", map[string]string{"userId": other.ID}, cookie, csrf, s.opts.PublicURL); w.Code != 200 {
+	if w := portalRequest(public, "POST", importPath, map[string]string{"userId": other.ID}, cookie, csrf, s.opts.PublicURL); w.Code != 200 {
 		t.Fatal("non-JSON-body handler should be session scoped")
 	}
-	own, _ := s.Store.PortalSubscription(user.ID, "get")
-	foreign, _ := s.Store.PortalSubscription(other.ID, "get")
+	own, _ := s.Store.PortalSubscription(user.ID, sub.ID, "get")
+	foreign, _ := s.Store.PortalSubscription(other.ID, foreignSub.ID, "get")
 	if own == "" || foreign != "" {
 		t.Fatal("request body changed user identity")
 	}
@@ -148,7 +151,7 @@ func TestPortalCSRFAndCrossRoleIsolation(t *testing.T) {
 	if strings.Contains(w.Body.String(), "password") || strings.Contains(w.Body.String(), "sshHost") || strings.Contains(w.Body.String(), other.Email) {
 		t.Fatal("profile leaked secrets/other user")
 	}
-	for _, path := range []string{"/api/v1/plans", "/api/v1/users", "/api/v1/settings/turnstile", "/admin"} {
+	for _, path := range []string{"/api/v1/subscription-templates", "/api/v1/users", "/api/v1/settings/turnstile", "/admin"} {
 		if w := request(public, "GET", path, nil, adminCookie, adminCSRF); w.Code != 404 {
 			t.Fatal("public exposed admin route", path)
 		}
@@ -162,7 +165,7 @@ func TestPortalNativeAuthorizationAndScopedDrain(t *testing.T) {
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	redirect := "http://127.0.0.1:45231/callback"
-	w := bearerRequest(public, "POST", "/api/v2/client/authorize", map[string]string{"codeChallenge": challenge, "redirectUri": redirect, "state": strings.Repeat("s", 32), "clientName": "test client", "installationId": "test-installation"}, "")
+	w := bearerRequest(public, "POST", "/api/v3/client/authorize", map[string]string{"codeChallenge": challenge, "redirectUri": redirect, "state": strings.Repeat("s", 32), "clientName": "test client", "installationId": "test-installation"}, "")
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -179,26 +182,27 @@ func TestPortalNativeAuthorizationAndScopedDrain(t *testing.T) {
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &approval)
 	target, _ := url.Parse(approval.RedirectURL)
-	w = bearerRequest(public, "POST", "/api/v2/client/token", map[string]string{"code": target.Query().Get("code"), "codeVerifier": verifier, "redirectUri": redirect, "installationId": "test-installation"}, "")
+	w = bearerRequest(public, "POST", "/api/v3/client/token", map[string]string{"code": target.Query().Get("code"), "codeVerifier": verifier, "redirectUri": redirect, "installationId": "test-installation"}, "")
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	var tokens model.PortalTokens
 	_ = json.Unmarshal(w.Body.Bytes(), &tokens)
-	w = bearerRequest(public, "GET", "/api/v2/client/profile", nil, tokens.AccessToken)
+	w = bearerRequest(public, "GET", "/api/v3/client/profile", nil, tokens.AccessToken)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	var profile struct {
-		Enabled     bool               `json:"enabled"`
-		Entitlement *model.Entitlement `json:"entitlement"`
-		DeviceID    string             `json:"deviceId"`
+		Enabled           bool                    `json:"enabled"`
+		Subscription      *model.UserSubscription `json:"subscription"`
+		SelectionRevision int64                   `json:"selectionRevision"`
+		DeviceID          string                  `json:"deviceId"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &profile)
-	if !profile.Enabled || profile.Entitlement != nil || profile.DeviceID != u.ID {
+	if !profile.Enabled || profile.Subscription != nil || profile.DeviceID != u.ID {
 		t.Fatal("unassigned user cannot log in or profile mis-scoped")
 	}
-	if w = bearerRequest(public, "POST", "/api/v2/client/connections/drain", map[string]any{}, tokens.AccessToken); w.Code != 200 {
+	if w = bearerRequest(public, "POST", "/api/v3/client/connections/drain", map[string]any{"subscriptionId": "", "expectedRevision": profile.SelectionRevision}, tokens.AccessToken); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	if w = bearerRequest(public, "GET", "/api/v1/client/profile", nil, tokens.AccessToken); w.Code != 401 {

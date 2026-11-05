@@ -10,21 +10,21 @@ import (
 // releases its capacity after the core acknowledges that exact rate version.
 // A new connection starts paused; all increases reserve capacity immediately.
 // -1 denotes a previously granted unlimited rate awaiting a finite-rate ACK.
-func rebalancePortalRates(tx *sql.Tx, user string, e *model.Entitlement, now time.Time) error {
+func rebalancePortalRates(tx *sql.Tx, subscription string, e *model.UserSubscription, now time.Time) error {
 	type member struct {
-		id                            string
-		rate, ceiling, version, epoch int64
-		pending, revoked              bool
-		node                          string
+		id                     string
+		rate, ceiling, version int64
+		pending, revoked       bool
+		node                   string
 	}
-	rows, err := tx.Query("SELECT l.id,l.bandwidth,r.ceiling,r.version,l.epoch,r.pending,l.revoked,l.node_id FROM portal_leases l JOIN portal_rates r ON r.lease_id=l.id WHERE l.user_id=? AND l.closed=0 AND l.expires>? ORDER BY l.created_at,l.id", user, now.Unix())
+	rows, err := tx.Query("SELECT l.id,l.bandwidth,r.ceiling,r.version,r.pending,l.revoked,l.node_id FROM portal_leases l JOIN portal_rates r ON r.lease_id=l.id WHERE l.subscription_id=? AND l.closed=0 AND l.expires>? ORDER BY l.created_at,l.rowid", subscription, now.Unix())
 	if err != nil {
 		return err
 	}
 	members := []member{}
 	for rows.Next() {
 		var m member
-		if err = rows.Scan(&m.id, &m.rate, &m.ceiling, &m.version, &m.epoch, &m.pending, &m.revoked, &m.node); err != nil {
+		if err = rows.Scan(&m.id, &m.rate, &m.ceiling, &m.version, &m.pending, &m.revoked, &m.node); err != nil {
 			rows.Close()
 			return err
 		}
@@ -38,7 +38,7 @@ func rebalancePortalRates(tx *sql.Tx, user string, e *model.Entitlement, now tim
 	count := 0
 	eligible := map[string]bool{}
 	for _, m := range members {
-		if !m.revoked && m.epoch == e.Epoch && entitlementAllows(e, m.node) && count < e.MaxConnections {
+		if !m.revoked && entitlementAllows(e, m.node) && count < e.MaxConnections {
 			eligible[m.id] = true
 			count++
 		}

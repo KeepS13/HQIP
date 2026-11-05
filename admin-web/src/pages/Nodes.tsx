@@ -659,7 +659,7 @@ export function NodePage() {
       <TaskLog node={node} events={data.events} />
       <Panel
         title="凭据用量记录"
-        subtitle="保留此节点的历史流量归属；用户权限在套餐中管理"
+        subtitle="保留此节点的历史流量归属；用户权限在订阅模板中管理"
         action={
           <Link className="text-link" to="/users">
             管理用户 <ArrowRight size={15} />
@@ -730,11 +730,11 @@ export function NodePage() {
         ) : (
           <Empty
             title="暂无凭据用量记录"
-            description="将此节点加入套餐后，用户可建立连接。"
+            description="将此节点加入订阅模板后，持有有效订阅的用户可连接。"
             action={
-              <Link to="/plans" className="button button-secondary">
+              <Link to="/subscriptions" className="button button-secondary">
                 <Plus size={15} />
-                管理套餐
+                管理订阅
               </Link>
             }
           />

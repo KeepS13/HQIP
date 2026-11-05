@@ -2,7 +2,6 @@ package control
 
 import (
 	"testing"
-	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"gopkg.in/yaml.v3"
@@ -25,14 +24,8 @@ func TestPortalSubscriptionDefaultOrderAndUnavailableRequiresSelection(t *testin
 		}
 		nodes = append(nodes, n)
 	}
-	p, err := s.Store.SavePlan("", model.Plan{Name: "default order", Enabled: true, SaleEnabled: true, NodeIDs: []string{nodes[0].ID, nodes[1].ID}, DefaultNodeID: nodes[1].ID, MaxConnections: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.Store.AssignPortal(u.ID, p.ID, s.Store.Now().Add(time.Hour), false); err != nil {
-		t.Fatal(err)
-	}
-	link, err := s.Store.PortalSubscription(u.ID, "create")
+	sub := subscriptionFixture(t, s, u, []string{nodes[0].ID, nodes[1].ID}, nodes[1].ID, 1)
+	link, err := s.Store.PortalSubscription(u.ID, sub.ID, "create")
 	if err != nil {
 		t.Fatal(err)
 	}

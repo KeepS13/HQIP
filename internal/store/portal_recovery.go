@@ -7,6 +7,7 @@ import (
 )
 
 type RecoveryUser struct {
+	SubscriptionID   string `json:"subscriptionId"`
 	UserID           string `json:"userId"`
 	UsedBytes        int64  `json:"usedBytes"`
 	ReservedBytes    int64  `json:"reservedBytes"`
@@ -21,8 +22,9 @@ type PortalRecovery struct {
 	Users     []RecoveryUser `json:"users"`
 }
 type RecoveryTotal struct {
-	UserID    string `json:"userId"`
-	UsedBytes int64  `json:"usedBytes"`
+	SubscriptionID string `json:"subscriptionId"`
+	UserID         string `json:"userId"`
+	UsedBytes      int64  `json:"usedBytes"`
 }
 
 func (s *Store) PortalRecovery() (PortalRecovery, error) {
@@ -41,7 +43,7 @@ func (s *Store) PortalRecovery() (PortalRecovery, error) {
 		v.Ready = false
 		v.Reason = "仍有节点未提交恢复后的在线配置确认与最终账本"
 	}
-	rows, err := s.DB.Query(`SELECT u.id,x.upload+x.download,x.reserved,MAX(0,COALESCE((SELECT SUM(l.upload+l.download) FROM lifetime l WHERE l.device_id='user_'||u.id),0)-COALESCE((SELECT SUM(p.upload+p.download) FROM portal_usage p WHERE p.user_id=u.id),0)) FROM portal_users u JOIN portal_usage x ON x.user_id=u.id AND x.epoch=u.epoch`)
+	rows, err := s.DB.Query(`SELECT p.user_id,p.id,x.upload+x.download,x.reserved,MAX(0,COALESCE((SELECT SUM(l.upload+l.download) FROM lifetime l WHERE l.device_id='subscription_'||p.id),0)-x.upload-x.download) FROM portal_subscriptions p JOIN portal_usage x ON x.subscription_id=p.id`)
 	if err != nil {
 		return v, err
 	}
@@ -49,7 +51,7 @@ func (s *Store) PortalRecovery() (PortalRecovery, error) {
 	for rows.Next() {
 		var r RecoveryUser
 		var gap int64
-		if err = rows.Scan(&r.UserID, &r.UsedBytes, &r.ReservedBytes, &gap); err != nil {
+		if err = rows.Scan(&r.UserID, &r.SubscriptionID, &r.UsedBytes, &r.ReservedBytes, &gap); err != nil {
 			return v, err
 		}
 		r.MinimumUsedBytes = r.UsedBytes + gap
@@ -70,19 +72,19 @@ func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []R
 	}
 	set := map[string]int64{}
 	for _, v := range totals {
-		if v.UserID == "" || v.UsedBytes < 0 || v.UsedBytes > 1<<60 {
+		if v.SubscriptionID == "" || v.UsedBytes < 0 || v.UsedBytes > 1<<60 {
 			return errors.New("恢复用量无效")
 		}
-		if _, ok := set[v.UserID]; ok {
-			return errors.New("恢复用户重复")
+		if _, ok := set[v.SubscriptionID]; ok {
+			return errors.New("恢复订阅重复")
 		}
-		set[v.UserID] = v.UsedBytes
+		set[v.SubscriptionID] = v.UsedBytes
 	}
 	if len(set) != len(state.Users) {
-		return errors.New("必须逐一核对全部用户的最终账本")
+		return errors.New("必须逐一核对全部订阅的最终账本")
 	}
 	for _, u := range state.Users {
-		value, ok := set[u.UserID]
+		value, ok := set[u.SubscriptionID]
 		if !ok || value < u.MinimumUsedBytes {
 			return errors.New("恢复累计量不得低于已知最终账本")
 		}
@@ -106,7 +108,7 @@ func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []R
 	if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE lifecycle='active' AND (last_seen<=? OR applied_revision<desired_revision OR core_healthy=0 OR last_seen<?)", state.StartedAt.Unix(), s.Now().Add(-30*time.Second).Unix()).Scan(&nodeGaps); err != nil {
 		return err
 	}
-	if err = tx.QueryRow("SELECT COUNT(*) FROM portal_users").Scan(&userCount); err != nil {
+	if err = tx.QueryRow("SELECT COUNT(*) FROM portal_subscriptions").Scan(&userCount); err != nil {
 		return err
 	}
 	if nodeGaps != 0 || userCount != len(set) || s.Now().Before(state.StartedAt.Add(120*time.Second)) {
@@ -114,13 +116,13 @@ func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []R
 	}
 	for id, target := range set {
 		var used, min int64
-		if err = tx.QueryRow(`SELECT x.upload+x.download,x.upload+x.download+MAX(0,COALESCE((SELECT SUM(l.upload+l.download) FROM lifetime l WHERE l.device_id='user_'||u.id),0)-COALESCE((SELECT SUM(p.upload+p.download) FROM portal_usage p WHERE p.user_id=u.id),0)) FROM portal_users u JOIN portal_usage x ON x.user_id=u.id AND x.epoch=u.epoch WHERE u.id=?`, id).Scan(&used, &min); err != nil {
+		if err = tx.QueryRow(`SELECT x.upload+x.download,MAX(x.upload+x.download,COALESCE((SELECT SUM(l.upload+l.download) FROM lifetime l WHERE l.device_id='subscription_'||p.id),0)) FROM portal_subscriptions p JOIN portal_usage x ON x.subscription_id=p.id WHERE p.id=?`, id).Scan(&used, &min); err != nil {
 			return err
 		}
 		if target < min {
 			return ErrConflict
 		}
-		if _, err = tx.Exec("UPDATE portal_usage SET download=download+? WHERE user_id=? AND epoch=(SELECT epoch FROM portal_users WHERE id=?)", target-used, id, id); err != nil {
+		if _, err = tx.Exec("UPDATE portal_usage SET download=download+? WHERE subscription_id=?", target-used, id); err != nil {
 			return err
 		}
 	}

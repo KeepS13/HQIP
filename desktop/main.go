@@ -23,15 +23,14 @@ var appIcon []byte
 type Desktop struct{ controller *client.Controller }
 
 func (d *Desktop) State() client.View { return d.controller.View() }
-func (d *Desktop) Login(server, user, password string) error {
-	return d.controller.Login(server, user, password)
-}
 func (d *Desktop) LoginBrowser(server string) error {
 	return d.controller.LoginBrowser(server, winclient.OpenBrowser)
 }
 func (d *Desktop) OpenAccount() error {
-	return winclient.OpenBrowser(d.controller.View().ServerURL + "/account")
+	return winclient.OpenBrowser(client.AccountURL(d.controller.View().ServerURL))
 }
+func (d *Desktop) SelectSubscription(id string) error  { return d.controller.SelectSubscription(id) }
+func (d *Desktop) MeasureDelay() error                 { return d.controller.MeasureDelay() }
 func (d *Desktop) CancelLogin()                        { d.controller.CancelLogin() }
 func (d *Desktop) Logout() error                       { return d.controller.Logout() }
 func (d *Desktop) Connect() error                      { return d.controller.Connect() }

@@ -18,10 +18,10 @@ func TestBrowserAuthorizationBindsStatePKCEAndLoopback(t *testing.T) {
 	var service *httptest.Server
 	service = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v2/client/authorize":
+		case "/api/v3/client/authorize":
 			_ = json.NewDecoder(r.Body).Decode(&request)
 			_ = json.NewEncoder(w).Encode(map[string]string{"authorizationUrl": service.URL + "/authorize/request"})
-		case "/api/v2/client/token":
+		case "/api/v3/client/token":
 			var body map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			digest := sha256.Sum256([]byte(body["codeVerifier"]))
@@ -91,7 +91,7 @@ func TestDefaultChangePreservesAllowedChoice(t *testing.T) {
 	}
 }
 
-func TestNoEntitlementKeepsAccountLoggedInButStopsProxy(t *testing.T) {
+func TestNoSubscriptionKeepsAccountLoggedInButStopsProxy(t *testing.T) {
 	c, engine, _ := setupClient(t)
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
@@ -99,14 +99,14 @@ func TestNoEntitlementKeepsAccountLoggedInButStopsProxy(t *testing.T) {
 	waitState(t, c, "connected")
 	p := c.saved.Profile
 	p.Revision++
-	p.Entitlement = nil
+	p.Subscription = nil
 	p.Nodes = nil
 	if err := c.cacheUnavailable(c.api, p); err != nil {
 		t.Fatal(err)
 	}
 	v := c.View()
 	if !v.LoggedIn || v.ConnectionIntent || v.ActualNodeID != "" || engine.Alive() {
-		t.Fatal("entitlement ended without stopping route or logged account out")
+		t.Fatal("subscription ended without stopping route or logged account out")
 	}
 	if err := c.Connect(); err == nil {
 		t.Fatal("unsubscribed account connected")
@@ -121,13 +121,13 @@ func TestWaitDrainedRequiresServerClosure(t *testing.T) {
 		if calls >= 2 {
 			state = "closed"
 		}
-		_ = json.NewEncoder(w).Encode(Connections{Connections: []Connection{{ID: "one", State: state}}})
+		_ = json.NewEncoder(w).Encode(Connections{SubscriptionID: "sub-a", SelectionRevision: 3, Connections: []Connection{{ID: "one", SubscriptionID: "sub-a", State: state}}})
 	}))
 	defer service.Close()
 	api, _ := NewAPI(service.URL, Tokens{AccessToken: "access", RefreshToken: "refresh", AccessExpiresAt: time.Now().Add(time.Hour)})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := api.WaitDrained(ctx); err != nil {
+	if err := api.WaitDrained(ctx, "sub-a", 3); err != nil {
 		t.Fatal(err)
 	}
 	if calls < 2 {

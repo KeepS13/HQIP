@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/secure"
@@ -17,7 +16,7 @@ import (
 )
 
 // This test-only writer creates an isolated controller database and private
-// native-session fixture. There is no production registration bypass endpoint.
+// browser/native-session fixture. There is no production registration bypass endpoint.
 // It refuses existing directories and never connects, deploys or starts nodes.
 func TestWritePortalIntegrationFixture(t *testing.T) {
 	output := os.Getenv("HQIP_PORTAL_FIXTURE_OUTPUT")
@@ -84,21 +83,22 @@ func TestWritePortalIntegrationFixture(t *testing.T) {
 	}
 	bandwidth := float64(8)
 	quota := int64(128 << 20)
-	p, err := db.SavePlan("", model.Plan{Name: "isolated acceptance", Enabled: true, SaleEnabled: true, NodeIDs: ids, DefaultNodeID: ids[0], BandwidthMbps: &bandwidth, QuotaBytes: &quota, MaxConnections: 2})
+	p, err := db.SaveSubscriptionTemplate("", model.SubscriptionTemplate{Name: "isolated acceptance", Enabled: true, Listed: true, ValidityDays: 1, NodeIDs: ids, DefaultNodeID: ids[0], BandwidthMbps: &bandwidth, QuotaBytes: &quota, MaxConnections: 2}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = db.AssignPortal(u.ID, p.ID, time.Now().Add(24*time.Hour), false); err != nil {
+	sub, err := db.AssignSubscription(u.ID, p.ID, secure.Token(), u.Revision, p.Revision)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.PortalSubscription(u.ID, "create"); err != nil {
+	if _, err = db.PortalSubscription(u.ID, sub.ID, "create"); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.ActivatePortal(); err != nil {
 		t.Fatal(err)
 	}
 	native := []model.PortalTokens{}
-	browser, _, err := db.PortalLogin(email, password)
+	browser, browserCSRF, err := db.PortalLogin(email, password)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestWritePortalIntegrationFixture(t *testing.T) {
 		}
 		native = append(native, tokens)
 	}
-	fixture := map[string]any{"dataDir": dataDir, "publicUrl": base, "admin": map[string]string{"username": "fixture-admin", "password": adminPassword}, "user": map[string]any{"id": u.ID, "email": email, "password": password}, "planId": p.ID, "nodes": nodeInfo, "nativeSessions": native}
+	fixture := map[string]any{"dataDir": dataDir, "publicUrl": base, "admin": map[string]string{"username": "fixture-admin", "password": adminPassword}, "user": map[string]any{"id": u.ID, "email": email, "password": password}, "browserSession": map[string]string{"cookie": browser.AccessToken, "csrfToken": browserCSRF, "sessionId": browser.SessionID}, "templateId": p.ID, "subscriptionId": sub.ID, "nodes": nodeInfo, "nativeSessions": native}
 	raw, _ := json.MarshalIndent(fixture, "", "  ")
 	if err = os.WriteFile(filepath.Join(abs, "private-fixture.json"), raw, 0600); err != nil {
 		t.Fatal(err)

@@ -1,37 +1,10 @@
 package control
 
 import (
-	"github.com/KeepS13/HQIP/internal/model"
 	"net/http"
 	"time"
 )
 
-func (s *Server) portalPlans(w http.ResponseWriter, r *http.Request) {
-	v, e := s.Store.Plans()
-	portalResult(w, v, e)
-}
-func (s *Server) portalSavePlan(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		model.Plan
-		ExpectedRevision int64 `json:"expectedRevision"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	v, e := s.Store.SavePlan(r.PathValue("id"), b.Plan, b.ExpectedRevision)
-	portalResult(w, v, e)
-}
-func (s *Server) portalPlanPreview(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		model.Plan
-		ExpectedRevision int64 `json:"expectedRevision"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	v, e := s.Store.PreviewPortalPlan(r.PathValue("id"), b.Plan)
-	portalResult(w, v, e)
-}
 func (s *Server) portalUsers(w http.ResponseWriter, r *http.Request) {
 	v, e := s.Store.PortalUsers()
 	portalResult(w, v, e)
@@ -49,23 +22,6 @@ func (s *Server) portalAdminEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.Store.SetPortalEnabled(r.PathValue("id"), b.Enabled, b.ExpectedRevision)
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	s.portalAdminUser(w, r)
-}
-func (s *Server) portalAdminAssignment(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		PlanID           string    `json:"planId"`
-		ExpiresAt        time.Time `json:"expiresAt"`
-		ResetUsage       bool      `json:"resetUsage"`
-		ExpectedRevision int64     `json:"expectedRevision"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	err := s.Store.AssignPortal(r.PathValue("id"), b.PlanID, b.ExpiresAt, b.ResetUsage, b.ExpectedRevision)
 	if err != nil {
 		portalResult(w, nil, err)
 		return

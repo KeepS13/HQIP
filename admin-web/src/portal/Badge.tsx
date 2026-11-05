@@ -1,24 +1,32 @@
 import { Badge } from "../components";
-import type { Entitlement } from "./types";
-const entitlementLabels: Record<string, string> = {
-  active: "使用中",
-  expired: "已到期",
-  exhausted: "流量已用尽",
-  unassigned: "待开通",
-  disabled: "已停用",
-};
-export function EntitlementBadge({ value }: { value?: Entitlement }) {
+import { subscriptionLabels, requestLabels } from "./types";
+export function SubscriptionBadge({ status }: { status: string }) {
   return (
     <Badge
       tone={
-        value?.status === "active"
+        status === "active"
           ? "success"
-          : value?.status === "unassigned"
+          : ["removed", "revoked"].includes(status)
             ? "muted"
             : "warning"
       }
     >
-      {entitlementLabels[value?.status || "unassigned"] || "待同步"}
+      {subscriptionLabels[status] || "待同步"}
+    </Badge>
+  );
+}
+export function RequestBadge({ status }: { status: string }) {
+  return (
+    <Badge
+      tone={
+        status === "approved"
+          ? "success"
+          : status === "pending"
+            ? "info"
+            : "muted"
+      }
+    >
+      {requestLabels[status] || status}
     </Badge>
   );
 }

@@ -222,89 +222,22 @@ func TestNotificationCertificatesExpiryStagesAndSafeErrors(t *testing.T) {
 	}
 }
 
-func TestNotificationPackageConfirmedUsageEpochAndExpiry(t *testing.T) {
-	q := int64(1000)
-	s, now, u, p, _, _ := portalFixture(t, 2, &q)
-	// Reservations can exhaust availability while confirmed consumption is low.
-	notificationExec(t, s, "UPDATE portal_usage SET upload=400,download=399,reserved=1000 WHERE user_id=? AND epoch=1", u.ID)
-	all := notificationCollect(t, s)
-	if len(notificationKinds(all, "package.quota")) != 0 {
-		t.Fatal("reserved budget counted as confirmed usage")
-	}
-	key := "package.quota:" + u.ID + ":1"
-	for _, tt := range []struct {
-		used  int64
-		stage int
-	}{{800, 80}, {900, 90}, {1000, 100}} {
-		notificationExec(t, s, "UPDATE portal_usage SET upload=?,download=0 WHERE user_id=? AND epoch=1", tt.used, u.ID)
-		all = notificationCollect(t, s)
-		if all[key].Stage != tt.stage || !strings.Contains(all[key].Message, "待结算预留 1.00 KB") {
-			t.Fatalf("wrong confirmed stage %+v", all[key])
-		}
-		if strings.Contains(all[key].Title, u.Email) || strings.Contains(all[key].Title, "example.com") {
-			t.Fatal("email leaked")
-		}
-	}
-	// Crossing the calendar month preserves the same one-time usage and key.
-	*now = now.Add(2 * time.Minute)
-	if notificationCollect(t, s)[key].Stage != 100 {
-		t.Fatal("package quota reset at month boundary")
-	}
-	for _, tt := range []struct {
-		days  int
-		stage int
-	}{{8, 0}, {7, 1}, {3, 2}, {1, 3}, {0, 4}} {
-		notificationExec(t, s, "UPDATE portal_users SET expires=? WHERE id=?", now.Add(time.Duration(tt.days)*24*time.Hour).Unix(), u.ID)
-		conditions := notificationKinds(notificationCollect(t, s), "package.expiry")
-		if tt.stage == 0 {
-			if len(conditions) > 0 {
-				t.Fatal("early expiry")
-			}
-			continue
-		}
-		if len(conditions) != 1 || conditions[0].Stage != tt.stage {
-			t.Fatalf("package expiry %d: %+v", tt.days, conditions)
-		}
-	}
-	if err := s.AssignPortal(u.ID, p.ID, now.Add(30*24*time.Hour), false); err != nil {
+func TestInfrastructureAlertsDoNotDependOnUserSubscriptionTables(t *testing.T) {
+	s, _ := fixture(t)
+	notificationExec(t, s, "DROP TABLE portal_usage")
+	conditions, err := s.CollectNotificationConditions()
+	if err != nil {
 		t.Fatal(err)
 	}
-	all = notificationCollect(t, s)
-	if all[key].Stage != 100 || len(notificationKinds(all, "package.expiry")) != 0 {
-		t.Fatal("extension reset used or kept expired condition")
-	}
-	if err := s.AssignPortal(u.ID, p.ID, now.Add(30*24*time.Hour), true); err != nil {
-		t.Fatal(err)
-	}
-	if len(notificationKinds(notificationCollect(t, s), "package.quota")) != 0 {
-		t.Fatal("new epoch reused old usage")
-	}
-	notificationExec(t, s, "UPDATE portal_usage SET upload=950 WHERE user_id=? AND epoch=2", u.ID)
-	if notificationCollect(t, s)["package.quota:"+u.ID+":2"].Stage != 90 {
-		t.Fatal("new epoch key missing")
-	}
-	// Dynamic plan quota changes do not need a traffic report to be observed.
-	notificationExec(t, s, "UPDATE portal_plans SET config=json_set(config,'$.quotaBytes',900) WHERE id=?", p.ID)
-	if notificationCollect(t, s)["package.quota:"+u.ID+":2"].Stage != 100 {
-		t.Fatal("lowered quota not observed")
-	}
-	notificationExec(t, s, "UPDATE portal_plans SET config=json_set(config,'$.quotaBytes',null) WHERE id=?", p.ID)
-	if len(notificationKinds(notificationCollect(t, s), "package.quota")) != 0 {
-		t.Fatal("unlimited plan alerted")
-	}
-	notificationExec(t, s, "UPDATE portal_users SET expires=?,enabled=0 WHERE id=?", now.Add(time.Hour).Unix(), u.ID)
-	if len(notificationKinds(notificationCollect(t, s), "package.expiry")) != 0 {
-		t.Fatal("disabled account expiry alerted")
-	}
-	notificationExec(t, s, "UPDATE portal_users SET enabled=1 WHERE id=?", u.ID)
-	notificationExec(t, s, "UPDATE portal_plans SET config=json_set(config,'$.enabled',json('false')) WHERE id=?", p.ID)
-	if len(notificationKinds(notificationCollect(t, s), "package.expiry")) != 0 {
-		t.Fatal("disabled plan expiry alerted")
+	for _, c := range conditions {
+		if c.Category == "package" || strings.HasPrefix(c.DetailPath, "/users/") {
+			t.Fatal("user alert leaked into infrastructure center")
+		}
 	}
 }
 
 func TestNotificationSnapshotErrorNeverMeansRecovery(t *testing.T) {
-	for _, table := range []string{"daily", "certificate_state", "portal_usage"} {
+	for _, table := range []string{"daily", "certificate_state"} {
 		t.Run(table, func(t *testing.T) {
 			s, _ := fixture(t)
 			notificationExec(t, s, "DROP TABLE "+table)
@@ -321,13 +254,7 @@ func TestNotificationSnapshotErrorNeverMeansRecovery(t *testing.T) {
 			t.Fatal("malformed node config ignored")
 		}
 	})
-	t.Run("missing-usage", func(t *testing.T) {
-		s, _, u, _, _, _ := portalFixture(t, 1, nil)
-		notificationExec(t, s, "DELETE FROM portal_usage WHERE user_id=?", u.ID)
-		if _, err := s.CollectNotificationConditions(); err == nil {
-			t.Fatal("missing usage row resolved entitlement incident")
-		}
-	})
+
 }
 
 func TestNotificationStoppedCertificateAndCounterOverflow(t *testing.T) {
@@ -364,13 +291,7 @@ func TestNotificationStoppedCertificateAndCounterOverflow(t *testing.T) {
 			t.Fatal("node total overflow was accepted")
 		}
 	})
-	t.Run("package-sum", func(t *testing.T) {
-		s, _, u, _, _, _ := portalFixture(t, 1, nil)
-		notificationExec(t, s, "UPDATE portal_usage SET upload=?,download=? WHERE user_id=?", int64(1<<62), int64(1<<62), u.ID)
-		if _, err := s.CollectNotificationConditions(); err == nil {
-			t.Fatal("package total overflow was accepted")
-		}
-	})
+
 }
 
 func TestNotificationCollectorRetirementCancelsInsteadOfRecovery(t *testing.T) {

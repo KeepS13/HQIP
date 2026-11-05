@@ -93,11 +93,6 @@ func (s *Store) CollectNotificationConditions() ([]model.NotificationCondition, 
 		return nil, err
 	}
 	out = append(out, certConditions...)
-	packageConditions, err := notificationPackages(tx, now)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, packageConditions...)
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -240,57 +235,6 @@ func notificationCertificates(tx *sql.Tx, now time.Time) ([]model.NotificationCo
 	return out, rows.Err()
 }
 
-func notificationPackages(tx *sql.Tx, now time.Time) ([]model.NotificationCondition, error) {
-	rows, err := tx.Query(`SELECT u.id,u.email,u.epoch,u.expires,p.config,x.upload,x.download,x.reserved FROM portal_users u LEFT JOIN portal_plans p ON p.id=u.plan_id LEFT JOIN portal_usage x ON x.user_id=u.id AND x.epoch=u.epoch WHERE u.enabled=1 AND u.plan_id!='' ORDER BY u.id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []model.NotificationCondition{}
-	for rows.Next() {
-		var id, email string
-		var raw sql.NullString
-		var epoch, expires int64
-		var up, down, reserved sql.NullInt64
-		if err = rows.Scan(&id, &email, &epoch, &expires, &raw, &up, &down, &reserved); err != nil {
-			return nil, err
-		}
-		if !raw.Valid || !up.Valid || !down.Valid || !reserved.Valid {
-			return nil, errors.New("incomplete notification entitlement snapshot")
-		}
-		var plan model.Plan
-		if err = json.Unmarshal([]byte(raw.String), &plan); err != nil {
-			return nil, err
-		}
-		if !plan.Enabled {
-			continue
-		}
-		if up.Int64 < 0 || down.Int64 < 0 || reserved.Int64 < 0 || down.Int64 > int64(^uint64(0)>>1)-up.Int64 {
-			return nil, errors.New("invalid notification entitlement totals")
-		}
-		name := notificationEmail(email)
-		path := "/users/" + url.PathEscape(id)
-		if c, ok := notificationQuota("package.quota", id, name, path, strconv.FormatInt(epoch, 10), up.Int64+down.Int64, plan.QuotaBytes, []int{80, 90, 100}); ok {
-			c.Category = "package"
-			c.Title = name + " 套餐流量提醒"
-			c.Message = fmt.Sprintf("套餐「%s」本次开通已确认使用 %s / %s，达到 %d%%；待结算预留 %s，不计入已确认用量。", notificationName(plan.Name, "套餐"), notificationBytes(up.Int64+down.Int64), notificationBytes(*plan.QuotaBytes), c.Stage, notificationBytes(reserved.Int64))
-			out = append(out, c)
-		}
-		if expires > 0 {
-			if stage, days := notificationExpiry(now, time.Unix(expires, 0), []int{7, 3, 1}); stage > 0 {
-				message := fmt.Sprintf("套餐「%s」将于北京时间 %s 到期（剩余不超过 %d 天）。", notificationName(plan.Name, "套餐"), notificationDate(expires), days)
-				level := "warning"
-				if days == 0 {
-					message = fmt.Sprintf("套餐「%s」已于北京时间 %s 到期，连接权限已停止。", notificationName(plan.Name, "套餐"), notificationDate(expires))
-					level = "danger"
-				}
-				out = append(out, model.NotificationCondition{Key: "package.expiry:" + id + ":" + strconv.FormatInt(epoch, 10) + ":" + strconv.FormatInt(expires, 10), Category: "package", Kind: "package.expiry", ResourceID: id, Title: name + " 套餐到期提醒", Message: message, DetailPath: path, Level: level, Stage: stage})
-			}
-		}
-	}
-	return out, rows.Err()
-}
-
 func notificationQuota(kind, id, name, path, period string, used int64, quota *int64, thresholds []int) (model.NotificationCondition, bool) {
 	if quota == nil || *quota <= 0 {
 		return model.NotificationCondition{}, false
@@ -341,15 +285,6 @@ func notificationName(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func notificationEmail(value string) string {
-	local, _, ok := strings.Cut(value, "@")
-	if !ok || local == "" {
-		return "用户 ***"
-	}
-	runes := []rune(local)
-	return "用户 " + notificationName(string(runes[:1]), "*") + "***@***"
 }
 
 func notificationDate(unix int64) string {

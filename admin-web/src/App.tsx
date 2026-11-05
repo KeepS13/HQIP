@@ -37,7 +37,10 @@ import {
 import type { Session } from "./types";
 import { Dashboard, Guide, NotFound } from "./pages/Dashboard";
 import { Nodes, NodePage } from "./pages/Nodes";
-import { Users, UserPage, Plans, TurnstileSettingsPage } from "./pages/Accounts";
+import { Users, UserPage } from "./pages/Accounts";
+import { TurnstileSettingsPage } from "./pages/Registration";
+import { SubscriptionTemplates } from "./pages/SubscriptionTemplates";
+import { SubscriptionRequests } from "./pages/SubscriptionRequests";
 import { Servers, ServerPage } from "./pages/Servers";
 import { Domains } from "./pages/Domains";
 import { Notifications } from "./pages/Notifications";
@@ -348,7 +351,8 @@ export default function App() {
     "/servers": "服务器",
     "/domains": "域名与证书",
     "/users": "用户管理",
-    "/plans": "套餐管理",
+    "/subscriptions": "订阅管理",
+    "/subscription-requests": "开通申请",
     "/turnstile": "注册与安全验证",
     "/notifications": "预警中心",
     "/guide": "使用指南",
@@ -407,10 +411,11 @@ export default function App() {
               <UsersRound size={19} />
               <span>用户管理</span>
             </NavLink>
-            <NavLink to="/plans">
+            <NavLink to="/subscriptions">
               <Package size={19} />
-              <span>套餐管理</span>
+              <span>订阅管理</span>
             </NavLink>
+            <NavLink to="/subscription-requests"><Package size={19} /><span>开通申请</span></NavLink>
             <NavLink to="/turnstile">
               <ShieldCheck size={19} />
               <span>注册与安全验证</span>
@@ -510,7 +515,8 @@ export default function App() {
               <Route path="/nodes/:id" element={<NodePage />} />
               <Route path="/users" element={<Users />} />
               <Route path="/users/:id" element={<UserPage />} />
-              <Route path="/plans" element={<Plans />} />
+              <Route path="/subscriptions" element={<SubscriptionTemplates />} />
+              <Route path="/subscription-requests" element={<SubscriptionRequests />} />
               <Route path="/turnstile" element={<TurnstileSettingsPage />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/devices/*" element={<Navigate to="/users" replace />} />
