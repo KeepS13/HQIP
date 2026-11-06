@@ -20,6 +20,15 @@ def command(args, **kwargs):
     return subprocess.run(args, cwd=ROOT, check=True, **kwargs)
 
 
+def copy_remote_manifest(remote, source, destination):
+    # Production artifacts can contain CRLF from a Windows release builder.
+    # text=True normalizes them and breaks their pinned byte-level checksum.
+    raw = remote(['cat', source], capture_output=True).stdout
+    if not isinstance(raw, bytes):
+        raise TypeError('Manifest transfer must preserve bytes')
+    destination.write_bytes(raw)
+
+
 def main():
     sha = os.environ['GITHUB_SHA']
     if not re.fullmatch('[a-f0-9]{40}', sha):
@@ -67,9 +76,8 @@ def main():
             return
         dist = ROOT / 'dist'
         (dist / 'base-manifest.json').write_text(base)
-        node_manifest = remote(['cat', '/opt/hqip-control/current/artifacts/manifest.json'],
-                               capture_output=True, text=True).stdout
-        (dist / 'base-node-manifest.json').write_text(node_manifest)
+        copy_remote_manifest(remote, '/opt/hqip-control/current/artifacts/manifest.json',
+                             dist / 'base-node-manifest.json')
         shutil.copyfile(dist / 'hqip-linux-amd64', dist / 'hqip-domains-linux-amd64')
         command([sys.executable, 'scripts/package_domains.py', '--base-manifest', 'dist/base-manifest.json',
                  '--base-node-manifest', 'dist/base-node-manifest.json'])
