@@ -55,7 +55,7 @@
   text-align: right;
   overflow-wrap: anywhere;
 }
-.subscription-node-picker > input {
+.account-node-picker.subscription-node-picker > input {
   width: 100%;
   height: 38px;
   margin: 4px 0 16px;
@@ -101,6 +101,64 @@
   width: 17px;
   height: 17px;
   accent-color: var(--purple);
+}
+.subscription-invalid-nodes,
+.node-deletion-conflicts {
+  padding: 16px;
+  border: 1px solid rgba(244, 184, 96, 0.3);
+  border-radius: 12px;
+  background: rgba(244, 184, 96, 0.04);
+  min-width: 0;
+}
+.subscription-invalid-nodes h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.subscription-invalid-nodes > p,
+.node-deletion-conflicts > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.subscription-invalid-node,
+.node-deletion-reference {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.subscription-invalid-node > div,
+.node-deletion-reference > div {
+  min-width: 0;
+}
+.subscription-invalid-node strong,
+.node-deletion-reference strong {
+  overflow-wrap: anywhere;
+}
+.subscription-invalid-node small,
+.subscription-invalid-node span {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.subscription-invalid-node .button,
+.node-deletion-reference .button {
+  flex-shrink: 0;
+}
+.subscription-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.node-deletion-reference-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 .subscription-impact {
   padding: 16px;
@@ -251,6 +309,12 @@
   }
 }
 @media (max-width: 560px) {
+  .subscription-invalid-node,
+  .node-deletion-reference {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
   .subscription-toolbar {
     gap: 10px;
   }

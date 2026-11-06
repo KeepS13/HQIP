@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
   Eye,
@@ -109,10 +109,25 @@ function TemplateEditor({
     defaultNodeId,
     ...(template ? { expectedRevision: template.revision } : {}),
   };
+  const eligible = nodes.filter(
+    (n) => n.lifecycle === "active" && n.capabilities?.includes("admission-v1"),
+  );
+  const invalidSelected = selected.filter(
+    (id) => !eligible.some((node) => node.id === id),
+  );
+  const validDefaultNodes = eligible.filter((n) => selected.includes(n.id));
+  const invalidDefault =
+    !!defaultNodeId && !validDefaultNodes.some((n) => n.id === defaultNodeId);
   const available = nodes.filter(
-    (n) => n.lifecycle === "active" || selected.includes(n.id),
+    (n) => n.lifecycle === "active" && !invalidSelected.includes(n.id),
   );
   const groups = Array.from(new Set(available.map((n) => n.serverId || "")));
+  function removeSelection(id: string) {
+    setSelected((value) => value.filter((selectedId) => selectedId !== id));
+    if (defaultNodeId === id) setDefault("");
+    setPreview(null);
+    setError("");
+  }
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -120,20 +135,12 @@ function TemplateEditor({
     try {
       if (!Number.isInteger(body.validityDays) || body.validityDays < 1)
         throw new Error("有效期至少为 1 天，请填写整数");
-      if (!selected.length || !selected.includes(defaultNodeId))
-        throw new Error("请选择可用节点，并指定其中一个默认节点");
-      if (
-        selected.some(
-          (id) =>
-            !nodes.some(
-              (n) =>
-                n.id === id &&
-                n.lifecycle === "active" &&
-                n.capabilities?.includes("admission-v1"),
-            ),
-        )
-      )
-        throw new Error("请选择已支持订阅准入的活动节点");
+      if (invalidSelected.length)
+        throw new Error("请先移除下方不可用节点的引用，再保存订阅模板");
+      if (selected.length && (!defaultNodeId || invalidDefault))
+        throw new Error("请从已选活动节点中明确选择一个默认节点");
+      if (!selected.length && defaultNodeId)
+        throw new Error("未选择节点时，请清空默认节点");
       if (template && !preview) {
         setPreview(
           await api<SubscriptionImpact>(
@@ -247,6 +254,40 @@ function TemplateEditor({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
+          {!!invalidSelected.length && (
+            <div className="subscription-invalid-nodes">
+              <h4>不可用节点引用 · {invalidSelected.length} 个</h4>
+              <p>
+                这些节点已不在可选列表中或尚不支持订阅准入。请明确移除引用；系统不会替换默认节点。
+              </p>
+              {invalidSelected.map((id) => {
+                const node = nodes.find((n) => n.id === id);
+                return (
+                  <div className="subscription-invalid-node" key={id}>
+                    <div>
+                      <strong>{node?.name || "节点已删除或不可见"}</strong>
+                      <small>{id}</small>
+                      <span>
+                        {!node
+                          ? "无法从节点列表读取"
+                          : node.lifecycle !== "active"
+                            ? "节点已停止或退役"
+                            : "节点内核需升级"}
+                        {defaultNodeId === id ? " · 当前默认节点" : ""}
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => removeSelection(id)}
+                    >
+                      移除引用
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {groups.map((group) => {
             const items = available.filter(
               (n) =>
@@ -270,13 +311,9 @@ function TemplateEditor({
                         !node.capabilities?.includes("admission-v1")
                       }
                       onChange={(e) => {
-                        setSelected(
-                          e.target.checked
-                            ? [...selected, node.id]
-                            : selected.filter((id) => id !== node.id),
-                        );
-                        if (!e.target.checked && defaultNodeId === node.id)
-                          setDefault("");
+                        if (e.target.checked)
+                          setSelected([...selected, node.id]);
+                        else removeSelection(node.id);
                       }}
                     />
                     <span>
@@ -306,27 +343,81 @@ function TemplateEditor({
               </div>
             ) : null;
           })}
-          {!available.length && <p className="muted">请先添加并升级节点。</p>}
+          {!available.length && (
+            <p className="muted">
+              当前没有可选活动节点，可添加并升级节点后再分配。
+            </p>
+          )}
+          {!!(selected.length || defaultNodeId) && (
+            <div className="subscription-picker-actions">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setSelected([]);
+                  setDefault("");
+                  setPreview(null);
+                  setError("");
+                }}
+              >
+                清空所选节点
+              </Button>
+            </div>
+          )}
         </fieldset>
+        {!selected.length && (
+          <Notice tone="warning">
+            当前未选择节点。保存后，该模板下的订阅将没有可连接节点，现有连接会停止；流量和有效期保留。
+          </Notice>
+        )}
         <Field
           label="默认节点"
           hint="首次选择订阅或当前节点被移除时使用；默认节点不可用则停止连接。"
         >
           <select
-            required
+            required={selected.length > 0}
             value={defaultNodeId}
             onChange={(e) => setDefault(e.target.value)}
           >
-            <option value="">选择默认节点</option>
-            {nodes
-              .filter((n) => selected.includes(n.id))
-              .map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.name} · {n.publicIp}
-                </option>
-              ))}
+            <option value="">
+              {selected.length ? "选择默认节点" : "无默认节点"}
+            </option>
+            {invalidDefault && (
+              <option value={defaultNodeId} disabled>
+                原默认节点不可用 ·{" "}
+                {nodes.find((n) => n.id === defaultNodeId)?.name ||
+                  defaultNodeId}
+              </option>
+            )}
+            {validDefaultNodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name} · {n.publicIp}
+              </option>
+            ))}
           </select>
         </Field>
+        {invalidDefault && (
+          <Notice tone="warning">
+            {selected.includes(defaultNodeId)
+              ? "原默认节点已失效。请移除它的引用并选择有效默认节点，或明确清空全部节点。"
+              : "原默认节点不在已选节点中，请明确选择有效默认节点或清空默认设置。"}
+            {!selected.includes(defaultNodeId) && (
+              <div className="subscription-picker-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setDefault("");
+                    setPreview(null);
+                    setError("");
+                  }}
+                >
+                  清空默认节点
+                </Button>
+              </div>
+            )}
+          </Notice>
+        )}
         <label className="account-checkbox">
           <input
             type="checkbox"
@@ -402,6 +493,8 @@ function TemplateEditor({
 }
 
 export function SubscriptionTemplates() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editId = searchParams.get("edit") || "";
   const list = usePolling<SubscriptionTemplate[]>("/subscription-templates");
   const nodes = usePolling<Node[]>("/nodes", 15000),
     servers = usePolling<{ id: string; name: string }[]>("/servers", 15000);
@@ -411,6 +504,32 @@ export function SubscriptionTemplates() {
   const [filter, setFilter] = useState("all"),
     [search, setSearch] = useState("");
   const toast = useToast();
+  useEffect(() => {
+    if (!editId) {
+      setEditing((current) => (current === "new" ? current : null));
+      return;
+    }
+    const target = list.data?.find((item) => item.id === editId);
+    if (target)
+      setEditing((current) =>
+        current && current !== "new" && current.id === target.id
+          ? current
+          : target,
+      );
+  }, [editId, list.data]);
+  function closeEditor() {
+    setEditing(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("edit");
+    setSearchParams(next, { replace: true });
+  }
+  function openEditor(value: SubscriptionTemplate | "new") {
+    setEditing(value);
+    const next = new URLSearchParams(searchParams);
+    if (value === "new") next.delete("edit");
+    else next.set("edit", value.id);
+    setSearchParams(next);
+  }
   const visible = (list.data || []).filter(
     (t) =>
       t.name.toLowerCase().includes(search.toLowerCase()) &&
@@ -428,7 +547,7 @@ export function SubscriptionTemplates() {
         actions={
           <>
             <RefreshButton refresh={list.refresh} />
-            <Button icon={Plus} onClick={() => setEditing("new")}>
+            <Button icon={Plus} onClick={() => openEditor("new")}>
               新建订阅
             </Button>
           </>
@@ -437,6 +556,13 @@ export function SubscriptionTemplates() {
       <ErrorNotice
         message={list.error ? `${list.error}；当前保留最近一次数据。` : ""}
         retry={() => void list.refresh()}
+      />
+      <ErrorNotice
+        message={
+          editId && list.data && !list.data.some((item) => item.id === editId)
+            ? "未找到指定订阅模板，请刷新列表后重试。"
+            : ""
+        }
       />
       <div className="subscription-toolbar">
         <input
@@ -483,7 +609,7 @@ export function SubscriptionTemplates() {
                 className="full-width"
                 variant="secondary"
                 icon={Settings2}
-                onClick={() => setEditing(t)}
+                onClick={() => openEditor(t)}
               >
                 编辑订阅
               </Button>
@@ -501,7 +627,7 @@ export function SubscriptionTemplates() {
             }
             description="设置流量、有效期和节点后，管理员即可分配，或开放用户申请。"
             action={
-              <Button icon={Plus} onClick={() => setEditing("new")}>
+              <Button icon={Plus} onClick={() => openEditor("new")}>
                 新建订阅
               </Button>
             }
@@ -511,17 +637,18 @@ export function SubscriptionTemplates() {
       {editing &&
         (nodes.data && servers.data ? (
           <TemplateEditor
+            key={editing === "new" ? "new" : editing.id}
             template={editing === "new" ? undefined : editing}
             nodes={nodes.data}
             servers={servers.data}
-            onClose={() => setEditing(null)}
+            onClose={closeEditor}
             onDone={async () => {
               await list.refresh();
               toast("订阅模板已保存");
             }}
           />
         ) : (
-          <Modal title="读取节点" onClose={() => setEditing(null)}>
+          <Modal title="读取节点" onClose={closeEditor}>
             {nodes.error || servers.error ? (
               <ErrorNotice
                 message={nodes.error || servers.error}

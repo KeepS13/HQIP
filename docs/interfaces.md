@@ -49,3 +49,5 @@
 ## 节点、规则与服务器
 
 节点、服务器、IP 清单、Cloudflare DNS/证书和规则接口仍为管理员 API，写入要求管理员认证及 CSRF。详细数据模型、预检／接管／删除流程和绑定公网 IP 规则见 [多 IP 运维](multi-ip.md)；服务器计量口径见 [服务器监控](monitoring.md)。控制服务不会将管理员 API 回退到公共监听，也不会根据用户提交的内容拼接 SSH 命令。
+
+`GET /api/v1/nodes/{id}/delete-preview` 的 `subscriptionTemplates` 数组列出引用该节点的模板，字段为 `id,name,defaultNode,enabled,listed`。存在任意引用时，`DELETE /api/v1/nodes/{id}` 返回 HTTP 409、`code: NODE_REFERENCED_BY_SUBSCRIPTIONS` 和相同数组；不会取消任务、改变授权或停止节点。须先修改模板解除全部引用，再提交节点删除。

@@ -90,6 +90,13 @@ func (s *Store) DeleteNode(id string, options model.NodeDeleteOptions) (model.No
 	if err = tx.QueryRow("SELECT revision,lifecycle,managed FROM nodes WHERE id=?", id).Scan(&revision, &lifecycle, &managed); err != nil {
 		return model.Node{}, notFound(err)
 	}
+	references, err := nodeSubscriptionReferences(tx, id)
+	if err != nil {
+		return model.Node{}, err
+	}
+	if len(references) > 0 {
+		return model.Node{}, &NodeSubscriptionConflict{Templates: references}
+	}
 	if lifecycle != "active" {
 		tx.Rollback()
 		return s.Node(id)

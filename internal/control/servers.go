@@ -340,6 +340,11 @@ func (s *Server) nodeDeletePreview(w http.ResponseWriter, r *http.Request) {
 		managementError(w, err)
 		return
 	}
+	templates, err := s.Store.NodeSubscriptionReferences(n.ID)
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
 	devices, err := s.Store.Devices()
 	if err != nil {
 		result(w, nil, err)
@@ -377,7 +382,7 @@ func (s *Server) nodeDeletePreview(w http.ResponseWriter, r *http.Request) {
 		}
 		affected = append(affected, deletionDevice{ID: d.ID, Name: d.Name, Assignment: a, Candidates: candidates})
 	}
-	reply(w, 200, map[string]any{"node": n, "devices": affected})
+	reply(w, 200, map[string]any{"node": n, "devices": affected, "subscriptionTemplates": templates})
 }
 func (s *Server) deleteNode(w http.ResponseWriter, r *http.Request) {
 	var opts model.NodeDeleteOptions
@@ -386,6 +391,11 @@ func (s *Server) deleteNode(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := s.Store.DeleteNode(r.PathValue("id"), opts)
 	if err != nil {
+		var conflict *store.NodeSubscriptionConflict
+		if errors.As(err, &conflict) {
+			reply(w, http.StatusConflict, map[string]any{"error": conflict.Error(), "code": "NODE_REFERENCED_BY_SUBSCRIPTIONS", "subscriptionTemplates": conflict.Templates})
+			return
+		}
 		managementError(w, err)
 		return
 	}
