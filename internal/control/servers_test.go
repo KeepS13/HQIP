@@ -54,6 +54,7 @@ func TestServerEnrollmentNodeOwnershipAndDeletionAPI(t *testing.T) {
 	s.runner = i
 	cookie, csrf := loginAdmin(t, s, h)
 	body := map[string]any{"name": "VPS", "sshHost": "203.0.113.10", "sshPort": 22, "sshUser": "root", "password": "ephemeral-secret"}
+	body["expiresAt"] = s.Store.Now().Add(30 * 24 * time.Hour).Truncate(time.Hour).Format(time.RFC3339)
 	if w := request(h, "POST", "/api/v1/servers", body, cookie, ""); w.Code != 403 {
 		t.Fatalf("missing csrf: %d", w.Code)
 	}
@@ -88,6 +89,7 @@ func TestServerEnrollmentNodeOwnershipAndDeletionAPI(t *testing.T) {
 		t.Fatal("accepted foreign address")
 	}
 	i.machine = "changed-machine"
+	delete(body, "expiresAt")
 	body["expectedRevision"] = server.Revision
 	w = request(h, "PATCH", "/api/v1/servers/"+server.ID, body, cookie, csrf)
 	if w.Code != 400 {

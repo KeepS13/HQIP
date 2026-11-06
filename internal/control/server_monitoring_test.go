@@ -32,6 +32,7 @@ func TestServerCapacityAPIIsolationAndConcurrency(t *testing.T) {
 	w := request(h, "POST", "/api/v1/servers", map[string]any{
 		"name": "VPS", "sshHost": "203.0.113.10", "password": "ephemeral",
 		"bandwidthMbps": 250.5, "monthlyQuotaBytes": 1_000_000_000_000,
+		"expiresAt": s.Store.Now().Add(30 * 24 * time.Hour).Truncate(time.Hour).Format(time.RFC3339),
 	}, cookie, csrf)
 	if w.Code != 201 {
 		t.Fatal(w.Body.String())

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { usePolling } from "../api";
 import { expectsNodeReport, hasNodeReport } from "../monitoring";
+import { billingFor, billingTotal } from "../billing";
 import {
   Empty,
   ErrorNotice,
@@ -198,7 +199,7 @@ export function Dashboard() {
       </div>
       <Panel
         title="节点概览"
-        subtitle="查看健康状态、实时速率与本月用量"
+        subtitle="查看健康状态、实时速率与周期额度"
         action={
           <Link className="text-link" to="/nodes">
             全部节点 <ChevronRight size={15} />
@@ -213,7 +214,7 @@ export function Dashboard() {
                   <th>节点</th>
                   <th>运行状态</th>
                   <th>实时速率</th>
-                  <th>本月用量</th>
+                  <th>周期额度</th>
                   <th>在线设备</th>
                   <th />
                 </tr>
@@ -246,11 +247,12 @@ export function Dashboard() {
                       )}
                     </td>
                     <td className="quota-cell">
-                      <Meter
-                        value={n.monthDownload + n.monthUpload}
+                      <div className="table-small">{billingFor(n).status === "unconfigured" ? "本月 · 待设置到期" : "本周期"}</div>
+                      {billingFor(n).cycleComplete ? <Meter
+                        value={billingTotal(n)}
                         max={n.monthlyQuotaBytes}
                         label
-                      />
+                      /> : <span className="muted">已知 {bytes(billingTotal(n))} · 数据不完整</span>}
                     </td>
                     <td>
                       {!error && onlineKnown(n) ? (

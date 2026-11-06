@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowDown, ArrowRight, ArrowUp, Clock3, Globe2, Plus, Search, Server, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, CalendarClock, Clock3, Globe2, Plus, Search, Server, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import { api, usePolling } from "../api";
 import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, TrafficChart, bytes, date, useToast } from "../components";
 import QuotaFields from "../QuotaFields";
 import { hasNodeReport } from "../monitoring";
+import { billingExpiry, billingFor, billingTotal, billingUsageLabel, defaultServerExpiry, parseBeijingExpiry } from "../billing";
+import { BillingSummary, ExpiryFields, ServerBillingSettings } from "./ServerBilling";
 import type { ManagedServer, ServerAddress, Node, TrafficPoint } from "../types";
 
 function useQuotaValues(server?: ManagedServer) {
@@ -17,6 +19,7 @@ function useQuotaValues(server?: ManagedServer) {
 function ServerForm({ server, onClose, onSaved }: { server?: ManagedServer; onClose: () => void; onSaved: (server: ManagedServer) => void }) {
   const [form, setForm] = useState({ name: server?.name || "", sshHost: server?.sshHost || "", sshPort: String(server?.sshPort || 22), sshUser: server?.sshUser || "root", password: "" });
   const quota = useQuotaValues(server);
+  const [expiry, setExpiry] = useState(defaultServerExpiry);
   const [expectedRevision] = useState(server?.revision || 0);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const change = (key: keyof typeof form, value: string) => setForm(p => ({ ...p, [key]: value }));
@@ -27,41 +30,31 @@ function ServerForm({ server, onClose, onSaved }: { server?: ManagedServer; onCl
         ...form, sshPort: Number(form.sshPort), expectedRevision,
         bandwidthMbps: server ? server.bandwidthMbps : quota.bandwidth === "" ? null : Number(quota.bandwidth),
         monthlyQuotaBytes: server ? server.monthlyQuotaBytes : quota.quota === "" ? null : Math.round(Number(quota.quota) * (quota.unit === "GB" ? 1e9 : 1e12)),
+        ...(!server ? { expiresAt: parseBeijingExpiry(expiry.day, expiry.hour) } : {}),
       });
       setForm(p => ({ ...p, password: "" })); onSaved(result);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <Modal title={server ? "编辑服务器连接" : "添加服务器"} description="检查 SSH 连接与主机身份，节点将在下一步单独部署。" onClose={() => { if (!busy) onClose(); }}>
+  return <Modal wide={!server} title={server ? "编辑服务器连接" : "添加服务器"} description="检查 SSH 连接与主机身份，节点将在下一步单独部署。" onClose={() => { if (!busy) onClose(); }}>
     <form className="form-stack" onSubmit={submit}>
+      <div className={server ? "form-stack" : "server-form-sections"}>
+      <section className={server ? "form-stack" : "server-form-section"} aria-label="服务器连接信息">
+      {!server && <h3><Server size={17} />连接与身份</h3>}
       <Field label="服务器名称"><input required maxLength={80} value={form.name} onChange={e => change("name", e.target.value)} placeholder="例如：香港 VPS" /></Field>
       <Field label="SSH 管理地址"><input required value={form.sshHost} onChange={e => change("sshHost", e.target.value)} placeholder="IP 或完整域名" autoCapitalize="none" /></Field>
       <div className="form-grid"><Field label="SSH 用户"><input required value={form.sshUser} onChange={e => change("sshUser", e.target.value)} /></Field><Field label="SSH 端口"><input type="number" min={1} max={65535} required value={form.sshPort} onChange={e => change("sshPort", e.target.value)} /></Field></div>
       <Field label="SSH 密码" hint="仅用于验证本次连接；部署节点时重新输入。"><input type="password" autoComplete="new-password" required value={form.password} onChange={e => change("password", e.target.value)} /></Field>
-      {!server && <><QuotaFields {...quota} /><Notice>额度按整台服务器汇总，仅提醒，不限速、不断网。带宽容量分别用于上传、下载方向的占用参考。</Notice></>}
-      <Notice>HQIP 会固定 SSH 主机指纹。新增公网 IP 请先在 VPS 厂商和系统中配置，再加入此服务器的 IP 清单。</Notice>
+      </section>
+      {!server && <section className="server-form-section" aria-label="服务器额度与有效期"><h3><CalendarClock size={17} />额度与有效期</h3><QuotaFields {...quota} quotaLabel="每周期流量额度" /><ExpiryFields {...expiry} onChange={setExpiry} /><p className="billing-help">默认到期时间为当前时间向上取整小时后加 30 天，请按厂商实际有效期核对。</p><Notice>整台服务器与各节点额度独立，仅作提醒。到期不停止代理；未经续期确认，不会自动清零用量。</Notice></section>}
+      </div>
+      <p className="billing-help">HQIP 会固定 SSH 主机指纹。新增公网 IP 请先在 VPS 厂商和系统中配置，再加入此服务器的 IP 清单。</p>
       <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy}>检查并保存</Button></div>
     </form>
   </Modal>;
 }
 
-function ServerSettings({ server, onClose, onSaved }: { server: ManagedServer; onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState(server.name), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const [expectedRevision] = useState(server.revision);
-  const quota = useQuotaValues(server);
-  return <Modal title="服务器额度设置" description="设置整台 VPS 的带宽容量和月流量，无需 SSH 密码。" onClose={() => { if (!busy) onClose(); }}>
-    <form className="form-stack" onSubmit={async e => {
-      e.preventDefault(); setBusy(true); setError("");
-      try {
-        await api(`/servers/${server.id}/settings`, "PATCH", { name: name.trim(), bandwidthMbps: quota.bandwidth === "" ? null : Number(quota.bandwidth), monthlyQuotaBytes: quota.quota === "" ? null : Math.round(Number(quota.quota) * (quota.unit === "GB" ? 1e9 : 1e12)), expectedRevision });
-        onSaved();
-      } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-    }}>
-      <Field label="服务器名称"><input required maxLength={80} value={name} onChange={e => setName(e.target.value)} /></Field>
-      <QuotaFields {...quota} />
-      <Notice>月流量汇总此服务器所有节点的代理上传与下载，包含已删除节点历史，不含探测流量。额度仅提醒，不限速、不断网；修改额度不会清空用量。</Notice>
-      <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy}>保存设置</Button></div>
-    </form>
-  </Modal>;
+function ServerSettings({ server, onClose, onSaved }: { server: ManagedServer; onClose: () => void; onSaved: (message: string) => void }) {
+  return <ServerBillingSettings server={server} onClose={onClose} onSaved={onSaved} />;
 }
 
 function serverHealth(server: ManagedServer, stale = false): { label: string; tone: "success" | "warning" | "muted" } {
@@ -107,9 +100,9 @@ function ServerRates({ server, stale = false }: { server: ManagedServer; stale?:
 }
 
 function ServerQuota({ server }: { server: ManagedServer }) {
-  const month = server.monthUpload + server.monthDownload;
-  const percent = server.monthlyQuotaBytes ? month / server.monthlyQuotaBytes * 100 : null;
-  return <div className="server-quota"><div className="server-section-label"><span>本月代理流量</span><strong>{percent === null ? "不限量" : `${percent.toFixed(1)}%`}</strong></div><Meter value={month} max={server.monthlyQuotaBytes} label /><small>上传 {bytes(server.monthUpload)} · 下载 {bytes(server.monthDownload)} · 不含探测</small></div>;
+  const billing = billingFor(server), total = billingTotal(server);
+  const percent = billing.cycleComplete && server.monthlyQuotaBytes ? total / server.monthlyQuotaBytes * 100 : null;
+  return <div className="server-quota"><div className="server-section-label"><span>{billingUsageLabel(server)}</span><strong>{!billing.cycleComplete ? "待核实" : percent === null ? "不限量" : `${percent.toFixed(1)}%`}</strong></div>{billing.cycleComplete ? <Meter value={total} max={server.monthlyQuotaBytes} label /> : <p className="billing-incomplete">已知用量 {bytes(total)}，数据不完整，暂不计算占用率。</p>}<small>上传 {bytes(billing.cycleUpload)} · 下载 {bytes(billing.cycleDownload)} · 不含探测</small></div>;
 }
 
 export function Servers() {
@@ -117,7 +110,7 @@ export function Servers() {
   const [add, setAdd] = useState(false), [search, setSearch] = useState(""), [abnormal, setAbnormal] = useState(false);
   const navigate = useNavigate();
   const query = search.trim().toLowerCase();
-  const visible = (data || []).filter(server => (!query || [server.name, server.sshHost, ...(server.addresses || []).map(address => address.ip)].some(value => value.toLowerCase().includes(query))) && (!abnormal || serverHealth(server, !!error).tone === "warning"));
+  const visible = (data || []).filter(server => (!query || [server.name, server.sshHost, ...(server.addresses || []).map(address => address.ip)].some(value => value.toLowerCase().includes(query))) && (!abnormal || serverHealth(server, !!error).tone === "warning" || billingExpiry(billingFor(server)).abnormal));
   return <>
     <PageHeader title="服务器" eyebrow="SERVERS" description="按 VPS 汇总资源、节点速率与代理用量，独立管理每个公网 IP。" actions={<><RefreshButton refresh={refresh} /><Button icon={Plus} onClick={() => setAdd(true)}>添加服务器</Button></>} />
     <ErrorNotice message={error ? `${error}${data ? "；以下保留上次成功数据，已标记过期。" : ""}` : ""} retry={() => void refresh()} />
@@ -129,12 +122,13 @@ export function Servers() {
           <div className="node-card-heading"><span className="node-card-icon"><Server size={22} /></span><Badge tone={health.tone}>{health.label}</Badge></div>
           <h2>{server.name}</h2><p className="server-address mono">{server.sshHost}:{server.sshPort}</p>
           <div className="server-identity"><ShieldCheck size={13} /><span>{server.machineId ? "身份已验证" : "身份待验证"}</span><span>{server.platform || "系统待检测"}</span></div>
+          <BillingSummary resource={server} compact />
           <ServerResources server={server} stale={!!error} /><ServerRates server={server} stale={!!error} /><ServerQuota server={server} />
         </div>
         <div className="server-card-footer"><span>{server.nodeCount} 个节点 <i /> {server.ipCount} 个 IP</span><strong>管理 IP 与节点 <ArrowRight size={15} /></strong></div>
       </Link>;
     })}</div>}
-    <p className="footnote">速率为各节点的代理上传 / 下载合计，含探测；月用量不含探测，保留已删除节点贡献。CPU、内存、磁盘仅取一个最新主机样本。</p>
+    <p className="footnote">异常筛选包含已到期及 48 小时内到期。速率含探测，周期用量不含探测；CPU、内存、磁盘仅取一个最新主机样本。</p>
     {add && <ServerForm onClose={() => setAdd(false)} onSaved={server => navigate(`/servers/${server.id}`)} />}
   </>;
 }
@@ -167,16 +161,17 @@ export function ServerPage() {
   }
   return <>
     <Breadcrumb to="/servers" label="服务器" current={server.name} />
-    <PageHeader title={server.name} eyebrow="SERVER DETAILS" description={`${server.sshUser}@${server.sshHost}:${server.sshPort} · ${server.platform || "待验证"}`} actions={<><RefreshButton refresh={async () => { await Promise.all([refresh(), traffic.refresh()]); }} /><Button variant="secondary" icon={Settings2} onClick={() => setSettings(true)}>额度设置</Button><Button variant="secondary" onClick={() => setEdit(true)}>编辑连接</Button><Button variant="danger" icon={Trash2} onClick={() => { setActionError(""); setRemove("server"); }}>删除服务器</Button></>} />
+    <PageHeader title={server.name} eyebrow="SERVER DETAILS" description={`${server.sshUser}@${server.sshHost}:${server.sshPort} · ${server.platform || "待验证"}`} actions={<><RefreshButton refresh={async () => { await Promise.all([refresh(), traffic.refresh()]); }} /><Button variant="secondary" icon={Settings2} onClick={() => setSettings(true)}>额度与续期</Button><Button variant="secondary" onClick={() => setEdit(true)}>编辑连接</Button><Button variant="danger" icon={Trash2} onClick={() => { setActionError(""); setRemove("server"); }}>删除服务器</Button></>} />
     <ErrorNotice message={error ? `${error}；以下为上次成功数据，当前状态未知。` : ""} retry={() => void refresh()} />
     <div className="server-detail-summary"><Badge tone={health.tone}>{health.label}</Badge><span><ShieldCheck size={14} />{server.machineId ? "主机身份已验证" : "主机身份待验证"}</span><span>{server.nodeCount} 个节点 / {server.ipCount} 个 IP</span><span>带宽容量：{server.bandwidthMbps == null ? "不限量" : `${server.bandwidthMbps} Mbps`}</span></div>
+    <BillingSummary resource={server} />
     <div className="two-column server-detail-metrics">
       <Panel title="服务器资源" subtitle="采用一个最新主机样本；磁盘为 Agent 数据目录所在文件系统">
         <ServerResources server={server} stale={!!error} />
         <div className="server-sample-source"><Clock3 size={14} /><span>最近上报：{server.metricsReportedAt || server.lastSeen ? date(server.metricsReportedAt || server.lastSeen) : "尚未收到"}<br />样本来源：{sourceNode?.name || (server.metricsSourceNodeId ? server.metricsSourceNodeId : "未知")}</span></div>
       </Panel>
       <Panel title="服务器带宽" subtitle="上传、下载独立计算占用，节点速率合计含探测">
-        <ServerRates server={server} stale={!!error} /><div className="server-detail-quota"><ServerQuota server={server} /><p>累计代理流量 {bytes(server.totalUpload + server.totalDownload)} · 上传 {bytes(server.totalUpload)} / 下载 {bytes(server.totalDownload)}</p></div>
+        <ServerRates server={server} stale={!!error} /><div className="server-detail-quota"><ServerQuota server={server} /><p>自然月流量 {bytes(server.monthUpload + server.monthDownload)} · 累计代理流量 {bytes(server.totalUpload + server.totalDownload)}<br />累计上传 {bytes(server.totalUpload)} / 下载 {bytes(server.totalDownload)}</p></div>
       </Panel>
     </div>
     <TrafficChart points={traffic.data || []} title="服务器代理流量" subtitle="所有节点合计 · 包含已删除节点历史 · 不含探测 · 北京时间" period={period} onPeriodChange={setPeriod} loading={traffic.loading} error={traffic.error} />
@@ -185,7 +180,7 @@ export function ServerPage() {
         <td><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small mono">{node.publicIp}</div><div className="table-small mono">{node.domain}</div></td>
         <td><NodeBadge node={node} /></td>
         <td>{!error && hasNodeReport(node) ? <div className="server-node-rates"><span>↑ {(node.metrics.uploadRate * 8 / 1e6).toFixed(2)} Mbps</span><span>↓ {(node.metrics.downloadRate * 8 / 1e6).toFixed(2)} Mbps</span></div> : <span className="muted">未知</span>}</td>
-        <td className="quota-cell"><div className="table-small">带宽 {node.bandwidthMbps == null ? "不限量" : `${node.bandwidthMbps} Mbps`}</div><Meter value={node.monthUpload + node.monthDownload} max={node.monthlyQuotaBytes} label /></td>
+        <td className="quota-cell"><div className="table-small">带宽 {node.bandwidthMbps == null ? "不限量" : `${node.bandwidthMbps} Mbps`} · {billingFor(node).status === "unconfigured" ? "自然月" : "本周期"}</div>{billingFor(node).cycleComplete ? <Meter value={billingTotal(node)} max={node.monthlyQuotaBytes} label /> : <span className="billing-incomplete">已知 {bytes(billingTotal(node))} · 数据不完整</span>}</td>
         <td>{bytes(node.monthUpload)} / {bytes(node.monthDownload)}</td><td>{bytes(node.totalUpload + node.totalDownload)}</td>
       </tr>)}</tbody></table></div> : <Empty icon={Server} title="暂无活动节点" description="部署节点后，这里会展示每个 IP 节点对服务器用量的贡献。" />}
     </Panel>
@@ -195,7 +190,7 @@ export function ServerPage() {
     </Panel>
     <Notice>删除节点只停止对应 IP 的实例。删除 IP 清单不会解绑网卡或释放厂商 IP；有节点或清理任务的 IP 必须先完成节点删除。</Notice>
     <Panel title="主机身份"><dl className="details-list"><div><dt>SSH 指纹</dt><dd className="mono break-all">{server.hostKey || "尚未固定"}</dd></div><div><dt>系统</dt><dd>{server.platform} · {server.architecture}</dd></div><div><dt>登记时间</dt><dd>{date(server.createdAt)}</dd></div></dl></Panel>
-    {settings && <ServerSettings server={server} onClose={() => setSettings(false)} onSaved={() => { setSettings(false); void refresh(); toast("服务器额度已更新"); }} />}
+    {settings && <ServerSettings server={server} onClose={() => setSettings(false)} onSaved={message => { setSettings(false); void refresh(); toast(message); }} />}
     {edit && <ServerForm server={server} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); void refresh(); }} />}
     {add && <Modal title="添加公网 IP" onClose={() => { if (!busy) setAdd(false); }}><form className="form-stack" onSubmit={addAddress}><Field label="公网 IPv4"><input required value={ip} onChange={e => setIP(e.target.value)} placeholder="已绑定到此 VPS 的公网 IP" /></Field><Notice>这里只登记地址。部署前会检查它是否在本机网卡上，并验证实际出口；不会自动修改系统网络。</Notice><ErrorNotice message={actionError} /><div className="modal-actions"><Button type="button" variant="secondary" onClick={() => setAdd(false)} disabled={busy}>取消</Button><Button type="submit" busy={busy}>添加 IP</Button></div></form></Modal>}
     {remove && <Modal title={remove === "server" ? "删除服务器" : "删除 IP"} onClose={() => { if (!busy) setRemove(null); }}><div className="form-stack"><Notice tone="warning">{remove === "server" ? "只有全部节点已清理完成的服务器才能删除。历史流量与审计记录保留。" : `将 ${remove.ip} 从 HQIP 清单移除。系统网卡和厂商分配不变。`}</Notice><ErrorNotice message={actionError} /><div className="modal-actions"><Button variant="secondary" onClick={() => setRemove(null)} disabled={busy}>取消</Button><Button variant="danger" busy={busy} onClick={() => void deleteEntry()}>确认删除</Button></div></div></Modal>}

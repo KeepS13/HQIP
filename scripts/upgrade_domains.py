@@ -37,6 +37,27 @@ def disable_feishu():
    db.execute("UPDATE feishu_settings SET enabled=0,webhook='',secret=''")
    db.execute("UPDATE notifications SET status='cancelled',claim='',claim_until=0,next_attempt=0 WHERE status IN ('pending','retry','sending')")
 
+def verify_agent_assets(release,old,manifest):
+ if manifest.get('agentTelemetryVersion')!=1:return set()
+ names={'agent-linux-amd64','agent-linux-arm64'}
+ previous=json.loads((old/'artifacts/manifest.json').read_text())
+ current=json.loads((release/'artifacts/manifest.json').read_text())
+ if current.get('agentTelemetryVersion')!=1 or current.get('agentSourceSHA')!=manifest['sourceSHA']:raise ValueError('Agent telemetry provenance does not match release')
+ for value in [previous,current]:
+  if value.get('hqipAdmissionVersion')!=1:raise ValueError('Admission core must be preserved')
+ if {k:v for k,v in previous['sha256'].items() if k not in names}!={k:v for k,v in current['sha256'].items() if k not in names}:raise ValueError('Only Agent artifacts may change in a telemetry release')
+ if {k:v for k,v in previous.items() if k not in ['sha256','agentTelemetryVersion','agentSourceSHA']}!={k:v for k,v in current.items() if k not in ['sha256','agentTelemetryVersion','agentSourceSHA']}:raise ValueError('Pinned node provenance changed')
+ for name in names:
+  if current['sha256'].get(name)!=manifest['sha256'].get('artifacts/'+name):raise ValueError('Agent artifact manifest mismatch')
+ return {'artifacts/manifest.json',*('artifacts/'+name for name in names)}
+
+def require_billing_compatible(manifest):
+ with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
+  initialized=db.execute("SELECT 1 FROM sqlite_master WHERE name IN ('server_billing','node_hourly_coverage') LIMIT 1").fetchone()
+  # The schema gate also covers an upgraded Agent before its first report. Old
+  # controllers strictly reject new report fields even without configured cycles.
+  if initialized and manifest.get('serverBillingVersion',0)<1:raise ValueError('Initialized telemetry schema requires a billing-compatible release; current accounting and Agent reports are preserved')
+
 def verify(release):
  release,manifest=control.verify_release(release)
  for path in ['admin-web/index.html','user-web/index.html','deploy/nginx-hqip.conf','deploy/hqip-control.service','artifacts/HQIP-Windows-x64.zip','artifacts/desktop-manifest.json']:
@@ -44,9 +65,11 @@ def verify(release):
  old=(control.BASE/'current').resolve(strict=True)
  _,previous=control.verify_release(old)
  if release==old or manifest.get('upgradeKind')!='domains-alerts' or manifest.get('previousSourceSHA')!=previous['sourceSHA']:raise ValueError('Release is not based on active version')
+ allowed=verify_agent_assets(release,old,manifest)|{'artifacts/HQIP-Windows-x64.zip','artifacts/desktop-manifest.json'}
  for name,digest in previous['sha256'].items():
-  if name.startswith('artifacts/') and name not in ['artifacts/HQIP-Windows-x64.zip','artifacts/desktop-manifest.json'] and manifest['sha256'].get(name)!=digest:raise ValueError('Unexpected node artifact change')
+  if name.startswith('artifacts/') and name not in allowed and manifest['sha256'].get(name)!=digest:raise ValueError('Unexpected node artifact change')
  data_identity()
+ require_billing_compatible(manifest)
  if manifest.get('schemaVersion',4)<schema_version():raise ValueError('Release cannot read the current database schema; downgrade refused')
  if manifest.get('schemaVersion',4)==5:subscription_migration_ready()
  return release,manifest,old
@@ -59,10 +82,15 @@ def rollback(state):
  active=(control.BASE/'current').resolve(strict=True)
  if active not in [Path(info['previous']),Path(info['release'])]:raise ValueError('Refusing rollback over a later release')
  _,previous_manifest=control.verify_release(Path(info['previous']))
+ require_billing_compatible(previous_manifest)
  if schema_version()>previous_manifest.get('schemaVersion',4):raise ValueError('Rollback binary cannot read the current subscription schema; current data and release are preserved')
  if data_identity()!=info['masterSHA256']:raise ValueError('Master key changed; manual recovery required')
  control.run('systemctl','stop',control.SERVICE)
  if data_identity()!=info['masterSHA256']:raise ValueError('Stopped data identity changed')
+ try:require_billing_compatible(previous_manifest)
+ except Exception:
+  control.run('systemctl','start',control.SERVICE)
+  raise
  if schema_version()>previous_manifest.get('schemaVersion',4):
   control.run('systemctl','start',control.SERVICE)
   raise ValueError('Schema advanced while stopping; current compatible release restarted, downgrade refused')

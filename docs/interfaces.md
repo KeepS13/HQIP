@@ -50,4 +50,8 @@
 
 节点、服务器、IP 清单、Cloudflare DNS/证书和规则接口仍为管理员 API，写入要求管理员认证及 CSRF。详细数据模型、预检／接管／删除流程和绑定公网 IP 规则见 [多 IP 运维](multi-ip.md)；服务器计量口径见 [服务器监控](monitoring.md)。控制服务不会将管理员 API 回退到公共监听，也不会根据用户提交的内容拼接 SSH 命令。
 
+服务器创建要求 `expiresAt` 为未来北京时间整点；`PATCH /api/v1/servers/{id}/settings` 可为未配置的服务器首次设置到期时间，普通额度修改不刷新流量。`POST /api/v1/servers/{id}/renewals` 要求 `expectedRevision` 和 `requestId`，未逾期传正整数 `months`，逾期传手动选择的 `expiresAt`，两者互斥；`GET` 同路径读取续期历史。重复请求返回原续期结果，不重复延期。服务器／节点响应的 `billing` 包含 `status,expiresAt,cycleId,cycleStartedAt,nextResetAt,cycleUpload,cycleDownload,cycleComplete`，原自然月及累计字段继续保留。
+
+Agent `hourly-usage-v1` 能力增加累计 `hours`、覆盖起点 `hourlySince`、已完整传送至的采样水位 `hourlyThrough`。小时桶与旧分钟派生小时分开保存，重传采用最大累计值，不能再次增加日累计或用户订阅消耗。不确定采样时段显式标记，周期统计不会将其视为可确定的当前周期用量。
+
 `GET /api/v1/nodes/{id}/delete-preview` 的 `subscriptionTemplates` 数组列出引用该节点的模板，字段为 `id,name,defaultNode,enabled,listed`。存在任意引用时，`DELETE /api/v1/nodes/{id}` 返回 HTTP 409、`code: NODE_REFERENCED_BY_SUBSCRIPTIONS` 和相同数组；不会取消任务、改变授权或停止节点。须先修改模板解除全部引用，再提交节点删除。

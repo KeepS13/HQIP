@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -42,17 +43,33 @@ func TestBrowserAuthorizationBindsStatePKCEAndLoopback(t *testing.T) {
 		if address != service.URL+"/authorize/request" {
 			t.Fatal("untrusted navigation")
 		}
-		for _, state := range []string{"wrong", request["state"]} {
-			response, e := http.Get(request["redirectUri"] + "?code=" + strings.Repeat("x", 40) + "&state=" + url.QueryEscape(state))
+		for _, callback := range []struct {
+			state  string
+			status int
+		}{{"wrong", http.StatusBadRequest}, {request["state"], http.StatusOK}, {request["state"], http.StatusConflict}} {
+			response, e := http.Get(request["redirectUri"] + "?code=" + strings.Repeat("x", 40) + "&state=" + url.QueryEscape(callback.state))
 			if e != nil {
 				return e
 			}
+			body, e := io.ReadAll(response.Body)
 			response.Body.Close()
-			if state == "wrong" && response.StatusCode != 400 {
-				t.Error("invalid state accepted")
+			if e != nil {
+				return e
 			}
-			if state != "wrong" && response.StatusCode != 200 {
-				t.Error("valid callback rejected")
+			if response.StatusCode != callback.status {
+				t.Errorf("callback status = %d, want %d", response.StatusCode, callback.status)
+			}
+			if callback.status == http.StatusOK {
+				if response.Header.Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(string(body), "请返回客户端查看登录结果") {
+					t.Error("callback did not render the authorization receipt page")
+				}
+				if strings.Contains(string(body), request["state"]) || strings.Contains(string(body), strings.Repeat("x", 40)) {
+					t.Error("callback page exposed authorization secrets")
+				}
+				policy := response.Header.Get("Content-Security-Policy")
+				if !strings.Contains(policy, "default-src 'none'") || !strings.Contains(policy, "style-src 'sha256-") || strings.Contains(policy, "unsafe-inline") || response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Referrer-Policy") != "no-referrer" {
+					t.Error("callback page lost its isolation headers")
+				}
 			}
 		}
 		return nil

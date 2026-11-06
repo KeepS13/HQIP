@@ -530,8 +530,9 @@ func (a *Agent) sync(ctx context.Context) error {
 	}
 	report := model.AgentReport{
 		At: a.now().UTC(), Daily: batch.daily, Minutes: batch.minutes,
+		Hours: batch.hours, HourlySince: batch.hourlySince, HourlyThrough: batch.hourlyThrough,
 		HistoryCompacted: batch.compacted,
-		Capabilities:     []string{"agent-v2"},
+		Capabilities:     []string{"agent-v2", "hourly-usage-v1"},
 	}
 	if a.cfg.Managed {
 		report.Capabilities = append(report.Capabilities, "multi-ip-v2", "retirement-v1", "certificate-v1")

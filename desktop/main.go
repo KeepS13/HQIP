@@ -72,17 +72,7 @@ func main() {
 	// back to appIcon during development builds without generated resources.
 	window = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "HQIP · 私人网络", Width: 1020, Height: 760, MinWidth: 760, MinHeight: 640, URL: "/", BackgroundColour: application.NewRGB(12, 17, 26)})
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { window.Hide(); event.Cancel() })
-	tray := app.SystemTray.New()
-	tray.SetIcon(appIcon)
-	tray.SetLabel("HQIP")
-	menu := app.NewMenu()
-	menu.Add("打开 HQIP").OnClick(func(*application.Context) { window.Show(); window.Focus() })
-	menu.Add("连接").OnClick(func(*application.Context) { _ = c.Connect() })
-	menu.Add("断开").OnClick(func(*application.Context) { _ = c.Disconnect() })
-	menu.AddSeparator()
-	menu.Add("退出并恢复网络").OnClick(func(*application.Context) { app.Quit() })
-	tray.SetMenu(menu)
-	tray.OnClick(func() { window.Show(); window.Focus() })
+	setupTray(app, window, c)
 	if e = app.Run(); e != nil {
 		log.Print("HQIP 窗口退出: ", e)
 	}

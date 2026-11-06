@@ -26,7 +26,7 @@ func validServer(v model.Server) error {
 	}
 	return nil
 }
-func (s *Store) CreateServer(v model.Server) (model.Server, error) {
+func (s *Store) CreateServer(v model.Server, actor ...string) (model.Server, error) {
 	if v.SSHPort == 0 {
 		v.SSHPort = 22
 	}
@@ -66,11 +66,19 @@ func (s *Store) CreateServer(v model.Server) (model.Server, error) {
 	if err != nil {
 		return v, err
 	}
+	if v.Billing.ExpiresAt != nil {
+		if err = setupServerBilling(tx, v.ID, *v.Billing.ExpiresAt, v.Revision, billingActor(actor), s.Now()); err != nil {
+			return v, err
+		}
+	}
 	err = tx.Commit()
 	if err == nil {
 		s.Audit("server.create", v.ID)
 	}
-	return v, err
+	if err != nil {
+		return v, err
+	}
+	return s.Server(v.ID)
 }
 func (s *Store) Server(id string) (model.Server, error) {
 	var v model.Server
@@ -89,6 +97,9 @@ func (s *Store) Server(id string) (model.Server, error) {
 		return v, err
 	}
 	err = s.serverMonitoring(&v)
+	if err == nil {
+		v.Billing, err = BillingInSnapshot(s.DB, id, "", s.Now())
+	}
 	return v, err
 }
 func (s *Store) Servers() ([]model.Server, error) {

@@ -31,7 +31,7 @@ go run ./cmd/hqip serve --data-dir .local/dev-data --listen 127.0.0.1:8080 --pub
 
 ## 发布
 
-固定提交后构建控制二进制 `dist/hqip-domains-linux-amd64`、两个网页和 Windows 包。执行 `python scripts/package_domains.py --base-manifest <当前生产release.json>` 生成叠加发布包；未包含文件只允许从原发布目录按清单校验后复用，不能从运行数据目录复制。
+固定提交后构建控制二进制 `dist/hqip-domains-linux-amd64`、两个架构的 Agent、两个网页和 Windows 包。执行 `python scripts/package_domains.py --base-manifest <当前生产release.json> --base-node-manifest <当前生产artifacts/manifest.json>` 生成叠加发布包；未包含文件只允许从原发布目录按清单校验后复用，不能从运行数据目录复制。节点清单仅更新 Agent 校验和及来源提交，HY2 等其他固定产物保持原值。
 
 两个新域名必须在 Cloudflare 指向目标服务器。Nginx 仅增加这三个准确名称的虚拟主机，不修改其他站点。新域名通过 Certbot webroot 签发证书，保留 `/.well-known/acme-challenge/`，续期部署钩子 reload Nginx。API 信任 Cloudflare 官方地址段提供的客户端 IP；非可信来源不能伪造限流身份。Cloudflare 不应对 API、SSE、订阅或授权页面启用缓存、交互式挑战或 URL 重写。
 

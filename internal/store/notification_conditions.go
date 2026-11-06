@@ -79,7 +79,18 @@ func (s *Store) CollectNotificationConditions() ([]model.NotificationCondition, 
 		} else {
 			out = append(out, notificationRemoved("node.health", n.node.ID, "system"))
 		}
-		if c, ok := notificationQuota("node.month", n.node.ID, name, path, month, n.monthUsed, n.node.MonthlyQuotaBytes, []int{80, 100}); ok {
+		var billing model.ServerBilling
+		if n.node.ServerID != "" {
+			billing, err = BillingInSnapshot(tx, n.node.ServerID, n.node.ID, now)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if billing.Status != "" && billing.Status != "unconfigured" {
+			if c, ok := notificationBillingQuota("node", n.node.ID, name, path, billing, n.node.MonthlyQuotaBytes); ok {
+				out = append(out, c)
+			}
+		} else if c, ok := notificationQuota("node.month", n.node.ID, name, path, month, n.monthUsed, n.node.MonthlyQuotaBytes, []int{80, 100}); ok {
 			out = append(out, c)
 		}
 	}
@@ -172,7 +183,18 @@ func notificationServers(tx *sql.Tx, nodes []notificationNodeSnapshot, now time.
 				host = n
 			}
 		}
-		if c, ok := notificationQuota("server.month", id, name, path, month, used, server.MonthlyQuotaBytes, []int{80, 100}); ok {
+		billing, e := BillingInSnapshot(tx, id, "", now)
+		if e != nil {
+			return nil, e
+		}
+		if billing.Status != "unconfigured" {
+			if c, ok := notificationBillingQuota("server", id, name, path, billing, server.MonthlyQuotaBytes); ok {
+				out = append(out, c)
+			}
+		} else if c, ok := notificationQuota("server.month", id, name, path, month, used, server.MonthlyQuotaBytes, []int{80, 100}); ok {
+			out = append(out, c)
+		}
+		if c, ok := serverExpiryCondition(id, name, billing, now); ok {
 			out = append(out, c)
 		}
 		c := model.NotificationCondition{Key: "server.disk:" + id, Category: "system", Kind: "server.disk", ResourceID: id, Title: name + " 磁盘空间不足", DetailPath: path, Level: "warning", Stage: 1, Continuous: true}

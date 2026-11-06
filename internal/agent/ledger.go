@@ -36,9 +36,12 @@ type ledger struct {
 }
 
 type reportBatch struct {
-	daily     []model.UsageBucket
-	minutes   []model.UsageBucket
-	compacted bool
+	daily         []model.UsageBucket
+	minutes       []model.UsageBucket
+	hours         []model.UsageBucket
+	hourlySince   *time.Time
+	hourlyThrough *time.Time
+	compacted     bool
 }
 
 func openLedger(path string) (*ledger, error) {
@@ -87,6 +90,10 @@ CREATE TABLE IF NOT EXISTS lease_usage (
  dirty INTEGER NOT NULL, received INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
  next_attempt INTEGER NOT NULL DEFAULT 0);`)
 	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := ensureHourlyLedger(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -168,6 +175,10 @@ func (l *ledger) record(ctx context.Context, now time.Time, generation string, c
 		return 0, 0, err
 	}
 	defer tx.Rollback()
+	hourly, err := beginHourlySample(ctx, tx, now, generation, counters)
+	if err != nil {
+		return 0, 0, err
+	}
 	var totalTX, totalRX int64
 	for id, current := range counters {
 		if len(id) == 0 || len(id) > 128 || current.TX < 0 || current.RX < 0 || current.TX > math.MaxInt64/2 || current.RX > math.MaxInt64/2 {
@@ -193,6 +204,9 @@ func (l *ledger) record(ctx context.Context, now time.Time, generation string, c
 			}
 			from = oldAt
 		}
+		if err := recordHourlyCounter(ctx, tx, hourly, now, generation, id, oldGeneration, oldAt, old, current, delta); err != nil {
+			return 0, 0, err
+		}
 		if delta.TX != 0 || delta.RX != 0 {
 			if err := addUsage(ctx, tx, id, from, now, delta); err != nil {
 				return 0, 0, err
@@ -206,8 +220,14 @@ ON CONFLICT(device_id) DO UPDATE SET upload=upload+excluded.upload,download=down
 ON CONFLICT(device_id) DO UPDATE SET generation=excluded.generation,tx=excluded.tx,rx=excluded.rx,sampled_at=excluded.sampled_at`, id, generation, current.TX, current.RX, now.UnixNano()); err != nil {
 			return 0, 0, err
 		}
+		if delta.TX > math.MaxInt64-totalTX || delta.RX > math.MaxInt64-totalRX {
+			return 0, 0, errors.New("统计采样总量溢出")
+		}
 		totalTX += delta.TX
 		totalRX += delta.RX
+	}
+	if err := finishHourlySample(ctx, tx, now, generation); err != nil {
+		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
@@ -298,6 +318,9 @@ func (l *ledger) batch() (reportBatch, error) {
 		return b, err
 	}
 	b.compacted = compacted == "1"
+	if err := l.hourlyBatch(&b); err != nil {
+		return b, err
+	}
 	return b, nil
 }
 
@@ -316,6 +339,9 @@ func (l *ledger) acknowledge(b reportBatch) error {
 				return err
 			}
 		}
+	}
+	if err := acknowledgeHours(tx, b.hours); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -336,6 +362,9 @@ func (l *ledger) replay(now time.Time) error {
 
 func replayTx(tx *sql.Tx, now time.Time) error {
 	if _, err := tx.Exec("UPDATE usage SET dirty=1 WHERE (kind='day' AND start>=?) OR (kind='minute' AND start>=?)", now.In(shanghai).AddDate(0, -13, 0).Unix(), now.AddDate(0, 0, -7).Unix()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE native_hourly SET dirty=1 WHERE start>=?", now.AddDate(0, -13, 0).Truncate(time.Hour).Unix()); err != nil {
 		return err
 	}
 	_, err := tx.Exec("INSERT INTO meta(key,value) VALUES('last_replay',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", now.Unix())
@@ -385,6 +414,9 @@ func (l *ledger) maintain(now time.Time, queueLimit int64) error {
 		if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES('compacted','1') ON CONFLICT(key) DO UPDATE SET value='1'"); err != nil {
 			return err
 		}
+	}
+	if err := maintainHours(tx, now, queueLimit); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

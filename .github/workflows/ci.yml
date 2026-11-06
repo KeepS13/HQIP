@@ -41,6 +41,8 @@ jobs:
           name: linux-release
           path: |
             dist/hqip-linux-amd64
+            dist/agent-linux-amd64
+            dist/agent-linux-arm64
             admin-web/dist
             user-web/dist
           if-no-files-found: error

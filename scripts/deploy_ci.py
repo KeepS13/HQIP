@@ -67,8 +67,12 @@ def main():
             return
         dist = ROOT / 'dist'
         (dist / 'base-manifest.json').write_text(base)
+        node_manifest = remote(['cat', '/opt/hqip-control/current/artifacts/manifest.json'],
+                               capture_output=True, text=True).stdout
+        (dist / 'base-node-manifest.json').write_text(node_manifest)
         shutil.copyfile(dist / 'hqip-linux-amd64', dist / 'hqip-domains-linux-amd64')
-        command([sys.executable, 'scripts/package_domains.py', '--base-manifest', 'dist/base-manifest.json'])
+        command([sys.executable, 'scripts/package_domains.py', '--base-manifest', 'dist/base-manifest.json',
+                 '--base-node-manifest', 'dist/base-node-manifest.json'])
         info = json.loads((dist / 'domains-release.json').read_text())
         archive = dist / info['filename']
         if hashlib.sha256(archive.read_bytes()).hexdigest() != info['sha256']:

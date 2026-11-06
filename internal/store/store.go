@@ -87,6 +87,14 @@ func Open(dataDir, baseURL string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = EnsureHourlyUsageSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = EnsureServerBillingSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = os.Chmod(filepath.Join(dataDir, "hqip.db"), 0600); err != nil {
 		db.Close()
 		return nil, err

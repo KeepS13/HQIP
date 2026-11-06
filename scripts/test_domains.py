@@ -76,6 +76,7 @@ class DomainReleaseTests(unittest.TestCase):
    mocks.enter_context(patch.object(control,'verify_release',return_value=(previous,{'schemaVersion':4})))
    mocks.enter_context(patch.object(deploy,'data_identity',return_value='paired-key'))
    mocks.enter_context(patch.object(deploy,'schema_version',side_effect=[4,5]))
+   mocks.enter_context(patch.object(deploy,'require_billing_compatible'))
    run=mocks.enter_context(patch.object(control,'run'));point=mocks.enter_context(patch.object(control,'point_current'))
    with self.assertRaisesRegex(ValueError,'Schema advanced while stopping'):deploy.rollback(state)
    point.assert_not_called()

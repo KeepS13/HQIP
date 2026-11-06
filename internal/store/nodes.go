@@ -148,6 +148,9 @@ func (s *Store) Node(id string) (model.Node, error) {
 		return n, err
 	}
 	err = s.DB.QueryRow("SELECT COALESCE(SUM(upload),0),COALESCE(SUM(download),0) FROM lifetime WHERE node_id=?", id).Scan(&n.TotalUpload, &n.TotalDownload)
+	if err == nil {
+		n.Billing, err = BillingInSnapshot(s.DB, n.ServerID, id, s.Now())
+	}
 	return n, err
 }
 

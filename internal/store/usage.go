@@ -13,7 +13,7 @@ import (
 // Only positive daily differences contribute to lifetime totals; deleting old
 // daily detail therefore never changes lifetime usage or duplicates replayed data.
 func (s *Store) Report(nodeID string, r model.AgentReport) error {
-	if len(r.Daily) > 4000 || len(r.Minutes) > 4000 || len(r.Online) > 4000 {
+	if len(r.Daily) > 4000 || len(r.Minutes) > 4000 || len(r.Hours) > 4000 || len(r.Online) > 4000 {
 		return errors.New("一次上报最多包含 4000 条记录")
 	}
 	var existingLifecycle, existingCertificateMode string
@@ -29,6 +29,9 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 		r.Certificate = nil
 	}
 	now := s.Now()
+	if err := validateHourlyReport(r, now); err != nil {
+		return err
+	}
 	dailyCutoff := DayStart(now.AddDate(0, -13, 0))
 	minuteCutoff := now.AddDate(0, 0, -7).Unix() / 60 * 60
 	for _, b := range r.Daily {
@@ -112,6 +115,9 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 			}
 		}
 	}
+	if err = recordHourlyReport(tx, nodeID, r, valid, now); err != nil {
+		return err
+	}
 	if _, err = tx.Exec("UPDATE nodes SET managed=1,applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
 		return err
 	}
@@ -132,6 +138,9 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "history:"+nodeID, fmt.Sprint(now.Unix())); err != nil {
 			return err
 		}
+	}
+	if err = RecordServerBillingUsage(tx, nodeID, now); err != nil {
+		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return err
@@ -208,11 +217,17 @@ func (s *Store) Alerts(nodes []model.Node) []Alert {
 	alerts := []Alert{}
 	for _, n := range nodes {
 		if n.MonthlyQuotaBytes != nil && *n.MonthlyQuotaBytes > 0 {
-			ratio := float64(n.MonthUpload+n.MonthDownload) / float64(*n.MonthlyQuotaBytes)
+			used := n.MonthUpload + n.MonthDownload
+			period := "本月"
+			if n.Billing.Status != "" && n.Billing.Status != "unconfigured" {
+				used = n.Billing.CycleUpload + n.Billing.CycleDownload
+				period = "本周期"
+			}
+			ratio := float64(used) / float64(*n.MonthlyQuotaBytes)
 			if ratio >= 1 {
-				alerts = append(alerts, Alert{Level: "danger", Message: n.Name + " 本月代理流量已达到额度，连接保持正常", NodeID: n.ID})
+				alerts = append(alerts, Alert{Level: "danger", Message: n.Name + " " + period + "代理流量已达到额度，连接保持正常", NodeID: n.ID})
 			} else if ratio >= .8 {
-				alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " 本月代理流量已达到额度的 80%", NodeID: n.ID})
+				alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " " + period + "代理流量已达到额度的 80%", NodeID: n.ID})
 			}
 		}
 		if n.LastSeen != nil && s.Now().Sub(*n.LastSeen) > 30*time.Second {

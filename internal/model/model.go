@@ -39,6 +39,7 @@ type Node struct {
 	Port                int                `json:"port"`
 	BandwidthMbps       *float64           `json:"bandwidthMbps"`
 	MonthlyQuotaBytes   *int64             `json:"monthlyQuotaBytes"`
+	Billing             ServerBilling      `json:"billing"`
 	Status              string             `json:"status"`
 	Message             string             `json:"message"`
 	HostKey             string             `json:"hostKey"`
@@ -104,10 +105,11 @@ type AgentDesired struct {
 // Daily buckets start at midnight Asia/Shanghai; repeated reports use MAX,
 // never SUM, making retransmission and acknowledgment loss idempotent.
 type UsageBucket struct {
-	DeviceID string `json:"deviceId"`
-	Start    int64  `json:"start"`
-	Upload   int64  `json:"upload"`
-	Download int64  `json:"download"`
+	DeviceID  string `json:"deviceId"`
+	Start     int64  `json:"start"`
+	Upload    int64  `json:"upload"`
+	Download  int64  `json:"download"`
+	Uncertain bool   `json:"uncertain,omitempty"`
 }
 
 type AgentReport struct {
@@ -118,6 +120,9 @@ type AgentReport struct {
 	Online           map[string]int       `json:"online"`
 	Daily            []UsageBucket        `json:"daily"`
 	Minutes          []UsageBucket        `json:"minutes"`
+	Hours            []UsageBucket        `json:"hours,omitempty"`
+	HourlySince      *time.Time           `json:"hourlySince,omitempty"`
+	HourlyThrough    *time.Time           `json:"hourlyThrough,omitempty"`
 	HistoryCompacted bool                 `json:"historyCompacted"`
 	Removals         []AgentRemovalStatus `json:"removals,omitempty"`
 	Warnings         []string             `json:"warnings,omitempty"`

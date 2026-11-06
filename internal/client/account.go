@@ -135,8 +135,7 @@ func (a *API) BrowserLogin(ctx context.Context, installationID, clientName strin
 			http.Error(w, "Callback already used", http.StatusConflict)
 			return
 		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("登录授权已送达 HQIP，请返回客户端查看结果。可以关闭此页面。"))
+		writeLoginCallbackPage(w)
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	defer server.Close()

@@ -20,14 +20,15 @@ type serverInspector interface {
 }
 
 type serverForm struct {
-	Name              string   `json:"name"`
-	SSHHost           string   `json:"sshHost"`
-	SSHPort           int      `json:"sshPort"`
-	SSHUser           string   `json:"sshUser"`
-	Password          string   `json:"password"`
-	ExpectedRevision  int64    `json:"expectedRevision"`
-	BandwidthMbps     *float64 `json:"bandwidthMbps"`
-	MonthlyQuotaBytes *int64   `json:"monthlyQuotaBytes"`
+	Name              string     `json:"name"`
+	SSHHost           string     `json:"sshHost"`
+	SSHPort           int        `json:"sshPort"`
+	SSHUser           string     `json:"sshUser"`
+	Password          string     `json:"password"`
+	ExpectedRevision  int64      `json:"expectedRevision"`
+	BandwidthMbps     *float64   `json:"bandwidthMbps"`
+	MonthlyQuotaBytes *int64     `json:"monthlyQuotaBytes"`
+	ExpiresAt         *time.Time `json:"expiresAt"`
 }
 
 func (s *Server) registerServerRoutes(m *http.ServeMux) {
@@ -36,7 +37,8 @@ func (s *Server) registerServerRoutes(m *http.ServeMux) {
 		"GET /api/v1/servers/{id}": s.serverDetail, "PATCH /api/v1/servers/{id}": s.updateServer, "DELETE /api/v1/servers/{id}": s.deleteServer,
 		"PATCH /api/v1/servers/{id}/settings": s.updateServerSettings,
 		"GET /api/v1/servers/{id}/traffic":    s.serverTraffic,
-		"GET /api/v1/servers/{id}/addresses":  s.listAddresses, "POST /api/v1/servers/{id}/addresses": s.createAddress, "DELETE /api/v1/servers/{id}/addresses/{address}": s.deleteAddress,
+		"GET /api/v1/servers/{id}/renewals":   s.serverRenewals, "POST /api/v1/servers/{id}/renewals": s.renewServer,
+		"GET /api/v1/servers/{id}/addresses": s.listAddresses, "POST /api/v1/servers/{id}/addresses": s.createAddress, "DELETE /api/v1/servers/{id}/addresses/{address}": s.deleteAddress,
 		"POST /api/v1/nodes/{id}/preflight": s.nodePreflight, "POST /api/v1/nodes/{id}/takeover": s.retryNode,
 		"GET /api/v1/nodes/{id}/delete-preview": s.nodeDeletePreview, "DELETE /api/v1/nodes/{id}": s.deleteNode,
 		"POST /api/v1/nodes/{id}/retire": s.retireNode, "DELETE /api/v1/devices/{id}": s.deleteDevice,
@@ -125,13 +127,23 @@ func (s *Server) createServer(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	if f.ExpiresAt == nil || !serverExpiryInput(*f.ExpiresAt, s.Store.Now()) {
+		fail(w, 400, "请选择未来的北京时间整点到期时间")
+		return
+	}
 	checked, err := s.inspectServer(r, f, model.Server{})
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
 	checked.BandwidthMbps, checked.MonthlyQuotaBytes = f.BandwidthMbps, f.MonthlyQuotaBytes
-	v, err := s.Store.CreateServer(checked)
+	checked.Billing.ExpiresAt = f.ExpiresAt
+	actor, _, _, err := s.Store.Admin()
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	v, err := s.Store.CreateServer(checked, actor)
 	if err != nil {
 		managementError(w, err)
 		return
@@ -141,6 +153,10 @@ func (s *Server) createServer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateServer(w http.ResponseWriter, r *http.Request) {
 	var f serverForm
 	if !readJSON(w, r, &f) {
+		return
+	}
+	if f.ExpiresAt != nil {
+		fail(w, 400, "到期时间请通过首次配置或续费操作调整")
 		return
 	}
 	if err := f.validate(); err != nil {
@@ -201,6 +217,7 @@ func (s *Server) updateServerSettings(w http.ResponseWriter, r *http.Request) {
 		BandwidthMbps     json.RawMessage `json:"bandwidthMbps"`
 		MonthlyQuotaBytes json.RawMessage `json:"monthlyQuotaBytes"`
 		ExpectedRevision  int64           `json:"expectedRevision"`
+		ExpiresAt         *time.Time      `json:"expiresAt"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -215,12 +232,62 @@ func (s *Server) updateServerSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请填写有效名称、版本及正数额度；无限请填写 null")
 		return
 	}
-	v, err := s.Store.UpdateServerSettings(r.PathValue("id"), name, bandwidth, quota, body.ExpectedRevision)
+	if body.ExpiresAt != nil && !serverExpiryInput(*body.ExpiresAt, s.Store.Now()) {
+		fail(w, 400, "请选择未来的北京时间整点到期时间")
+		return
+	}
+	actor, _, _, err := s.Store.Admin()
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	v, err := s.Store.UpdateServerSettings(r.PathValue("id"), name, bandwidth, quota, body.ExpectedRevision, store.ServerBillingSetup{ExpiresAt: body.ExpiresAt, Actor: actor})
 	if errors.Is(err, store.ErrConflict) {
 		fail(w, 409, "服务器设置已被修改，请刷新后重试")
 		return
 	}
 	result(w, v, err)
+}
+
+func serverExpiryInput(at, now time.Time) bool {
+	return at.After(now) && at.Year() <= 2200 && at.Unix()%3600 == 0 && at.Nanosecond() == 0
+}
+
+func (s *Server) serverRenewals(w http.ResponseWriter, r *http.Request) {
+	v, err := s.Store.ServerRenewals(r.PathValue("id"))
+	result(w, v, err)
+}
+
+func (s *Server) renewServer(w http.ResponseWriter, r *http.Request) {
+	var b store.ServerRenewalRequest
+	if !readJSON(w, r, &b) {
+		return
+	}
+	if b.ExpectedRevision < 1 || len(b.RequestID) < 8 || len(b.RequestID) > 128 || strings.ContainsAny(b.RequestID, "\r\n\x00") || (b.Months == nil) == (b.ExpiresAt == nil) || b.Months != nil && (*b.Months < 1 || *b.Months > 1200) {
+		fail(w, 400, "请提供版本、请求标识，并选择续费月数或到期时间")
+		return
+	}
+	// Future-date validation is transactional in Store, after idempotent replay.
+	// A successful manual renewal remains retryable after its date has passed.
+	actor, _, _, err := s.Store.Admin()
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
+	v, renewal, err := s.Store.RenewServer(r.PathValue("id"), b, actor)
+	if errors.Is(err, store.ErrNotFound) {
+		fail(w, 404, "服务器不存在")
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		fail(w, 409, "服务器或续费请求已发生变化，请刷新后重试")
+		return
+	}
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	reply(w, 200, map[string]any{"server": v, "renewal": renewal})
 }
 
 func (s *Server) serverTraffic(w http.ResponseWriter, r *http.Request) {

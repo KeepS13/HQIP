@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import { api, usePolling } from "../api";
 import QuotaFields from "../QuotaFields";
+import { billingFor, billingQuotaLabel, billingTotal, billingUsageLabel } from "../billing";
+import { BillingSummary } from "./ServerBilling";
 import {
   Badge,
   Breadcrumb,
@@ -84,8 +86,8 @@ function AddNode({ onClose }: { onClose: () => void }) {
       {form.dnsMode === "cloudflare" ? <Field label="Cloudflare 域名" hint="自动创建独立子域名和仅 DNS 的 A 记录"><select required value={form.zoneId} onChange={e => change("zoneId", e.target.value)}><option value="">选择域名</option>{settings.data?.defaultZoneId && !zones.some(z => z.id === settings.data!.defaultZoneId) && <option value={settings.data.defaultZoneId}>{settings.data.defaultZoneName}</option>}{zones.map(z => <option value={z.id} key={z.id} disabled={z.status !== "active"}>{z.name}</option>)}</select></Field> : <Field label="已有节点域名" hint="A 记录需指向所选 IP；HTTP 证书验证需要此 IP 的 TCP 80 可用"><input required value={form.domain} pattern="[^/ :]+[.][^/ :]+" onChange={e => change("domain", e.target.value)} placeholder="node.example.com" autoCapitalize="none" /></Field>}
       {!settings.data?.configured && <p className="muted"><Link to="/domains">配置 Cloudflare Token</Link> 后可自动分配域名。</p>}
       <div className="form-grid"><Field label="本次部署的 SSH 密码"><input type="password" required autoComplete="new-password" value={form.password} onChange={e => change("password", e.target.value)} /></Field><Field label="Hysteria UDP 端口"><input type="number" required min={1} max={65535} value={form.port} onChange={e => change("port", e.target.value)} /></Field></div>
-      <QuotaFields {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }} />
-      <Notice>每个 IP 的节点、设备授权和流量独立管理。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。带宽和流量额度只作提醒。</Notice>
+      <QuotaFields {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }} quotaLabel={servers.data?.find(server => server.id === serverId)?.billing?.status === "unconfigured" ? "月流量额度" : "每周期流量额度"} />
+      <Notice>每个 IP 的额度独立设置，统计周期与有效期随所属服务器。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。带宽和流量额度只作提醒。</Notice>
       <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy} icon={Plus}>添加并部署</Button></div>
     </form>
   </Modal>;
@@ -171,18 +173,19 @@ export function Nodes() {
                 </div>
               </div>
               <div className="node-quota-title">
-                <span>本月代理流量</span>
+                <span>{billingUsageLabel(n)}</span>
                 <span>
-                  {n.monthlyQuotaBytes
-                    ? `${Math.round(((n.monthDownload + n.monthUpload) / n.monthlyQuotaBytes) * 100)}%`
+                  {!billingFor(n).cycleComplete ? "待核实" : n.monthlyQuotaBytes
+                    ? `${Math.round((billingTotal(n) / n.monthlyQuotaBytes) * 100)}%`
                     : "不限量"}
                 </span>
               </div>
-              <Meter
-                value={n.monthDownload + n.monthUpload}
+              {billingFor(n).cycleComplete ? <Meter
+                value={billingTotal(n)}
                 max={n.monthlyQuotaBytes}
                 label
-              />
+              /> : <p className="billing-incomplete">已知 {bytes(billingTotal(n))} · 周期用量数据不完整</p>}
+              <BillingSummary resource={n} compact followsServer />
               <div className="node-card-bottom">
                 {fresh(n) ? (
                   <Rate
@@ -298,8 +301,9 @@ function EditNode({
         </Field>
         <QuotaFields
           {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }}
+          quotaLabel={billingQuotaLabel(node)}
         />
-        <Notice>额度仅提醒，不限速、不断网；修改额度不会清除本月统计。</Notice>
+        <Notice>额度仅提醒，不限速、不断网；修改额度不清除用量。节点周期跟随服务器，到期与续期请在服务器详情中管理。</Notice>
         <ErrorNotice message={error} />
         <div className="modal-actions">
           <Button variant="secondary" type="button" onClick={onClose}>
@@ -424,11 +428,13 @@ export function NodePage() {
   if (loading) return <Loading />;
   if (!data)
     return <ErrorNotice message={error} retry={() => void refresh()} />;
-  const { node, devices } = data,
+  const { node } = data,
     live = fresh(node),
     known = onlineKnown(node),
     metrics = node.metrics,
-    month = node.monthUpload + node.monthDownload;
+    month = node.monthUpload + node.monthDownload,
+    billing = billingFor(node),
+    cycleTotal = billingTotal(node);
   async function verify() {
     setVerifying(true);
     try {
@@ -504,16 +510,17 @@ export function NodePage() {
           秒未收到心跳，在线设备与实时速率标记为未知。历史流量仍保留，节点恢复后会自动补报。
         </Notice>
       )}
+      <BillingSummary resource={node} followsServer />
       <div className="stats-grid">
         <StatCard
-          label="本月代理流量"
-          value={bytes(month).split(" ")[0]}
-          unit={bytes(month).split(" ")[1]}
+          label={billingUsageLabel(node)}
+          value={billing.cycleComplete ? bytes(cycleTotal).split(" ")[0] : "待核实"}
+          unit={billing.cycleComplete ? bytes(cycleTotal).split(" ")[1] : ""}
           icon={Activity}
           hint={
-            node.monthlyQuotaBytes
+            !billing.cycleComplete ? `已知 ${bytes(cycleTotal)} · 数据不完整` : node.monthlyQuotaBytes
               ? `额度 ${bytes(node.monthlyQuotaBytes)} · 仅提醒`
-              : "本月额度无限制"
+              : "额度无限制"
           }
         />
         <StatCard
@@ -621,9 +628,9 @@ export function NodePage() {
             </div>
           )}
         </Panel>
-        <Panel title="本月用量" subtitle="北京时间自然月 · 上传 + 下载">
+        <Panel title={billing.status === "unconfigured" ? "本月用量（待设置到期）" : "本周期用量"} subtitle={billing.status === "unconfigured" ? "暂按北京时间自然月 · 上传 + 下载" : "跟随所属服务器周期 · 上传 + 下载"}>
           <div className="usage-hero">
-            <strong>{bytes(month)}</strong>
+            <strong>{!billing.cycleComplete ? "已知 " : ""}{bytes(cycleTotal)}</strong>
             <span>
               {node.monthlyQuotaBytes
                 ? `/ ${bytes(node.monthlyQuotaBytes)}`
@@ -631,7 +638,7 @@ export function NodePage() {
             </span>
           </div>
           <div className="usage-meter">
-            <Meter value={month} max={node.monthlyQuotaBytes} />
+            {billing.cycleComplete ? <Meter value={cycleTotal} max={node.monthlyQuotaBytes} /> : <p className="billing-incomplete">周期用量数据不完整，暂不计算额度占用率。</p>}
           </div>
           <div className="usage-breakdown">
             <div>
@@ -639,107 +646,24 @@ export function NodePage() {
                 <ArrowUp size={15} />
                 上传
               </span>
-              <strong>{bytes(node.monthUpload)}</strong>
+              <strong>{bytes(billing.cycleUpload)}</strong>
             </div>
             <div>
               <span>
                 <ArrowDown size={15} />
                 下载
               </span>
-              <strong>{bytes(node.monthDownload)}</strong>
+              <strong>{bytes(billing.cycleDownload)}</strong>
             </div>
           </div>
           <div className="usage-note">
             代理流量不等同服务商账单。额度到达 80% / 100%
-            时提醒，连接继续正常工作。
+            时提醒，连接继续正常工作。<br />自然月流量 {bytes(month)} · 累计 {bytes(node.totalUpload + node.totalDownload)}，续期后保留。
           </div>
         </Panel>
       </div>
       <NetworkQuality key={node.id} node={node} />
       <TaskLog node={node} events={data.events} />
-      <Panel
-        title="凭据用量记录"
-        subtitle="保留此节点的历史流量归属；用户权限在订阅模板中管理"
-        action={
-          <Link className="text-link" to="/users">
-            管理用户 <ArrowRight size={15} />
-          </Link>
-        }
-      >
-        {devices?.length ? (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>记录名称</th>
-                  <th>状态</th>
-                  <th>本月上传</th>
-                  <th>本月下载</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {devices.map((d) => (
-                  <tr key={d.id}>
-                    <td>
-                      <span className="table-name">
-                        {d.name}
-                      </span>
-                    </td>
-                    <td>
-                      <Badge
-                        tone={
-                          d.pendingSync
-                            ? "warning"
-                            : !d.enabled
-                              ? "muted"
-                              : !known
-                                ? "warning"
-                                : d.online
-                                  ? "success"
-                                  : "muted"
-                        }
-                      >
-                        {d.pendingSync
-                          ? "待同步"
-                          : !d.enabled
-                            ? "已停用"
-                            : !known
-                              ? "在线未知"
-                              : d.online
-                                ? "在线"
-                                : "离线"}
-                      </Badge>
-                    </td>
-                    <td>{bytes(d.monthUpload)}</td>
-                    <td>{bytes(d.monthDownload)}</td>
-                    <td>
-                      <Link
-                        to="/users"
-                        className="icon-button"
-                        aria-label="前往用户管理"
-                      >
-                        <ChevronRight size={16} />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <Empty
-            title="暂无凭据用量记录"
-            description="将此节点加入订阅模板后，持有有效订阅的用户可连接。"
-            action={
-              <Link to="/subscriptions" className="button button-secondary">
-                <Plus size={15} />
-                管理订阅
-              </Link>
-            }
-          />
-        )}
-      </Panel>
       {remove && <DeleteNode node={node} onClose={() => setRemove(false)} refresh={refresh} />}
       {retire && <RetireNode node={node} onClose={() => setRetire(false)} refresh={refresh} />}
       {edit && (

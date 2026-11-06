@@ -37,7 +37,7 @@ func validServerSettings(name string, bandwidth *float64, quota *int64) error {
 }
 
 // UpdateServerSettings changes advisory capacity without SSH or node mutations.
-func (s *Store) UpdateServerSettings(id, name string, bandwidth *float64, quota *int64, expected int64) (model.Server, error) {
+func (s *Store) UpdateServerSettings(id, name string, bandwidth *float64, quota *int64, expected int64, setup ...ServerBillingSetup) (model.Server, error) {
 	if err := validServerSettings(name, bandwidth, quota); err != nil {
 		return model.Server{}, err
 	}
@@ -53,6 +53,11 @@ func (s *Store) UpdateServerSettings(id, name string, bandwidth *float64, quota 
 	}
 	if revision != expected {
 		return model.Server{}, ErrConflict
+	}
+	if len(setup) > 0 && setup[0].ExpiresAt != nil {
+		if err = setupServerBilling(tx, id, *setup[0].ExpiresAt, revision+1, billingActor([]string{setup[0].Actor}), s.Now()); err != nil {
+			return model.Server{}, err
+		}
 	}
 	if _, err = tx.Exec("UPDATE servers SET config=json_set(config,'$.name',?,'$.bandwidthMbps',?,'$.monthlyQuotaBytes',?,'$.revision',?),revision=revision+1 WHERE id=?", name, bandwidth, quota, revision+1, id); err != nil {
 		return model.Server{}, err
@@ -255,13 +260,20 @@ func (s *Store) ServerNodeUsage(id string) ([]model.Node, error) {
 func (s *Store) ServerAlerts(servers []model.Server) []Alert {
 	alerts := []Alert{}
 	for _, v := range servers {
+		up, down, label := v.MonthUpload, v.MonthDownload, "本月"
+		if v.Billing.Status != "" && v.Billing.Status != "unconfigured" {
+			up, down, label = v.Billing.CycleUpload, v.Billing.CycleDownload, "本周期"
+		}
 		if v.MonthlyQuotaBytes != nil && *v.MonthlyQuotaBytes > 0 {
-			ratio := (float64(v.MonthUpload) + float64(v.MonthDownload)) / float64(*v.MonthlyQuotaBytes)
+			ratio := (float64(up) + float64(down)) / float64(*v.MonthlyQuotaBytes)
 			if ratio >= 1 {
-				alerts = append(alerts, Alert{Level: "danger", Message: v.Name + " 本月设备代理流量已达到服务器额度，连接保持正常", ServerID: v.ID})
+				alerts = append(alerts, Alert{Level: "danger", Message: v.Name + " " + label + "设备代理流量已达到服务器额度，连接保持正常", ServerID: v.ID})
 			} else if ratio >= .8 {
-				alerts = append(alerts, Alert{Level: "warning", Message: v.Name + " 本月设备代理流量已达到服务器额度的 80%", ServerID: v.ID})
+				alerts = append(alerts, Alert{Level: "warning", Message: v.Name + " " + label + "设备代理流量已达到服务器额度的 80%", ServerID: v.ID})
 			}
+		}
+		if condition, ok := serverExpiryCondition(v.ID, v.Name, v.Billing, s.Now()); ok {
+			alerts = append(alerts, Alert{Level: condition.Level, Message: condition.Message, ServerID: v.ID})
 		}
 		if v.MetricsFresh && v.Metrics.DiskTotal > 0 && (v.Metrics.DiskUsed >= v.Metrics.DiskTotal || v.Metrics.DiskTotal-v.Metrics.DiskUsed < 512*1024*1024) {
 			alerts = append(alerts, Alert{Level: "warning", Message: v.Name + " 的 Agent 数据目录所在磁盘可用空间不足 512 MiB", ServerID: v.ID})

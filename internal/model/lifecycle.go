@@ -14,6 +14,7 @@ type Server struct {
 	Architecture        string          `json:"architecture"`
 	BandwidthMbps       *float64        `json:"bandwidthMbps"`
 	MonthlyQuotaBytes   *int64          `json:"monthlyQuotaBytes"`
+	Billing             ServerBilling   `json:"billing"`
 	Revision            int64           `json:"revision"`
 	CreatedAt           time.Time       `json:"createdAt"`
 	LastSeen            *time.Time      `json:"lastSeen,omitempty"`

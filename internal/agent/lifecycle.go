@@ -158,7 +158,7 @@ func (a *Agent) progressRetirement(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if len(pending.daily) != 0 || len(pending.minutes) != 0 {
+		if len(pending.daily) != 0 || len(pending.minutes) != 0 || len(pending.hours) != 0 {
 			// Offline nodes can have many report batches. Keep the Agent alive
 			// until every cumulative bucket has been durably acknowledged.
 			return nil

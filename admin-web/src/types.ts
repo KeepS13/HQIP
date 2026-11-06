@@ -13,6 +13,28 @@ export interface Metrics {
   uploadRate: number;
   downloadRate: number;
 }
+export interface BillingCycle {
+  status: "unconfigured" | "active" | "expired";
+  expiresAt: string | null;
+  cycleId: string;
+  cycleStartedAt: string | null;
+  nextResetAt: string | null;
+  cycleUpload: number;
+  cycleDownload: number;
+  cycleComplete: boolean;
+}
+export interface ServerRenewal {
+  id: string;
+  serverId: string;
+  requestId: string;
+  kind: "initial" | "advance" | "overdue";
+  months: number;
+  previousExpiresAt: string | null;
+  expiresAt: string;
+  confirmedAt: string;
+  actor: string;
+  revision: number;
+}
 export interface Node {
   id: string;
   serverId: string;
@@ -35,6 +57,7 @@ export interface Node {
   port: number;
   bandwidthMbps: number | null;
   monthlyQuotaBytes: number | null;
+  billing: BillingCycle;
   status: string;
   message: string;
   hostKey: string;
@@ -84,6 +107,7 @@ export interface ManagedServer {
   metrics: Metrics;
   bandwidthMbps: number | null;
   monthlyQuotaBytes: number | null;
+  billing: BillingCycle;
   monthUpload: number;
   monthDownload: number;
   totalUpload: number;
