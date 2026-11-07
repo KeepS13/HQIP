@@ -13,14 +13,24 @@ import (
 func retryDatabase[T any](attempt func() (T, error)) (T, error) {
 	var result T
 	var err error
-	for i := 0; i < 6; i++ {
+	deadline := time.Now().Add(5 * time.Second)
+	for i := 0; i < 32; i++ {
 		result, err = attempt()
 		var pg *pgconn.PgError
 		if !errors.As(err, &pg) || (pg.Code != "40001" && pg.Code != "40P01") {
 			return result, err
 		}
-		if i < 5 {
-			time.Sleep(time.Duration(5*(1<<i)+rand.IntN(10)) * time.Millisecond)
+		// A short fixed attempt count can exhaust while a burst of Agent
+		// replays is still serializing. Bound elapsed retry time and cap each
+		// backoff instead; full jitter prevents contenders moving in lockstep.
+		remaining := time.Until(deadline)
+		if i == 31 || remaining <= 0 {
+			return result, err
+		}
+		ceiling := min(time.Duration(5*(1<<min(i, 6)))*time.Millisecond, 200*time.Millisecond, remaining)
+		time.Sleep(time.Duration(rand.Int64N(int64(ceiling)) + 1))
+		if !time.Now().Before(deadline) {
+			return result, err
 		}
 	}
 	return result, err
