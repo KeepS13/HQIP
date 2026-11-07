@@ -1,281 +1,113 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, ClipboardList, X } from "lucide-react";
-import { api, usePolling } from "../api";
+import { ArrowLeft, ClipboardList } from "lucide-react";
+import { usePolling } from "../api";
 import {
-  Button,
   Empty,
   ErrorNotice,
-  Field,
   Loading,
-  Modal,
   Notice,
   PageHeader,
   Panel,
   RefreshButton,
   date,
-  useToast,
 } from "../components";
 import { RequestBadge } from "../portal/Badge";
-import type {
-  SubscriptionRequest,
-  SubscriptionTemplate,
-} from "../portal/types";
-import { TemplateFacts } from "./SubscriptionTemplates";
-
-function DecideRequest({
-  request,
-  template,
-  decision,
-  onClose,
-  onDone,
-}: {
-  request: SubscriptionRequest;
-  template?: SubscriptionTemplate;
-  decision: "approve" | "reject";
-  onClose: () => void;
-  onDone: () => Promise<void>;
-}) {
-  const [note, setNote] = useState(""),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  return (
-    <Modal
-      title={decision === "approve" ? "确认开通订阅" : "拒绝开通申请"}
-      description={`${request.email} · ${request.templateName}`}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      {decision === "approve" &&
-        (template ? (
-          <>
-            <TemplateFacts value={template} />
-            <Notice>
-              按以上当前模板开通一份全新订阅，有效期从确认时开始。已有订阅继续独立使用。
-            </Notice>
-            {!template.enabled && (
-              <Notice tone="warning">该模板已停用，无法批准开通。</Notice>
-            )}
-          </>
-        ) : (
-          <Notice tone="warning">模板无法读取，请刷新后重试。</Notice>
-        ))}
-      <form
-        className="form-stack"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError("");
-          try {
-            await api(
-              `/subscription-requests/${request.id}/${decision}`,
-              "POST",
-              {
-                expectedRevision: request.revision,
-                templateRevision: template?.revision || 0,
-                note: note.trim(),
-              },
-            );
-            await onDone();
-            onClose();
-          } catch (e) {
-            setError((e as Error).message);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <Field
-          label={decision === "reject" ? "拒绝原因" : "处理备注（选填）"}
-          hint="处理结果与备注会展示给申请用户。"
-        >
-          <textarea
-            rows={3}
-            maxLength={1000}
-            required={decision === "reject"}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </Field>
-        <ErrorNotice message={error} />
-        <div className="modal-actions">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
-            取消
-          </Button>
-          <Button
-            type="submit"
-            busy={busy}
-            disabled={decision === "approve" && !template?.enabled}
-            icon={decision === "approve" ? Check : X}
-          >
-            {decision === "approve" ? "确认开通" : "确认拒绝"}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
+import type { SubscriptionRequest } from "../portal/types";
 
 export function SubscriptionRequests() {
-  const requests = usePolling<SubscriptionRequest[]>("/subscription-requests"),
-    templates = usePolling<SubscriptionTemplate[]>("/subscription-templates");
-  const [status, setStatus] = useState("pending"),
-    [search, setSearch] = useState("");
-  const [selection, setSelection] = useState<{
-    request: SubscriptionRequest;
-    template?: SubscriptionTemplate;
-    decision: "approve" | "reject";
-  } | null>(null);
-  const toast = useToast();
-  const items = (requests.data || []).filter(
-    (r) =>
-      (!status || r.status === status) &&
-      `${r.email} ${r.templateName}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
+  const requests = usePolling<SubscriptionRequest[]>("/subscription-requests");
+  const [search, setSearch] = useState("");
+  const items = (requests.data || []).filter((request) =>
+    `${request.email} ${request.templateName}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
   );
   return (
     <>
       <PageHeader
-        eyebrow="REQUESTS"
-        title="开通申请"
-        description="核对当前订阅规则，确认后为用户新增一份独立流量包。"
+        eyebrow="REQUEST ARCHIVE"
+        title="旧申请历史"
+        description="保留过去的人工开通记录，仅供查询。"
         actions={<RefreshButton refresh={requests.refresh} />}
       />
+      <Notice>
+        新的订阅通过商城支付后自动开通。旧申请不再受理，历史记录不提供审批操作。
+      </Notice>
       <ErrorNotice
-        message={requests.error || templates.error}
-        retry={() => {
-          void requests.refresh();
-          void templates.refresh();
-        }}
+        message={
+          requests.error ? `${requests.error}；保留最近一次有效数据。` : ""
+        }
+        retry={() => void requests.refresh()}
       />
-      {requests.error && requests.data && (
-        <Notice>当前显示最近一次有效申请列表。</Notice>
-      )}
       <Panel
-        title="用户申请"
-        subtitle={`待处理 ${(requests.data || []).filter((r) => r.status === "pending").length} 条`}
+        className="payment-panel"
+        title="历史开通申请"
+        action={
+          <Link to="/orders" className="text-link">
+            <ArrowLeft size={14} /> 订单管理
+          </Link>
+        }
       >
         <div className="subscription-toolbar">
           <input
-            aria-label="搜索申请"
+            aria-label="搜索历史申请"
             placeholder="搜索邮箱或订阅名称"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <select
-            aria-label="申请状态"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="pending">待审核</option>
-            <option value="approved">已开通</option>
-            <option value="rejected">未通过</option>
-            <option value="cancelled">已取消</option>
-            <option value="">全部状态</option>
-          </select>
         </div>
         {requests.loading ? (
           <Loading />
         ) : items.length ? (
           <div className="subscription-request-list">
-            {items.map((r) => (
-              <article key={r.id}>
+            {items.map((request) => (
+              <article key={request.id}>
                 <div className="subscription-request-title">
                   <div>
-                    <Link className="table-name" to={`/users/${r.userId}`}>
-                      {r.email}
+                    <Link
+                      className="table-name"
+                      to={`/users/${request.userId}`}
+                    >
+                      {request.email}
                     </Link>
-                    <h3>{r.templateName}</h3>
+                    <h3>{request.templateName}</h3>
                     <small>
-                      提交于 {date(r.requestedAt)} · #{r.id.slice(-8)}
+                      提交于 {date(request.requestedAt)} · #
+                      {request.id.slice(-8)}
                     </small>
                   </div>
-                  <RequestBadge status={r.status} />
+                  <RequestBadge status={request.status} />
                 </div>
-                {r.note && <p className="subscription-note">{r.note}</p>}
-                {r.decidedAt && (
-                  <small className="muted">处理于 {date(r.decidedAt)}</small>
+                {request.note && (
+                  <p className="subscription-note">{request.note}</p>
                 )}
-                <div className="subscription-actions">
-                  {r.status === "pending" ? (
-                    <>
-                      <Button
-                        variant="secondary"
-                        icon={X}
-                        disabled={
-                          !templates.data?.some((t) => t.id === r.templateId)
-                        }
-                        onClick={() =>
-                          setSelection({
-                            request: r,
-                            template: templates.data?.find(
-                              (t) => t.id === r.templateId,
-                            ),
-                            decision: "reject",
-                          })
-                        }
-                      >
-                        拒绝申请
-                      </Button>
-                      <Button
-                        icon={Check}
-                        disabled={
-                          !templates.data?.some((t) => t.id === r.templateId)
-                        }
-                        onClick={() =>
-                          setSelection({
-                            request: r,
-                            template: templates.data?.find(
-                              (t) => t.id === r.templateId,
-                            ),
-                            decision: "approve",
-                          })
-                        }
-                      >
-                        核对并开通
-                      </Button>
-                    </>
-                  ) : (
-                    r.subscriptionId && (
-                      <Link
-                        to={`/users/${r.userId}#subscription-${r.subscriptionId}`}
-                        className="text-link"
-                      >
-                        查看已开通订阅
-                      </Link>
-                    )
-                  )}
-                </div>
+                {request.decidedAt && (
+                  <small className="muted">
+                    处理于 {date(request.decidedAt)}
+                  </small>
+                )}
+                {request.subscriptionId && (
+                  <div className="subscription-actions">
+                    <Link
+                      to={`/users/${request.userId}#subscription-${request.subscriptionId}`}
+                      className="text-link"
+                    >
+                      查看已开通订阅
+                    </Link>
+                  </div>
+                )}
               </article>
             ))}
           </div>
         ) : (
           <Empty
             icon={ClipboardList}
-            title="暂无符合条件的申请"
-            description="用户在商城提交后，申请会自动出现在这里。"
+            title="暂无匹配的历史申请"
+            description="新的购买记录请前往订单管理查看。"
           />
         )}
       </Panel>
-      {selection && (
-        <DecideRequest
-          {...selection}
-          onClose={() => setSelection(null)}
-          onDone={async () => {
-            await requests.refresh();
-            toast(
-              selection.decision === "approve" ? "订阅已开通" : "申请已拒绝",
-            );
-          }}
-        />
-      )}
     </>
   );
 }

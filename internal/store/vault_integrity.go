@@ -21,6 +21,8 @@ UNION ALL SELECT password_secret FROM portal_credentials
 UNION ALL SELECT token FROM cloudflare_settings
 UNION ALL SELECT private_key FROM certificate_accounts
 UNION ALL SELECT bundle FROM certificate_versions
+UNION ALL SELECT secret FROM payment_config_versions
+UNION ALL SELECT pay_url FROM payment_orders
 UNION ALL SELECT value FROM metadata WHERE key='turnstile_secret'
 UNION ALL SELECT COALESCE(json_extract(value,'$.secret'),'') FROM metadata WHERE key='turnstile_settings'`)
 	if err != nil {

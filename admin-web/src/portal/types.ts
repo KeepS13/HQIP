@@ -11,6 +11,7 @@ export interface SubscriptionTemplate {
   enabled: boolean;
   listed: boolean;
   validityDays: number;
+  priceCents: number | null;
   nodeIds: string[];
   defaultNodeId: string;
   bandwidthMbps: number | null;
@@ -42,7 +43,7 @@ export interface SubscriptionRequest {
   email: string;
   templateId: string;
   templateName: string;
-  status: "pending" | "approved" | "rejected" | "cancelled";
+  status: "pending" | "approved" | "rejected" | "cancelled" | "closed";
   requestedAt: string;
   decidedAt?: string | null;
   note: string;
@@ -109,6 +110,7 @@ export const requestLabels: Record<string, string> = {
   approved: "已开通",
   rejected: "未通过",
   cancelled: "已取消",
+  closed: "已关闭",
 };
 
 export interface Connection {

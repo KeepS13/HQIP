@@ -12,11 +12,12 @@ func runBackground(ctx context.Context, db *store.Store, server *control.Server)
 	return db.WithMaintenanceLeadership(ctx, func(leader context.Context) error {
 		work, cancel := context.WithCancel(leader)
 		defer cancel()
-		done := make(chan error, 2)
+		done := make(chan error, 3)
 		go func() { done <- server.RunWorker(work) }()
 		go func() { done <- server.RunNotifications(work) }()
+		go func() { done <- server.RunPayments(work) }()
 		first := <-done
 		cancel()
-		return errors.Join(first, <-done)
+		return errors.Join(first, <-done, <-done)
 	})
 }

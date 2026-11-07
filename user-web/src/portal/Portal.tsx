@@ -20,6 +20,7 @@ import {
   LogOut,
   Menu,
   Monitor,
+  ReceiptText,
   ShieldCheck,
   UserRound,
   Wifi,
@@ -50,10 +51,11 @@ import type {
 import { AccountSettings } from "./AccountSettings";
 import {
   OwnedSubscriptions,
-  SubscriptionCatalog,
   UserOverview,
   UserSubscriptionDetail,
 } from "./SubscriptionPages";
+import { SubscriptionCatalog } from "./Commerce";
+import { UserOrderDetail, UserOrders } from "./Orders";
 import "./portal.css";
 
 export function PortalBrand() {
@@ -170,7 +172,7 @@ function Auth({
           <h2>{register ? "创建你的账户" : "欢迎回来"}</h2>
           <p>
             {register
-              ? "注册后选择订阅，管理员确认开通即可使用。"
+              ? "注册后选择订阅，付款成功后自动开通。"
               : "登录后，继续你的连接。"}
           </p>
           <div className="portal-auth-tabs">
@@ -499,7 +501,12 @@ function PortalHome({ onLogout }: { onLogout: () => void }) {
       />
       <Routes>
         <Route path="/" element={<UserOverview profile={data} />} />
-        <Route path="/catalog" element={<SubscriptionCatalog />} />
+        <Route
+          path="/catalog"
+          element={<SubscriptionCatalog userId={data.user.id} />}
+        />
+        <Route path="/orders" element={<UserOrders />} />
+        <Route path="/orders/:id" element={<UserOrderDetail />} />
         <Route path="/subscriptions" element={<OwnedSubscriptions />} />
         <Route path="/subscriptions/:id" element={<UserSubscriptionDetail />} />
         <Route path="/downloads" element={<Downloads />} />
@@ -613,11 +620,14 @@ export default function Portal() {
                   "/",
                   "/catalog",
                   "/subscriptions",
+                  "/orders",
                   "/downloads",
                   "/account",
                   "/authorize",
                 ].includes(target.pathname) ||
-                  /^\/subscriptions\/[A-Za-z0-9_-]+$/.test(target.pathname))
+                  /^\/(?:subscriptions|orders)\/[A-Za-z0-9_-]+$/.test(
+                    target.pathname,
+                  ))
               )
                 destination = target.pathname + target.search;
             } catch {
@@ -632,6 +642,7 @@ export default function Portal() {
     { to: "/", name: "账户概览", icon: <LayoutDashboard size={19} /> },
     { to: "/catalog", name: "订阅商城", icon: <Globe2 size={19} /> },
     { to: "/subscriptions", name: "我的订阅", icon: <Link2 size={19} /> },
+    { to: "/orders", name: "我的订单", icon: <ReceiptText size={19} /> },
     { to: "/downloads", name: "客户端下载", icon: <Download size={19} /> },
     { to: "/account", name: "账户设置", icon: <UserRound size={19} /> },
   ];
@@ -704,7 +715,9 @@ export default function Portal() {
                 {links.find((link) => link.to === location.pathname)?.name ||
                   (location.pathname.startsWith("/subscriptions/")
                     ? "订阅详情"
-                    : "客户端授权")}
+                    : location.pathname.startsWith("/orders/")
+                      ? "订单详情"
+                      : "客户端授权")}
               </strong>
             </div>
             <div className="topbar-right">

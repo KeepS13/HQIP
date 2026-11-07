@@ -13,6 +13,9 @@ import (
 )
 
 func validSubscriptionTemplate(p model.SubscriptionTemplate) error {
+	if p.PriceCents != nil && (*p.PriceCents < 100 || *p.PriceCents > 100000000) {
+		return errors.New("订阅价格须为 1 至 1000000 元，最多两位小数")
+	}
 	if strings.TrimSpace(p.Name) == "" || len(p.Name) > 100 || p.ValidityDays < 1 || p.ValidityDays > 36500 || p.MaxConnections < 1 || p.MaxConnections > 1000 || len(p.NodeIDs) > 1000 {
 		return errors.New("订阅名称、有效天数、节点或连接数无效")
 	}
@@ -228,6 +231,12 @@ func validRequestKey(key string) bool {
 	return len(key) >= 8 && len(key) <= 128 && !strings.ContainsAny(key, "\r\n\x00")
 }
 func grantSubscription(tx *sql.Tx, user, template, key string, expectedUser, expectedTemplate int64, now time.Time) (model.UserSubscription, error) {
+	return grantSubscriptionWithValidity(tx, user, template, key, expectedUser, expectedTemplate, now, 0)
+}
+
+// Paid orders keep the purchased duration while their live node set and limits
+// continue to follow the template, just like an administrator-assigned copy.
+func grantSubscriptionWithValidity(tx *sql.Tx, user, template, key string, expectedUser, expectedTemplate int64, now time.Time, validityDays int) (model.UserSubscription, error) {
 	var empty model.UserSubscription
 	var existing, oldTemplate string
 	err := tx.QueryRow("SELECT id,template_id FROM portal_subscriptions WHERE user_id=? AND grant_key=?", user, key).Scan(&existing, &oldTemplate)
@@ -266,7 +275,13 @@ func grantSubscription(tx *sql.Tx, user, template, key string, expectedUser, exp
 		return empty, ErrConflict
 	}
 	id := NewID()
-	expires := now.Add(time.Duration(p.ValidityDays) * 24 * time.Hour)
+	if validityDays == 0 {
+		validityDays = p.ValidityDays
+	}
+	if validityDays < 1 || validityDays > 36500 {
+		return empty, errors.New("订阅有效期无效")
+	}
+	expires := now.Add(time.Duration(validityDays) * 24 * time.Hour)
 	if _, err = tx.Exec("INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", id, user, template, now.Unix(), expires.Unix(), key); err != nil {
 		return empty, err
 	}

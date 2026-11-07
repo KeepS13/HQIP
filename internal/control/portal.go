@@ -19,9 +19,10 @@ import (
 )
 
 func (s *Server) registerPortalAdmin(m *http.ServeMux) {
+	s.registerPaymentAdmin(m)
 	for pattern, handler := range map[string]http.HandlerFunc{
 		"GET /api/v1/subscription-templates": s.subscriptionTemplates, "POST /api/v1/subscription-templates": s.saveSubscriptionTemplate, "PUT /api/v1/subscription-templates/{id}": s.saveSubscriptionTemplate, "POST /api/v1/subscription-templates/{id}/preview": s.previewSubscriptionTemplate,
-		"GET /api/v1/subscription-requests": s.adminSubscriptionRequests, "POST /api/v1/subscription-requests/{id}/approve": s.decideSubscriptionRequest, "POST /api/v1/subscription-requests/{id}/reject": s.decideSubscriptionRequest,
+		"GET /api/v1/subscription-requests": s.adminSubscriptionRequests, "POST /api/v1/subscription-requests/{id}/approve": stoppedApplication, "POST /api/v1/subscription-requests/{id}/reject": stoppedApplication,
 		"GET /api/v1/users/{id}/subscriptions": s.adminUserSubscriptions, "POST /api/v1/users/{id}/subscriptions": s.adminAssignSubscription, "DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}": s.adminRemoveSubscription,
 		"GET /api/v1/users": s.portalUsers, "GET /api/v1/users/{id}": s.portalAdminUser, "PATCH /api/v1/users/{id}": s.portalAdminEnabled, "POST /api/v1/users/{id}/password": s.portalAdminPassword,
 		"POST /api/v1/users/{id}/sessions/{sessionId}/revoke": s.portalAdminRevokeSession, "POST /api/v1/users/{id}/connections/{leaseId}/revoke": s.portalAdminRevokeConnection,
@@ -32,6 +33,7 @@ func (s *Server) registerPortalAdmin(m *http.ServeMux) {
 	}
 }
 func (s *Server) registerPortalPublic(m *http.ServeMux) {
+	s.registerPaymentPublic(m)
 	m.HandleFunc("GET /api/v1/user/config", s.portalConfig)
 	m.HandleFunc("POST /api/v1/user/register", s.portalRegister)
 	m.HandleFunc("POST /api/v1/user/login", s.portalLogin)
@@ -42,7 +44,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("GET /downloads/{sha256}/HQIP-Windows-x64.zip", s.portalDownload)
 	for pattern, handler := range map[string]portalHandler{
 		"GET /api/v1/user/profile": s.portalProfile, "POST /api/v1/user/logout": s.portalLogout, "POST /api/v1/user/password": s.portalPassword,
-		"GET /api/v1/user/catalog": s.userCatalog, "GET /api/v1/user/subscription-requests": s.userSubscriptionRequests, "POST /api/v1/user/subscription-requests": s.userSubscriptionRequests, "POST /api/v1/user/subscription-requests/{id}/cancel": s.cancelSubscriptionRequest,
+		"GET /api/v1/user/catalog": s.userCatalog, "GET /api/v1/user/subscription-requests": s.userSubscriptionRequests,
 		"GET /api/v1/user/subscriptions": s.userSubscriptions, "GET /api/v1/user/subscriptions/{id}": s.userSubscriptionDetail,
 		"POST /api/v1/user/subscriptions/{id}/import-link": s.portalSubscription, "POST /api/v1/user/subscriptions/{id}/import-link/rotate": s.portalSubscription, "POST /api/v1/user/subscriptions/{id}/import-link/revoke": s.portalSubscription,
 		"GET /api/v1/user/sessions": s.portalSessions, "POST /api/v1/user/sessions/{id}/revoke": s.portalRevokeSession,

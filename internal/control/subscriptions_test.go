@@ -1,7 +1,6 @@
 package control
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -50,24 +49,27 @@ func TestSubscriptionRequestApprovalAndUserIsolation(t *testing.T) {
 	pub := s.PublicHandler()
 	body := map[string]any{"templateId": p.ID, "templateRevision": p.Revision, "requestId": "repeatable-application-0001"}
 	w := portalRequest(pub, "POST", "/api/v1/user/subscription-requests", body, cookie, csrf, s.opts.UserOrigin)
-	if w.Code != 200 {
+	if w.Code != 410 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	var application model.SubscriptionRequest
-	if err = json.Unmarshal(w.Body.Bytes(), &application); err != nil {
+	application, err := s.Store.CreateSubscriptionRequest(u.ID, p.ID, "historical-request-0001", p.Revision)
+	if err != nil {
 		t.Fatal(err)
 	}
-	w = portalRequest(pub, "POST", "/api/v1/user/subscription-requests", body, cookie, csrf, s.opts.UserOrigin)
-	var duplicate model.SubscriptionRequest
-	_ = json.Unmarshal(w.Body.Bytes(), &duplicate)
-	if w.Code != 200 || duplicate.ID != application.ID {
-		t.Fatal("application retry duplicated", w.Body.String())
-	}
 	approval := map[string]any{"expectedRevision": application.Revision, "templateRevision": p.Revision, "note": "approved"}
+	w = request(h, "POST", "/api/v1/subscription-requests/"+application.ID+"/approve", approval, admin, adminCSRF)
+	if w.Code != 410 {
+		t.Fatal("retired approval route remained writable", w.Code)
+	}
+	current, err := s.Store.PortalUser(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment := map[string]any{"expectedRevision": current.Revision, "templateRevision": p.Revision, "templateId": p.ID, "requestId": "gift-after-payments-0001"}
 	for i := 0; i < 2; i++ {
-		w = request(h, "POST", "/api/v1/subscription-requests/"+application.ID+"/approve", approval, admin, adminCSRF)
+		w = request(h, "POST", "/api/v1/users/"+u.ID+"/subscriptions", assignment, admin, adminCSRF)
 		if w.Code != 200 {
-			t.Fatal("approval retry", w.Code, w.Body.String())
+			t.Fatal("manual assignment retry", w.Code, w.Body.String())
 		}
 	}
 	subs, err := s.Store.UserSubscriptions(u.ID)

@@ -76,9 +76,7 @@ func TestPostgresMigrationPreservesSecretsAndOpenLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Tables) != 56 {
-		t.Fatalf("unexpected table inventory: %d", len(r.Tables))
-	}
+	assertPaymentMigrationInventory(t, s, r)
 	pg, err := OpenPostgres(target, s.BaseURL, dsn)
 	if err != nil {
 		t.Fatal(err)

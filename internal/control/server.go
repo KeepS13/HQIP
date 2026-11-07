@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KeepS13/HQIP/internal/payment"
 	"github.com/KeepS13/HQIP/internal/provision"
 	"github.com/KeepS13/HQIP/internal/secure"
 	"github.com/KeepS13/HQIP/internal/store"
@@ -25,6 +26,7 @@ type LoginLimiter interface {
 	Allow(context.Context, string, int, time.Duration) (bool, error)
 }
 type Options struct {
+	PaymentClient                                   *payment.Client
 	LoginLimiter                                    LoginLimiter
 	TurnstileClient                                 *http.Client
 	PublicURL, AdminOrigin, UserOrigin, ArtifactDir string

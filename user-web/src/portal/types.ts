@@ -6,6 +6,7 @@ export interface PortalUser {
   revision: number;
 }
 export interface SubscriptionTemplate {
+  priceCents: number | null;
   id: string;
   name: string;
   enabled: boolean;

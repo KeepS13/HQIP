@@ -21,6 +21,8 @@ import {
   UsersRound,
   Package,
   BellRing,
+  CreditCard,
+  ReceiptText,
 } from "lucide-react";
 import { api, setCSRF } from "./api";
 import {
@@ -42,6 +44,8 @@ import { SubscriptionRequests } from "./pages/SubscriptionRequests";
 import { Servers, ServerPage } from "./pages/Servers";
 import { Domains } from "./pages/Domains";
 import { Notifications } from "./pages/Notifications";
+import { Payments } from "./pages/Payments";
+import { Orders, OrderDetail } from "./pages/Orders";
 import { HostResources } from "./HostResources";
 
 function Brand() {
@@ -351,7 +355,9 @@ export default function App() {
     "/domains": "域名与证书",
     "/users": "用户管理",
     "/subscriptions": "订阅管理",
-    "/subscription-requests": "开通申请",
+    "/subscription-requests": "旧申请历史",
+    "/orders": "订单管理",
+    "/payments": "支付设置",
     "/turnstile": "注册与安全验证",
     "/notifications": "预警中心",
     "/guide": "使用指南",
@@ -364,6 +370,8 @@ export default function App() {
         ? "服务器详情"
       : location.pathname.startsWith("/users/")
         ? "用户详情"
+        : location.pathname.startsWith("/orders/")
+          ? "订单详情"
         : "控制台");
   return (
     <ToastContext.Provider value={notify}>
@@ -404,7 +412,7 @@ export default function App() {
               <Package size={19} />
               <span>订阅管理</span>
             </NavLink>
-            <NavLink to="/subscription-requests"><Package size={19} /><span>开通申请</span></NavLink>
+            <NavLink to="/orders"><ReceiptText size={19} /><span>订单管理</span></NavLink>
             <NavLink to="/notifications">
               <BellRing size={19} />
               <span>预警中心</span>
@@ -412,6 +420,10 @@ export default function App() {
           </nav>
           <div className="nav-caption nav-caption-second">系统设置</div>
           <nav>
+            <NavLink to="/payments">
+              <CreditCard size={19} />
+              <span>支付设置</span>
+            </NavLink>
             <NavLink to="/turnstile">
               <ShieldCheck size={19} />
               <span>注册与安全验证</span>
@@ -503,6 +515,9 @@ export default function App() {
               <Route path="/users/:id" element={<UserPage />} />
               <Route path="/subscriptions" element={<SubscriptionTemplates />} />
               <Route path="/subscription-requests" element={<SubscriptionRequests />} />
+              <Route path="/orders" element={<Orders />} />
+              <Route path="/orders/:id" element={<OrderDetail />} />
+              <Route path="/payments" element={<Payments />} />
               <Route path="/turnstile" element={<TurnstileSettingsPage />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/devices/*" element={<Navigate to="/users" replace />} />

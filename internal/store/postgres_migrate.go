@@ -63,6 +63,9 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	if err = snapshot.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='schema_version'").Scan(&version); err != nil || version != "5" {
 		return report, errors.New("请先将 SQLite 快照升级到当前 schema 5")
 	}
+	if err = snapshot.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='payments_schema_version'").Scan(&version); err != nil || version != "1" {
+		return report, errors.New("请先将 SQLite 数据库升级到当前支付版本后重新制作快照")
+	}
 	var brokenReferences int
 	if err = snapshot.QueryRowContext(ctx, "SELECT count(*) FROM pragma_foreign_key_check").Scan(&brokenReferences); err != nil || brokenReferences != 0 {
 		return report, errors.New("SQLite 外键检查失败")
@@ -111,7 +114,7 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	}
 	// pgx extended protocol parses one statement at a time; split the static
 	// schema script before executing it in the migration transaction.
-	for _, statement := range strings.Split(pgstore.Schema, ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.Exec(ctx, statement); err != nil {
 				return report, err
@@ -119,6 +122,9 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 		}
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM metadata"); err != nil {
+		return report, err
+	}
+	if _, err = tx.Exec(ctx, "DELETE FROM payment_settings"); err != nil {
 		return report, err
 	}
 	catalog, err := snapshot.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid")

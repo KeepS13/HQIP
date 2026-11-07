@@ -49,8 +49,10 @@ func run(args []string) error {
 		return restore(args[1:])
 	case "storage-info":
 		return storageInfo(args[1:])
+	case "migrate-payments":
+		return migratePayments(args[1:])
 	default:
-		return errors.New("未知命令；可用命令：serve、init-admin、backup、restore、storage-info")
+		return errors.New("未知命令；可用命令：serve、init-admin、backup、restore、storage-info、migrate-payments")
 	}
 }
 func serve(args []string) error {

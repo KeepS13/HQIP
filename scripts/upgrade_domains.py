@@ -89,8 +89,12 @@ def require_billing_compatible(manifest):
  if postgres_enabled():
   if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
   if manifest.get('serverBillingVersion',0)<2:raise ValueError('PostgreSQL requires serverBillingVersion 2')
+  if manifest.get('paymentsVersion',0)<1 and postgres_info().get('paymentsRequired',False):raise ValueError('Payment orders require a payment-compatible release; live orders are preserved')
   return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
+  payment_table=db.execute("SELECT 1 FROM sqlite_master WHERE name='payment_orders'").fetchone()
+  if payment_table and manifest.get('paymentsVersion',0)<1:
+   if db.execute('SELECT 1 FROM payment_orders LIMIT 1').fetchone() or db.execute('SELECT 1 FROM payment_settings WHERE enabled<>0 LIMIT 1').fetchone():raise ValueError('Payment orders require a payment-compatible release; live orders are preserved')
   initialized=db.execute("SELECT 1 FROM sqlite_master WHERE name IN ('server_billing','node_hourly_coverage') LIMIT 1").fetchone()
   # The schema gate also covers an upgraded Agent before its first report. Old
   # controllers strictly reject new report fields even without configured cycles.

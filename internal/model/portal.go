@@ -3,6 +3,7 @@ package model
 import "time"
 
 type SubscriptionTemplate struct {
+	PriceCents     *int64   `json:"priceCents"`
 	Listed         bool     `json:"listed"`
 	ValidityDays   int      `json:"validityDays"`
 	ID             string   `json:"id"`

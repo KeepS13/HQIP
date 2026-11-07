@@ -27,7 +27,7 @@ class PostgresReleaseTests(unittest.TestCase):
             with patch.object(deploy.control,'DATA',data), patch.object(deploy.sqlite3,'connect') as sqlite:
                 with self.assertRaisesRegex(ValueError,'PostgreSQL-compatible'):
                     deploy.require_billing_compatible({'schemaVersion':5,'serverBillingVersion':2})
-                deploy.require_billing_compatible({'postgresSchemaVersion':1,'serverBillingVersion':2})
+                deploy.require_billing_compatible({'postgresSchemaVersion':1,'serverBillingVersion':2,'paymentsVersion':1})
                 deploy.disable_feishu()
                 sqlite.assert_not_called()
 

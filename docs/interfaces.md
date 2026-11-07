@@ -4,7 +4,7 @@
 
 管理会话和用户会话分别使用 host-only Secure、HttpOnly Cookie；各自 Origin 精确限制在对应网页来源。用户登录不能访问管理员 API，客户端 Bearer token 和节点 Agent token 也不能代替浏览器会话。订阅 URL、密码、SSH 信息和授权令牌不得进入访问日志。
 
-## 用户订阅与申请
+## 用户订阅与购买
 
 详见 [用户账户、多份订阅与节点准入](portal.md)。主要接口如下：
 
@@ -13,20 +13,25 @@
 | `GET/POST /api/v1/subscription-templates` | 管理员列出或创建模板 |
 | `PUT /api/v1/subscription-templates/{id}` | 管理员更新模板并提交 `expectedRevision` |
 | `POST /api/v1/subscription-templates/{id}/preview` | 预览现有实例和连接影响 |
-| `GET /api/v1/subscription-requests` | 管理员查看待处理及历史申请 |
-| `POST /api/v1/subscription-requests/{id}/approve` | 开通独立实例；请求带申请和模板版本 |
-| `POST /api/v1/subscription-requests/{id}/reject` | 拒绝申请 |
+| `GET /api/v1/subscription-requests` | 管理员只读查看历史申请；旧审批写接口返回 410 |
 | `GET/POST /api/v1/users/{id}/subscriptions` | 管理员查看或分配实例 |
 | `DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}` | 移除单个实例 |
-| `GET /api/v1/user/catalog` | 用户查看可申请商品 |
-| `GET/POST /api/v1/user/subscription-requests` | 用户查看或提交申请 |
+| `GET /api/v1/user/catalog` | 用户查看可购买商品，`priceCents` 为人民币整数分，空值不可购买 |
+| `GET /api/v1/user/subscription-requests` | 用户只读查看本人历史申请；提交和取消返回 410 |
+| `GET/PUT /api/v1/settings/payment` | 管理员读取脱敏支付配置或带版本保存 |
+| `GET /api/v1/user/payment-info` | 用户读取结账启用状态，不返回商户或密钥 |
+| `GET/POST /api/v1/user/orders` | 用户列出本人订单，或以 `requestId,templateId,templateRevision` 创建 |
+| `GET /api/v1/user/orders/{id}`、`POST …/{id}/close` | 本人订单详情／关闭本地付款入口 |
+| `GET /api/v1/orders[/{id}]` | 管理员查询订单及活动记录 |
+| `POST /api/v1/orders/{id}/retry-fulfillment`、`POST …/{id}/query` | 带 `expectedRevision` 重试已核验收款的开通或按权限查单 |
+| `GET/POST /api/v1/payments/fm/notify` | 公共监听，独立验签，不使用登录 Cookie；持久化后纯文本 `success` |
 | `GET /api/v1/user/subscriptions` | 用户查看本人多份实例 |
 | `GET /api/v1/user/subscriptions/{id}` | 查看单份详情与允许节点 |
 | `POST /api/v1/user/subscriptions/{id}/import-link[/rotate\|/revoke]` | 管理该实例的第三方导入入口 |
 | `/api/v3/client/*` | Windows 客户端授权、同步、订阅选择、状态和连接收尾 |
 | `GET /usub/{token}` | 无浏览器会话的 Mihomo/Clash 配置 |
 
-管理和用户写请求均执行各自会话授权、CSRF、修订版本冲突检查和审计。用户实例查询始终从认证会话解析 userId；不得使用请求体中的用户 ID 决定访问权限。创建请求支持幂等 ID：同一个请求 ID 的重试只返回原请求，不重复开通；新的 ID 表示新的申请。
+管理和用户写请求均执行各自会话授权、CSRF、修订版本冲突检查和审计。用户实例查询始终从认证会话解析 userId；不得使用请求体中的用户 ID 决定访问权限。同一个下单请求 ID 的重试返回原订单，不重复向支付平台下单；用户明确再次购买使用新 ID。收款状态与开通状态独立，按唯一 `payment:{orderId}` 原子发放，浏览器回跳参数不构成付款证明。完整配置、异常处理与迁移说明见 [支付 FM](payments.md)。
 
 ## 认证与限制
 

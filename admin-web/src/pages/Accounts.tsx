@@ -144,7 +144,7 @@ export function Users() {
               : "—"
           }
           icon={ShieldCheck}
-          hint="可处理申请或主动分配"
+          hint="用户可购买，管理员可赠送"
           color="amber"
         />
       </div>
@@ -226,7 +226,7 @@ export function Users() {
           <Empty
             icon={UsersRound}
             title={search ? "没有匹配的账户" : "暂无用户"}
-            description="用户注册后可在商城申请订阅，或由管理员主动分配。"
+            description="用户注册后可在商城购买订阅，或由管理员直接赠送。"
           />
         )}
       </Panel>
@@ -272,7 +272,7 @@ function GrantSubscription({
   }
   return (
     <Modal
-      title="为用户添加订阅"
+      title="为用户赠送订阅"
       description={user.user.email}
       onClose={() => {
         if (!busy) onClose();
@@ -298,7 +298,7 @@ function GrantSubscription({
         </Field>
         {selected && <TemplateFacts value={selected} />}
         <Notice>
-          新增一份独立订阅，从现在开始计时。用户已有的同名订阅继续有效，各份额度互不合并。
+          本次为管理员赠送，不收取费用、不生成付款订单。新增一份独立订阅，从现在开始计时，已有订阅继续有效。
         </Notice>
         <ErrorNotice message={error} />
         <div className="modal-actions">
@@ -555,7 +555,7 @@ export function UserPage() {
           <Empty
             icon={Package}
             title={subscriptions.length ? "没有有效订阅" : "尚未开通订阅"}
-            description="可以主动分配已设置的订阅，或在开通申请中批准用户申请。"
+            description="用户付款后自动开通；管理员也可直接赠送已设置的订阅。"
             action={
               <Button icon={Plus} onClick={() => setGrant(true)}>
                 添加订阅

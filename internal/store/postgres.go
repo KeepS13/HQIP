@@ -42,7 +42,7 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	// PostgreSQL extended protocol accepts one statement per Parse. Execute
 	// schema statements individually instead of sending the whole migration
 	// script as one multi-command query.
-	for _, statement := range strings.Split(pgstore.Schema, ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.ExecContext(ctx, statement); err != nil {
 				return err
@@ -73,6 +73,10 @@ func OpenPostgres(dataDir, baseURL, dsn string) (*Store, error) {
 	if err = db.QueryRow("SELECT value FROM metadata WHERE key='postgres_schema_version'").Scan(&version); err != nil || version != "1" {
 		db.Close()
 		return nil, errors.New("PostgreSQL schema 未初始化或版本不兼容")
+	}
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='payments_schema_version'").Scan(&version); err != nil || version != "1" {
+		db.Close()
+		return nil, errors.New("支付 schema 未升级，请使用迁移账号执行 hqip migrate-payments")
 	}
 	key, err := os.ReadFile(filepath.Join(dataDir, "master.key"))
 	if err != nil {

@@ -1,0 +1,324 @@
+.commerce-banner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid rgba(155, 149, 255, 0.25);
+  border-radius: 16px;
+  background: linear-gradient(
+    110deg,
+    rgba(155, 149, 255, 0.09),
+    rgba(155, 149, 255, 0.025)
+  );
+}
+.commerce-banner > div {
+  flex: 1;
+  min-width: 0;
+}
+.commerce-banner strong {
+  font-size: 16px;
+}
+.commerce-banner p,
+.commerce-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.commerce-banner p {
+  margin: 8px 0 0;
+}
+.commerce-product {
+  display: flex;
+  flex-direction: column;
+}
+.commerce-product > .button {
+  margin-top: auto;
+}
+.commerce-price {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 16px;
+}
+.commerce-price strong {
+  font-size: 30px;
+  letter-spacing: -0.7px;
+  color: var(--purple);
+}
+.commerce-price span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.commerce-checkout-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(155, 149, 255, 0.05);
+}
+.commerce-checkout-total span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.commerce-checkout-total strong {
+  color: var(--purple);
+  font-size: 26px;
+}
+.commerce-sync {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 18px;
+}
+.commerce-sync.stale {
+  color: var(--amber);
+}
+.commerce-orders {
+  display: grid;
+  gap: 14px;
+}
+.commerce-order-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.commerce-order-card:hover,
+.commerce-order-card:focus-visible {
+  border-color: var(--purple);
+  background: rgba(155, 149, 255, 0.055);
+}
+.commerce-order-card:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 3px;
+}
+.commerce-order-title {
+  flex: 1;
+  min-width: 0;
+}
+.commerce-order-title h2 {
+  margin: 0 0 7px;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.commerce-order-title small,
+.commerce-order-title > span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.commerce-order-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 11px;
+}
+.commerce-order-end > strong {
+  font-size: 19px;
+}
+.commerce-order-arrow {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.commerce-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.commerce-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+.commerce-payment-hero {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 30px;
+  margin-bottom: 25px;
+  border: 1px solid rgba(155, 149, 255, 0.3);
+  border-radius: 17px;
+  background: linear-gradient(
+    115deg,
+    rgba(155, 149, 255, 0.1),
+    rgba(155, 149, 255, 0.025)
+  );
+}
+.commerce-payment-symbol {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 70px;
+  height: 70px;
+  border-radius: 20px;
+  color: var(--purple);
+  background: rgba(155, 149, 255, 0.1);
+}
+.commerce-payment-hero.complete .commerce-payment-symbol {
+  color: var(--green);
+}
+.commerce-payment-hero > div {
+  flex: 1;
+  min-width: 0;
+}
+.commerce-payment-hero h2 {
+  margin: 13px 0 10px;
+  font-size: 23px;
+}
+.commerce-payment-hero p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.commerce-order-amount {
+  font-size: 31px;
+  white-space: nowrap;
+  letter-spacing: -0.8px;
+}
+.commerce-detail-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 22px;
+}
+.commerce-detail-grid .panel {
+  min-width: 0;
+}
+.commerce-detail-facts {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 0 24px 26px;
+}
+.commerce-detail-facts > div {
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.commerce-detail-facts dt {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.commerce-detail-facts dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.commerce-payment-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 24px 26px;
+}
+.commerce-payment-actions .notice {
+  margin: 0;
+}
+.commerce-payment-actions .commerce-hint {
+  margin: 0;
+}
+.commerce-countdown {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--purple);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+@media (max-width: 900px) {
+  .commerce-detail-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .commerce-payment-hero {
+    flex-wrap: wrap;
+  }
+  .commerce-order-amount {
+    margin-left: 92px;
+  }
+}
+@media (max-width: 560px) {
+  .commerce-banner {
+    flex-wrap: wrap;
+    padding: 20px;
+  }
+  .commerce-banner > .button {
+    width: 100%;
+  }
+  .commerce-order-card {
+    padding: 18px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .commerce-order-card > .user-sub-icon {
+    width: 38px;
+    height: 38px;
+  }
+  .commerce-order-title {
+    flex-basis: calc(100% - 52px);
+  }
+  .commerce-order-end {
+    flex: 1;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .commerce-order-end .badge {
+    max-width: 70%;
+    white-space: normal;
+  }
+  .commerce-order-arrow {
+    display: none;
+  }
+  .commerce-pagination {
+    flex-wrap: wrap;
+  }
+  .commerce-pagination > div {
+    margin-left: auto;
+  }
+  .commerce-payment-hero {
+    padding: 22px;
+    gap: 16px;
+  }
+  .commerce-payment-symbol {
+    width: 50px;
+    height: 50px;
+    border-radius: 15px;
+  }
+  .commerce-payment-hero > div {
+    flex-basis: calc(100% - 66px);
+  }
+  .commerce-payment-hero h2 {
+    font-size: 19px;
+  }
+  .commerce-order-amount {
+    margin-left: 66px;
+    font-size: 28px;
+  }
+  .commerce-detail-facts,
+  .commerce-payment-actions {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}

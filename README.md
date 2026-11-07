@@ -6,13 +6,13 @@ Go 控制服务、独立 React 用户端和管理端、基于 sing-box 的 Windo
 - 管理入口：https://cms-hqip.5202345.xyz
 - API：https://api-hqip.5202345.xyz
 
-用户自行注册并申请订阅，管理员审核开通，也可直接分配。一个用户可同时持有多份独立流量包；每份分别计量、到期、限速和占用 VPN 连接名额。支持多 IP 节点、Cloudflare DNS／证书管理、Windows 流量仪表盘和基础设施预警。
+用户自行注册并购买订阅，支付 FM 收款核验后自动开通，管理员也可直接分配。一个用户可同时持有多份独立流量包；每份分别计量、到期、限速和占用 VPN 连接名额。支持多 IP 节点、Cloudflare DNS／证书管理、Windows 流量仪表盘和基础设施预警。
 
 `admin-web/` 与 `user-web/` 各自安装、构建、发布，Go 不再内嵌网页。`desktop/` 为 Windows 客户端。运行数据库、密码、主密钥、订阅令牌和索引缓存不提交仓库。
 
 ## 开发与部署
 
-参阅 [订阅与准入](docs/portal.md)、[三域名部署与恢复](docs/domains.md)、[客户端使用说明](docs/client.md)、[站内预警中心](docs/notifications.md) 和 [接口说明](docs/interfaces.md)。
+参阅 [订阅与准入](docs/portal.md)、[支付配置与订单](docs/payments.md)、[三域名部署与恢复](docs/domains.md)、[客户端使用说明](docs/client.md)、[站内预警中心](docs/notifications.md) 和 [接口说明](docs/interfaces.md)。
 
 ```powershell
 npm --prefix admin-web ci

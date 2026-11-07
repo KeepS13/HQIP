@@ -27,12 +27,17 @@ import {
 } from "../components";
 import type { Node } from "../types";
 import type { SubscriptionImpact, SubscriptionTemplate } from "../portal/types";
+import { parsePriceInput, priceText } from "../payments";
 import "./accounts.css";
 import "./subscriptions.css";
 
 export function TemplateFacts({ value }: { value: SubscriptionTemplate }) {
   return (
     <dl className="subscription-facts">
+      <div>
+        <dt>商城售价</dt>
+        <dd>{priceText(value.priceCents)}</dd>
+      </div>
       <div>
         <dt>一次性总流量</dt>
         <dd>
@@ -81,6 +86,9 @@ function TemplateEditor({
   const [listed, setListed] = useState(template?.listed ?? false);
   const [days, setDays] = useState(
     template ? String(template.validityDays) : "30",
+  );
+  const [price, setPrice] = useState(
+    template?.priceCents == null ? "" : (template.priceCents / 100).toFixed(2),
   );
   const [bandwidth, setBandwidth] = useState(
     template?.bandwidthMbps?.toString() || "",
@@ -133,6 +141,7 @@ function TemplateEditor({
     setBusy(true);
     setError("");
     try {
+      const payload = { ...body, priceCents: parsePriceInput(price) };
       if (!Number.isInteger(body.validityDays) || body.validityDays < 1)
         throw new Error("有效期至少为 1 天，请填写整数");
       if (invalidSelected.length)
@@ -146,7 +155,7 @@ function TemplateEditor({
           await api<SubscriptionImpact>(
             `/subscription-templates/${template.id}/preview`,
             "POST",
-            body,
+            payload,
           ),
         );
         return;
@@ -156,7 +165,7 @@ function TemplateEditor({
           ? `/subscription-templates/${template.id}`
           : "/subscription-templates",
         template ? "PUT" : "POST",
-        body,
+        payload,
       );
       await onDone();
       onClose();
@@ -201,6 +210,18 @@ function TemplateEditor({
               step={1}
               value={days}
               onChange={(e) => setDays(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="售价（人民币元）"
+            hint="¥1.00 起，最多两位小数。留空不开放购买，仍可由管理员赠送。"
+          >
+            <input
+              inputMode="decimal"
+              value={price}
+              maxLength={12}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="未设置价格"
             />
           </Field>
           <Field
@@ -425,8 +446,10 @@ function TemplateEditor({
             onChange={(e) => setListed(e.target.checked)}
           />
           <span>
-            <strong>展示给用户申请</strong>
-            <small>显示在订阅商城；隐藏后管理员仍可主动分配。</small>
+            <strong>展示在订阅商城</strong>
+            <small>
+              设置价格并启用支付后可购买；隐藏后管理员仍可主动分配。
+            </small>
           </span>
         </label>
         <label className="account-checkbox">
@@ -582,7 +605,7 @@ export function SubscriptionTemplates() {
           <option value="disabled">已停用</option>
         </select>
         <Link to="/subscription-requests" className="button button-secondary">
-          开通申请 <ArrowRight size={15} />
+          旧申请历史 <ArrowRight size={15} />
         </Link>
       </div>
       {list.loading ? (
@@ -602,7 +625,11 @@ export function SubscriptionTemplates() {
               <h2>{t.name}</h2>
               <p className="subscription-visibility">
                 {t.listed ? <Eye size={14} /> : <EyeOff size={14} />}
-                {t.listed ? "用户可申请" : "仅后台分配"}
+                {t.listed
+                  ? t.priceCents == null
+                    ? "商城展示 · 未设售价"
+                    : "商城展示"
+                  : "仅后台分配"}
               </p>
               <TemplateFacts value={t} />
               <Button
@@ -625,7 +652,7 @@ export function SubscriptionTemplates() {
                 ? "没有匹配的订阅"
                 : "创建第一份订阅模板"
             }
-            description="设置流量、有效期和节点后，管理员即可分配，或开放用户申请。"
+            description="设置流量、有效期、节点和售价后，用户即可购买，管理员也可直接赠送。"
             action={
               <Button icon={Plus} onClick={() => openEditor("new")}>
                 新建订阅
