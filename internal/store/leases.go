@@ -145,7 +145,7 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 			budget = available
 		}
 	}
-	if budget <= 0 {
+	if budget < model.MinimumSubscriptionLeaseBytes {
 		return empty, ErrEntitlement
 	}
 	l := model.ConnectionLease{ID: NewID(), UserID: user, AccountingID: "subscription_" + subscription, SubscriptionID: subscription, SessionID: scope, NodeID: node, CreatedAt: now.UTC(), ExpiresAt: leaseExpiry(now, e), BandwidthBytesPerSecond: rate, BudgetBytes: budget, Revision: e.Revision, State: "active"}

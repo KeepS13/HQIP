@@ -42,6 +42,8 @@ type Controller struct {
 	loginGeneration     uint64
 	cancelSelection     context.CancelFunc
 	restoreSelection    bool
+	nodeTest            *nodeTestRun
+	nodeProbe           func(context.Context, Node) (int64, error)
 }
 
 func New(dir string, platform Platform, engine Engine) (*Controller, error) {
@@ -99,10 +101,12 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 func (c *Controller) View() View {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.invalidateNodeTestLocked()
 	v := c.view
 	v.Nodes = append([]NodeView{}, v.Nodes...)
 	v.Subscriptions = append([]Subscription{}, v.Subscriptions...)
 	v.Metrics.History = append([]MetricPoint{}, v.Metrics.History...)
+	v.NodeTests.Results = append([]NodeDelayResult{}, v.NodeTests.Results...)
 	return v
 }
 func (c *Controller) persistLocked() error {

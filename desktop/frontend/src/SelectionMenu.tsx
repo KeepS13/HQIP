@@ -1,7 +1,7 @@
 import {useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode} from 'react';
 import {Check, ChevronDown} from 'lucide-react';
 
-type SelectionOption = {value:string;label:string;description?:string;disabled?:boolean};
+type SelectionOption = {value:string;label:string;description?:string;disabled?:boolean;status?:string;statusKind?:string};
 
 export function SelectionMenu({label,value,placeholder,icon,options,disabled=false,onChange}:{
   label:string;value:string;placeholder:string;icon:ReactNode;options:SelectionOption[];disabled?:boolean;onChange:(value:string)=>void;
@@ -10,7 +10,7 @@ export function SelectionMenu({label,value,placeholder,icon,options,disabled=fal
   const [open,setOpen]=useState(false),[active,setActive]=useState('');
   const selected=options.find(option=>option.value===value);
   const activeIndex=options.findIndex(option=>option.value===active&&!option.disabled);
-  const optionSignature=JSON.stringify(options);
+  const optionSignature=JSON.stringify(options.map(({value,label,description,disabled})=>({value,label,description,disabled})));
   useEffect(()=>setOpen(false),[disabled,value,optionSignature]);
   useEffect(()=>{
     if(!open)return;
@@ -54,10 +54,10 @@ export function SelectionMenu({label,value,placeholder,icon,options,disabled=fal
   }
   return <div className="selection-menu" ref={container} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setOpen(false)}}>
     <button ref={trigger} type="button" role="combobox" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={id} aria-activedescendant={open&&activeIndex>=0?`${id}-${activeIndex}`:undefined} disabled={disabled} className={'node-select selection-trigger'+(open?' is-open':'')} onClick={()=>open?setOpen(false):expand()} onKeyDown={keyDown} title={selected?[selected.label,selected.description].filter(Boolean).join(' · '):placeholder}>
-      <span className="node-symbol" aria-hidden="true">{icon}</span><span className="selection-value"><strong>{selected?.label||placeholder}</strong>{selected?.description&&<small>{selected.description}</small>}</span><ChevronDown size={16} aria-hidden="true"/>
+      <span className="node-symbol" aria-hidden="true">{icon}</span><span className="selection-value"><strong>{selected?.label||placeholder}</strong>{selected?.description&&<small>{selected.description}</small>}</span>{selected?.status&&<span className={'selection-status '+selected.statusKind}>{selected.status}</span>}<ChevronDown size={16} aria-hidden="true"/>
     </button>
     {open&&<div ref={list} id={id} role="listbox" aria-label={label} className="selection-options">
-      {options.length===0?<p className="selection-empty">暂无可选项</p>:options.map((option,index)=><div key={option.value} id={`${id}-${index}`} role="option" aria-selected={option.value===value} aria-disabled={!!option.disabled} data-active={option.value===active&&!option.disabled} className="selection-option" title={[option.label,option.description].filter(Boolean).join(' · ')} onMouseDown={event=>event.preventDefault()} onPointerMove={()=>{if(!option.disabled)setActive(option.value)}} onClick={()=>choose(option)}><span className="selection-option-copy"><strong>{option.label}</strong>{option.description&&<small>{option.description}</small>}</span>{option.value===value&&<Check size={16} aria-hidden="true"/>}</div>)}
+      {options.length===0?<p className="selection-empty">暂无可选项</p>:options.map((option,index)=><div key={option.value} id={`${id}-${index}`} role="option" aria-selected={option.value===value} aria-disabled={!!option.disabled} data-active={option.value===active&&!option.disabled} className="selection-option" title={[option.label,option.description,option.status].filter(Boolean).join(' · ')} onMouseDown={event=>event.preventDefault()} onPointerMove={()=>{if(!option.disabled)setActive(option.value)}} onClick={()=>choose(option)}><span className="selection-option-copy"><strong>{option.label}</strong>{option.description&&<small>{option.description}</small>}</span>{option.status&&<span className={'selection-status '+option.statusKind}>{option.status}</span>}{option.value===value&&<Check size={16} aria-hidden="true"/>}</div>)}
     </div>}
   </div>;
 }

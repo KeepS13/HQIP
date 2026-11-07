@@ -175,16 +175,17 @@ export function Nodes() {
               <div className="node-quota-title">
                 <span>{billingUsageLabel(n)}</span>
                 <span>
-                  {!billingFor(n).cycleComplete ? "待核实" : n.monthlyQuotaBytes
+                  {n.monthlyQuotaBytes
                     ? `${Math.round((billingTotal(n) / n.monthlyQuotaBytes) * 100)}%`
                     : "不限量"}
                 </span>
               </div>
-              {billingFor(n).cycleComplete ? <Meter
+              <Meter
                 value={billingTotal(n)}
                 max={n.monthlyQuotaBytes}
                 label
-              /> : <p className="billing-incomplete">已知 {bytes(billingTotal(n))} · 周期用量数据不完整</p>}
+              />
+              {!billingFor(n).cycleComplete && <p className="billing-help">数据不完整，按已知用量计算</p>}
               <BillingSummary resource={n} compact followsServer />
               <div className="node-card-bottom">
                 {fresh(n) ? (
@@ -514,13 +515,11 @@ export function NodePage() {
       <div className="stats-grid">
         <StatCard
           label={billingUsageLabel(node)}
-          value={billing.cycleComplete ? bytes(cycleTotal).split(" ")[0] : "待核实"}
-          unit={billing.cycleComplete ? bytes(cycleTotal).split(" ")[1] : ""}
+          value={bytes(cycleTotal).split(" ")[0]}
+          unit={bytes(cycleTotal).split(" ")[1]}
           icon={Activity}
           hint={
-            !billing.cycleComplete ? `已知 ${bytes(cycleTotal)} · 数据不完整` : node.monthlyQuotaBytes
-              ? `额度 ${bytes(node.monthlyQuotaBytes)} · 仅提醒`
-              : "额度无限制"
+            (node.monthlyQuotaBytes ? `额度 ${bytes(node.monthlyQuotaBytes)} · 仅提醒` : "额度无限制") + (!billing.cycleComplete ? " · 按已知用量计算" : "")
           }
         />
         <StatCard
@@ -638,7 +637,8 @@ export function NodePage() {
             </span>
           </div>
           <div className="usage-meter">
-            {billing.cycleComplete ? <Meter value={cycleTotal} max={node.monthlyQuotaBytes} /> : <p className="billing-incomplete">周期用量数据不完整，暂不计算额度占用率。</p>}
+            <Meter value={cycleTotal} max={node.monthlyQuotaBytes} />
+            {!billing.cycleComplete && <p className="billing-help">数据不完整，按已知用量计算</p>}
           </div>
           <div className="usage-breakdown">
             <div>

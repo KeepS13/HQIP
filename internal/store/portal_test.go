@@ -173,13 +173,13 @@ func TestPortalDynamicRateWaitsForDownwardACK(t *testing.T) {
 	}
 }
 func TestPortalBudgetReplayExpiryAndLateSettlement(t *testing.T) {
-	q := int64(1024)
+	q := model.MinimumSubscriptionLeaseBytes + 1024
 	s, now, u, _, n, password := portalFixture(t, 1, &q)
 	l := acquire(t, s, n, password, "a")
 	l = renew(t, s, l, 100, 200, false)
 	l = renew(t, s, l, 100, 200, false)
 	e, _ := s.UserSubscription(u.ID, u.Subscriptions[0].ID)
-	if e.UsedBytes != 300 || e.ReservedBytes != 724 {
+	if e.UsedBytes != 300 || e.ReservedBytes != q-300 {
 		t.Fatalf("duplicate usage charged %+v", e)
 	}
 	*now = now.Add(121 * time.Second)
@@ -196,10 +196,10 @@ func TestPortalBudgetReplayExpiryAndLateSettlement(t *testing.T) {
 		t.Fatalf("late settlement not exact %+v", e)
 	}
 	next := acquire(t, s, n, password, "b")
-	if next.BudgetBytes != 624 {
+	if next.BudgetBytes != q-400 {
 		t.Fatal("wrong remaining quota")
 	}
-	if _, err := s.RenewLease(n.ID, next.ID, model.LeaseUsage{UploadBytes: 625, Closed: true}); !errors.Is(err, ErrConflict) {
+	if _, err := s.RenewLease(n.ID, next.ID, model.LeaseUsage{UploadBytes: q - 399, Closed: true}); !errors.Is(err, ErrConflict) {
 		t.Fatal("overspend accepted")
 	}
 	if _, err := s.RenewLease("another-node", next.ID, model.LeaseUsage{}); !errors.Is(err, ErrNotFound) {

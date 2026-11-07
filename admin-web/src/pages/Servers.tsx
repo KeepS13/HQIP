@@ -101,8 +101,8 @@ function ServerRates({ server, stale = false }: { server: ManagedServer; stale?:
 
 function ServerQuota({ server }: { server: ManagedServer }) {
   const billing = billingFor(server), total = billingTotal(server);
-  const percent = billing.cycleComplete && server.monthlyQuotaBytes ? total / server.monthlyQuotaBytes * 100 : null;
-  return <div className="server-quota"><div className="server-section-label"><span>{billingUsageLabel(server)}</span><strong>{!billing.cycleComplete ? "待核实" : percent === null ? "不限量" : `${percent.toFixed(1)}%`}</strong></div>{billing.cycleComplete ? <Meter value={total} max={server.monthlyQuotaBytes} label /> : <p className="billing-incomplete">已知用量 {bytes(total)}，数据不完整，暂不计算占用率。</p>}<small>上传 {bytes(billing.cycleUpload)} · 下载 {bytes(billing.cycleDownload)} · 不含探测</small></div>;
+  const percent = server.monthlyQuotaBytes ? total / server.monthlyQuotaBytes * 100 : null;
+  return <div className="server-quota"><div className="server-section-label"><span>{billingUsageLabel(server)}</span><strong>{percent === null ? "不限量" : `${percent.toFixed(1)}%`}</strong></div><Meter value={total} max={server.monthlyQuotaBytes} label /><small>上传 {bytes(billing.cycleUpload)} · 下载 {bytes(billing.cycleDownload)} · 不含探测{!billing.cycleComplete ? " · 数据不完整，按已知用量计算" : ""}</small></div>;
 }
 
 export function Servers() {
@@ -180,7 +180,7 @@ export function ServerPage() {
         <td><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small mono">{node.publicIp}</div><div className="table-small mono">{node.domain}</div></td>
         <td><NodeBadge node={node} /></td>
         <td>{!error && hasNodeReport(node) ? <div className="server-node-rates"><span>↑ {(node.metrics.uploadRate * 8 / 1e6).toFixed(2)} Mbps</span><span>↓ {(node.metrics.downloadRate * 8 / 1e6).toFixed(2)} Mbps</span></div> : <span className="muted">未知</span>}</td>
-        <td className="quota-cell"><div className="table-small">带宽 {node.bandwidthMbps == null ? "不限量" : `${node.bandwidthMbps} Mbps`} · {billingFor(node).status === "unconfigured" ? "自然月" : "本周期"}</div>{billingFor(node).cycleComplete ? <Meter value={billingTotal(node)} max={node.monthlyQuotaBytes} label /> : <span className="billing-incomplete">已知 {bytes(billingTotal(node))} · 数据不完整</span>}</td>
+        <td className="quota-cell"><div className="table-small">带宽 {node.bandwidthMbps == null ? "不限量" : `${node.bandwidthMbps} Mbps`} · {billingFor(node).status === "unconfigured" ? "自然月" : "本周期"}</div><Meter value={billingTotal(node)} max={node.monthlyQuotaBytes} label />{!billingFor(node).cycleComplete && <span className="table-small">数据不完整，按已知用量计算</span>}</td>
         <td>{bytes(node.monthUpload)} / {bytes(node.monthDownload)}</td><td>{bytes(node.totalUpload + node.totalDownload)}</td>
       </tr>)}</tbody></table></div> : <Empty icon={Server} title="暂无活动节点" description="部署节点后，这里会展示每个 IP 节点对服务器用量的贡献。" />}
     </Panel>

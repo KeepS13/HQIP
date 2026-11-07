@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, BellRing, CheckCheck, Clock3, MessageSquare, RefreshCw, Search, ShieldCheck, TriangleAlert } from "lucide-react";
 import { api, usePolling } from "../api";
-import { Badge, Button, Empty, ErrorNotice, Loading, Modal, Notice, PageHeader, Panel, RefreshButton, StatCard, date, useToast } from "../components";
+import { Badge, Button, Empty, ErrorNotice, Loading, Modal, Notice, Panel, RefreshButton, StatCard, date, useToast } from "../components";
 import "./notifications.css";
 
 type Condition = { category:string;kind:string;title:string;message:string;detailPath:string;level:string;resourceId:string;stage:number };
@@ -42,12 +42,16 @@ export function Notifications(){
  const [status,setStatus]=useState("current"),[category,setCategory]=useState(""),[level,setLevel]=useState(""),[search,setSearch]=useState(""),[unack,setUnack]=useState(false),[page,setPage]=useState(1),[selected,setSelected]=useState("");
  const params=new URLSearchParams({status,category,level,search,unacknowledged:String(unack),page:String(page),pageSize:"20"});
  const list=usePolling<Page>(`/alerts?${params}`);
- const stale=Boolean(summary.error||list.error)||Boolean(summary.data?.lastEvaluation&&Date.now()-Date.parse(summary.data.lastEvaluation)>90000);
+ const evaluatedAt=summary.data?.lastEvaluation?Date.parse(summary.data.lastEvaluation):Number.NaN;
+ const waiting=!Number.isFinite(evaluatedAt);
+ const stale=Boolean(summary.error||list.error)||(!waiting&&Date.now()-evaluatedAt>90000);
  const refresh=async()=>{await Promise.all([summary.refresh(),list.refresh()])};
  useEffect(()=>{setPage(1)},[status,category,level,search,unack]);
  return <>
-  <PageHeader eyebrow="NETWORK WATCH" title="预警中心" description="跟踪服务器、节点、容量和证书的运行情况。" actions={<RefreshButton refresh={refresh}/>}/>
-  <section className="center-banner"><div className="center-banner-icon"><ShieldCheck size={28}/></div><div><span className="eyebrow">STAY INFORMED</span><h2>每一次变化，都有迹可循。</h2><p>确认已知晓，记录处理过程；恢复状态由系统核验。</p></div><div className="center-monitor"><span className={stale?"":"live-dot"}/>{stale?"检测数据待更新":"站内监控运行中"}<small>最近检查 · {summary.data?.lastEvaluation?date(summary.data.lastEvaluation):"等待首次检查"}</small></div></section>
+  <section className="center-heading" aria-labelledby="notification-title">
+   <div className="center-heading-copy"><h1 id="notification-title">预警中心</h1><p>跟踪服务器、节点、容量和证书；确认知晓并记录处理过程。</p></div>
+   <div className="center-heading-actions"><div className={`center-monitor${stale||waiting?" is-stale":""}`}><span className="center-monitor-status"><span className={stale||waiting?"status-dot amber":"live-dot"} aria-hidden="true"/>{stale?"检测数据待更新":waiting?"等待首次检查":"站内监控运行中"}</span><small>最近检查 · {!waiting?date(summary.data?.lastEvaluation):"等待首次检查"}</small></div><RefreshButton refresh={refresh}/></div>
+  </section>
   <div className="center-stats"><StatCard hint="持续跟踪 · 北京时间" label="当前异常与提醒" value={summary.data?.active??"—"} icon={BellRing}/><StatCard hint="持续跟踪 · 北京时间" label="尚未确认" value={summary.data?.unacknowledged??"—"} icon={Clock3}/><StatCard hint="持续跟踪 · 北京时间" label="严重预警" value={summary.data?.critical??"—"} icon={TriangleAlert}/><StatCard hint="持续跟踪 · 北京时间" label="等待核实" value={summary.data?.unknown??"—"} icon={RefreshCw}/></div>
   <ErrorNotice message={summary.error||list.error}/>{stale&&<Notice>当前显示最近一次有效数据，连接恢复后会自动更新；缺失报告不代表异常已恢复。</Notice>}
   <Panel className="center-panel" title="预警记录" subtitle="服务器与节点容量仅作运维提醒；恢复状态由系统核验。">

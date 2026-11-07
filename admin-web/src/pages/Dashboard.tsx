@@ -248,11 +248,12 @@ export function Dashboard() {
                     </td>
                     <td className="quota-cell">
                       <div className="table-small">{billingFor(n).status === "unconfigured" ? "本月 · 待设置到期" : "本周期"}</div>
-                      {billingFor(n).cycleComplete ? <Meter
+                      <Meter
                         value={billingTotal(n)}
                         max={n.monthlyQuotaBytes}
                         label
-                      /> : <span className="muted">已知 {bytes(billingTotal(n))} · 数据不完整</span>}
+                      />
+                      {!billingFor(n).cycleComplete && <span className="table-small">数据不完整，按已知用量计算</span>}
                     </td>
                     <td>
                       {!error && onlineKnown(n) ? (

@@ -27,7 +27,7 @@ export interface ServerRenewal {
   id: string;
   serverId: string;
   requestId: string;
-  kind: "initial" | "advance" | "overdue";
+  kind: "initial" | "advance" | "overdue" | "correction";
   months: number;
   previousExpiresAt: string | null;
   expiresAt: string;

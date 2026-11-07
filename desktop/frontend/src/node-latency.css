@@ -1,0 +1,6 @@
+.node-test-button{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:11px;flex-shrink:0}
+.selection-status{flex-shrink:0;white-space:nowrap;font-size:11px;font-variant-numeric:tabular-nums;color:#96a3bc;margin-left:auto}
+.selection-status.success{color:#89d6bf}
+.selection-status.testing,.selection-status.waiting{color:#b2a4f9}
+.selection-status.timeout,.selection-status.failed,.selection-status.certificate_error,.selection-status.direct_unavailable{color:#d7a095}
+.node-panel .node-meta span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

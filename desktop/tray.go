@@ -144,16 +144,19 @@ func trayEntries(view client.View, busy bool) []trayEntry {
 		trayEntry{label: "断开", disabled: !stoppable, action: trayAction{kind: "disconnect"}})
 	subscriptions := []trayEntry{}
 	for _, sub := range view.Subscriptions {
+		if !trayUsable(&sub) {
+			continue
+		}
 		status := traySubscriptionStatus(sub.Status)
 		id := sub.ID
 		if len(id) > 6 {
 			id = id[len(id)-6:]
 		}
 		subscriptions = append(subscriptions, trayEntry{label: trayLabel(sub.TemplateName) + " · " + trayLabel(id) + " · " + status,
-			check: true, checked: sub.ID == view.DesiredSubscriptionID, disabled: !available || !trayUsable(&sub), action: trayAction{"subscription", sub.ID}})
+			check: true, checked: sub.ID == view.DesiredSubscriptionID, disabled: !available, action: trayAction{"subscription", sub.ID}})
 	}
 	if len(subscriptions) == 0 {
-		subscriptions = append(subscriptions, trayEntry{label: "暂无订阅", disabled: true})
+		subscriptions = append(subscriptions, trayEntry{label: "暂无有效订阅", disabled: true})
 	}
 	nodes := []trayEntry{}
 	for _, node := range view.Nodes {

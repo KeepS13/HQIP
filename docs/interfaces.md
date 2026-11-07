@@ -50,7 +50,7 @@
 
 节点、服务器、IP 清单、Cloudflare DNS/证书和规则接口仍为管理员 API，写入要求管理员认证及 CSRF。详细数据模型、预检／接管／删除流程和绑定公网 IP 规则见 [多 IP 运维](multi-ip.md)；服务器计量口径见 [服务器监控](monitoring.md)。控制服务不会将管理员 API 回退到公共监听，也不会根据用户提交的内容拼接 SSH 命令。
 
-服务器创建要求 `expiresAt` 为未来北京时间整点；`PATCH /api/v1/servers/{id}/settings` 可为未配置的服务器首次设置到期时间，普通额度修改不刷新流量。`POST /api/v1/servers/{id}/renewals` 要求 `expectedRevision` 和 `requestId`，未逾期传正整数 `months`，逾期传手动选择的 `expiresAt`，两者互斥；`GET` 同路径读取续期历史。重复请求返回原续期结果，不重复延期。服务器／节点响应的 `billing` 包含 `status,expiresAt,cycleId,cycleStartedAt,nextResetAt,cycleUpload,cycleDownload,cycleComplete`，原自然月及累计字段继续保留。
+服务器创建要求 `expiresAt` 为未来北京时间整点；`PATCH /api/v1/servers/{id}/settings` 可为未配置的服务器首次设置到期时间，普通额度修改不刷新流量。已配置服务器可通过 `PATCH /api/v1/servers/{id}/expiry` 提交 `expectedRevision,requestId,expiresAt` 单独修改日期，保留当前周期标识、开始时间及已有用量，并记入 `kind=correction` 的历史。`POST /api/v1/servers/{id}/renewals` 要求 `expectedRevision` 和 `requestId`，未逾期传正整数 `months`，逾期传手动选择的 `expiresAt`，两者互斥；`GET` 同路径读取有效期与续期历史。重复请求返回原变更结果，不重复延期。首次设置、日期修改及续期均从最新到期时间向前每 30 天推算未来重置点，只安排严格晚于保存时间且早于到期的边界；保存不立即清零，只有明确确认的逾期续期会立即开启新周期。旧数据升级后保留原周期和排期，下次修改或续期时应用新规则。服务器／节点响应的 `billing` 包含 `status,expiresAt,cycleId,cycleStartedAt,nextResetAt,cycleUpload,cycleDownload,cycleComplete`，原自然月及累计字段继续保留。
 
 Agent `hourly-usage-v1` 能力增加累计 `hours`、覆盖起点 `hourlySince`、已完整传送至的采样水位 `hourlyThrough`。小时桶与旧分钟派生小时分开保存，重传采用最大累计值，不能再次增加日累计或用户订阅消耗。不确定采样时段显式标记，周期统计不会将其视为可确定的当前周期用量。
 

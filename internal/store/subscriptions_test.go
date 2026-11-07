@@ -54,7 +54,7 @@ func subscriptionPassword(t *testing.T, s *Store, user, subscription, node strin
 }
 
 func TestSubscriptionsAreIndependentAcrossIdenticalTemplatePurchases(t *testing.T) {
-	q := int64(1024)
+	q := 2 * model.MinimumSubscriptionLeaseBytes
 	s, now, u, p, n, passA := portalFixture(t, 1, &q)
 	a := u.Subscriptions[0]
 	*now = now.Add(time.Hour)
@@ -76,7 +76,7 @@ func TestSubscriptionsAreIndependentAcrossIdenticalTemplatePurchases(t *testing.
 	_ = renew(t, s, la, 300, 200, true)
 	ea, _ := s.UserSubscription(u.ID, a.ID)
 	eb, _ := s.UserSubscription(u.ID, b.ID)
-	if ea.UsedBytes != 500 || ea.ReservedBytes != 0 || eb.UsedBytes != 0 || eb.ReservedBytes != 1024 {
+	if ea.UsedBytes != 500 || ea.ReservedBytes != 0 || eb.UsedBytes != 0 || eb.ReservedBytes != q {
 		t.Fatalf("cross-copy budget charge: %+v %+v", ea, eb)
 	}
 	if err := s.RevokeSubscription(u.ID, a.ID, ea.Revision); err != nil {

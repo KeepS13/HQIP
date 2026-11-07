@@ -98,7 +98,12 @@ func (s *Store) RevokePortalSession(user, id string) error {
 	return tx.Commit()
 }
 func (s *Store) PortalSessions(user, current string) ([]model.PortalSession, error) {
-	rows, err := s.DB.Query("SELECT id,kind,client_name,created_at,last_seen,expires,revoked FROM portal_sessions WHERE user_id=? ORDER BY created_at DESC LIMIT 100", user)
+	now := s.Now().Unix()
+	// Rank before the history limit so old, still-valid devices remain visible.
+	rows, err := s.DB.Query(`SELECT id,kind,client_name,created_at,last_seen,expires,revoked
+		FROM portal_sessions WHERE user_id=?
+		ORDER BY CASE WHEN revoked=0 AND expires>? THEN CASE WHEN id=? THEN 0 ELSE 1 END ELSE 2 END,
+		last_seen DESC,created_at DESC,id ASC LIMIT 100`, user, now, current)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +118,7 @@ func (s *Store) PortalSessions(user, current string) ([]model.PortalSession, err
 		v.CreatedAt = time.Unix(created, 0).UTC()
 		v.LastSeen = time.Unix(last, 0).UTC()
 		v.ExpiresAt = time.Unix(expires, 0).UTC()
-		v.Current = v.ID == current
+		v.Current = v.ID == current && !v.Revoked && expires > now
 		out = append(out, v)
 	}
 	return out, rows.Err()

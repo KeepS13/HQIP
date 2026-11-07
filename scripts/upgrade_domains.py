@@ -57,6 +57,12 @@ def require_billing_compatible(manifest):
   # The schema gate also covers an upgraded Agent before its first report. Old
   # controllers strictly reject new report fields even without configured cycles.
   if initialized and manifest.get('serverBillingVersion',0)<1:raise ValueError('Initialized telemetry schema requires a billing-compatible release; current accounting and Agent reports are preserved')
+  columns={row[1] for row in db.execute("PRAGMA table_info(server_billing)")}
+  # A date correction can retain the cycle number while moving its anchor.
+  # Version 1 ignores that offset and would reuse old cycle IDs / alert keys.
+  if 'cycle_offset' in columns and manifest.get('serverBillingVersion',0)<2:
+   if db.execute('SELECT 1 FROM server_billing WHERE cycle_offset<>0 LIMIT 1').fetchone():
+    raise ValueError('Reanchored billing cycles require serverBillingVersion 2; current cycle identities and accounting are preserved')
 
 def verify(release):
  release,manifest=control.verify_release(release)

@@ -21,6 +21,16 @@ CREATE TABLE IF NOT EXISTS server_renewals(id TEXT PRIMARY KEY,server_id TEXT NO
 CREATE TABLE IF NOT EXISTS billing_daily(node_id TEXT NOT NULL REFERENCES nodes(id),start INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(node_id,start));
 CREATE TABLE IF NOT EXISTS billing_hourly(node_id TEXT NOT NULL REFERENCES nodes(id),start INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,uncertain INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(node_id,start));
 `)
+	if err != nil {
+		return err
+	}
+	var hasOffset int
+	if err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('server_billing') WHERE name='cycle_offset'").Scan(&hasOffset); err != nil {
+		return err
+	}
+	if hasOffset == 0 {
+		_, err = db.Exec("ALTER TABLE server_billing ADD COLUMN cycle_offset INTEGER NOT NULL DEFAULT 0")
+	}
 	return err
 }
 
@@ -45,11 +55,12 @@ type ServerRenewalRequest struct {
 type billingState struct {
 	epoch                    string
 	started, anchor, expires int64
+	offset                   int64
 }
 
 func billingStateFor(q BillingQuery, server string) (billingState, error) {
 	var b billingState
-	err := q.QueryRow("SELECT epoch,started_at,anchor,expires_at FROM server_billing WHERE server_id=?", server).Scan(&b.epoch, &b.started, &b.anchor, &b.expires)
+	err := q.QueryRow("SELECT epoch,started_at,anchor,expires_at,cycle_offset FROM server_billing WHERE server_id=?", server).Scan(&b.epoch, &b.started, &b.anchor, &b.expires, &b.offset)
 	return b, err
 }
 
@@ -73,7 +84,20 @@ func currentBillingCycle(b billingState, now time.Time) (start int64, index int6
 	if next >= b.expires {
 		next = 0
 	}
+	index += b.offset
 	return
+}
+
+// The expiry defines the 30-day grid. A save never creates a boundary at or
+// before now, and the final expiry itself does not reset usage.
+func nextServerBillingAnchor(expires time.Time, now time.Time) int64 {
+	return expires.Unix() - (expires.Unix()-now.Unix()-1)/serverCycleSeconds*serverCycleSeconds
+}
+
+func reanchorServerBilling(tx *sql.Tx, server string, b billingState, expires time.Time, now time.Time) error {
+	start, index, _ := currentBillingCycle(b, now)
+	_, err := tx.Exec("UPDATE server_billing SET started_at=?,anchor=?,expires_at=?,cycle_offset=? WHERE server_id=?", start, nextServerBillingAnchor(expires, now), expires.Unix(), index, server)
+	return err
 }
 
 func validServerExpiry(expires time.Time, now time.Time) bool {
@@ -91,7 +115,7 @@ func setupServerBilling(tx *sql.Tx, server string, expires time.Time, revision i
 	if count != 0 {
 		return ErrConflict
 	}
-	if _, err := tx.Exec("INSERT INTO server_billing(server_id,epoch,started_at,anchor,expires_at) VALUES(?,?,?,?,?)", server, NewID(), MonthStart(now), expires.Unix(), expires.Unix()); err != nil {
+	if _, err := tx.Exec("INSERT INTO server_billing(server_id,epoch,started_at,anchor,expires_at) VALUES(?,?,?,?,?)", server, NewID(), MonthStart(now), nextServerBillingAnchor(expires, now), expires.Unix()); err != nil {
 		return err
 	}
 	record := model.ServerRenewal{ID: NewID(), ServerID: server, RequestID: "initial", Kind: "initial", ExpiresAt: expires.UTC(), ConfirmedAt: now.UTC(), Actor: actor, Revision: revision}
@@ -176,14 +200,14 @@ func (s *Store) RenewServer(server string, request ServerRenewalRequest, actor s
 		if record.ExpiresAt.Year() > 2200 {
 			return empty, record, errors.New("续费到期时间超出范围")
 		}
-		_, err = tx.Exec("UPDATE server_billing SET expires_at=? WHERE server_id=?", record.ExpiresAt.Unix(), server)
+		err = reanchorServerBilling(tx, server, b, record.ExpiresAt, now)
 	} else {
 		if request.ExpiresAt == nil || !validServerExpiry(*request.ExpiresAt, now) {
 			return empty, record, errors.New("服务器已到期，请手动选择未来的北京时间整点到期时间")
 		}
 		record.Kind = "overdue"
 		record.ExpiresAt = request.ExpiresAt.UTC()
-		_, err = tx.Exec("UPDATE server_billing SET epoch=?,started_at=?,anchor=?,expires_at=? WHERE server_id=?", NewID(), now.Unix(), record.ExpiresAt.Unix(), record.ExpiresAt.Unix(), server)
+		_, err = tx.Exec("UPDATE server_billing SET epoch=?,started_at=?,anchor=?,expires_at=?,cycle_offset=0 WHERE server_id=?", NewID(), now.Unix(), nextServerBillingAnchor(record.ExpiresAt, now), record.ExpiresAt.Unix(), server)
 	}
 	if err != nil {
 		return empty, record, err

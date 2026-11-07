@@ -216,7 +216,9 @@ func TestServerOverdueRenewalExcludesUnresolvedHourAndKeepsHistory(t *testing.T)
 	if _, _, err := s.RenewServer(v.ID, ServerRenewalRequest{ExpectedRevision: v.Revision, RequestID: "overdue-months", Months: &months}, "admin"); err == nil {
 		t.Fatal("overdue inferred a new 30 day expiry")
 	}
-	newExpiry := time.Date(2026, 12, 20, 12, 0, 0, 0, Shanghai)
+	// Keep this retention check within one cycle; long renewals now schedule
+	// intermediate resets backwards from their final expiry.
+	newExpiry := time.Date(2026, 11, 20, 12, 0, 0, 0, Shanghai)
 	v, r, err := s.RenewServer(v.ID, ServerRenewalRequest{ExpectedRevision: v.Revision, RequestID: "manual-overdue", ExpiresAt: &newExpiry}, "admin")
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +266,7 @@ func TestServerCycleUnknownHoursDoNotBecomeKnownDailyUsage(t *testing.T) {
 }
 
 func TestServerBillingRenewalDoesNotChangeUserBudgetOrNodeAuthorization(t *testing.T) {
-	quota := int64(1024)
+	quota := 2 * model.MinimumSubscriptionLeaseBytes
 	s, now, u, _, n, password := portalFixture(t, 1, &quota)
 	v, err := s.Server(n.ServerID)
 	if err != nil {

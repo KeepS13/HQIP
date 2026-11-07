@@ -82,3 +82,16 @@
 .mini-traffic dt{display:flex;align-items:center;gap:5px;font-size:10px;color:#91a1b8;white-space:nowrap}
 .mini-traffic dd{margin:0;font-size:11px;line-height:15px;font-weight:500;color:#c4cede;white-space:nowrap;font-variant-numeric:tabular-nums}
 .mini-traffic-up dt svg,.mini-traffic-up dd{color:#b8a7ff}.mini-traffic-down dt svg,.mini-traffic-down dd{color:#79d5bf}
+
+.window-chrome{position:fixed;inset:0 0 auto;height:34px;z-index:100;display:flex;align-items:center;user-select:none;background:linear-gradient(to right,#101722 206px,#0c111a 206px)}
+.window-drag-region{flex:1;align-self:stretch;--wails-draggable:drag}
+.window-controls{display:flex;align-items:center;gap:2px;padding:3px 7px 3px 0;--wails-draggable:no-drag}
+.window-controls button{display:grid;place-items:center;width:36px;height:28px;padding:0;border:0;border-radius:5px;background:transparent;color:#8e9bb2;--wails-draggable:no-drag}
+.window-controls button>*{pointer-events:none;--wails-draggable:no-drag}
+.window-controls button:hover:not(:disabled){background:#29283f;color:#e0daff}
+.window-controls .window-close:hover:not(:disabled){background:#a83f58;color:#fff}
+.window-controls button:focus-visible{outline:2px solid #b5a9fa;outline-offset:-2px}
+.window-controls button:disabled{opacity:.35}
+main{padding-top:43px}
+aside{padding-top:40px}
+@media(max-width:850px){.window-chrome{background:linear-gradient(to right,#101722 175px,#0c111a 175px)}main{padding-top:40px}}

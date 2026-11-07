@@ -65,6 +65,7 @@ export interface UserSession {
   installationId?: string;
   createdAt?: string;
   lastSeen?: string;
+  expiresAt?: string;
   current?: boolean;
   kind?: string;
   revoked?: boolean;

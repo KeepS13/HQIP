@@ -31,6 +31,8 @@ func (d *Desktop) OpenAccount() error {
 }
 func (d *Desktop) SelectSubscription(id string) error  { return d.controller.SelectSubscription(id) }
 func (d *Desktop) MeasureDelay() error                 { return d.controller.MeasureDelay() }
+func (d *Desktop) TestNodeDelays() error               { return d.controller.TestNodeDelays() }
+func (d *Desktop) CancelNodeDelays()                   { d.controller.CancelNodeDelays() }
 func (d *Desktop) CancelLogin()                        { d.controller.CancelLogin() }
 func (d *Desktop) Logout() error                       { return d.controller.Logout() }
 func (d *Desktop) Connect() error                      { return d.controller.Connect() }
@@ -70,7 +72,7 @@ func main() {
 	}}})
 	// Wails loads Windows icon resource ID 3 for the window/taskbar and falls
 	// back to appIcon during development builds without generated resources.
-	window = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "HQIP · 私人网络", Width: 1020, Height: 760, MinWidth: 760, MinHeight: 640, URL: "/", BackgroundColour: application.NewRGB(12, 17, 26)})
+	window = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "HQIP · 私人网络", Frameless: true, Width: 1020, Height: 760, MinWidth: 760, MinHeight: 640, URL: "/", BackgroundColour: application.NewRGB(12, 17, 26)})
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { window.Hide(); event.Cancel() })
 	setupTray(app, window, c)
 	if e = app.Run(); e != nil {

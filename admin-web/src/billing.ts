@@ -4,6 +4,13 @@ export const BILLING_HOUR = 60 * 60 * 1000;
 export const BILLING_MONTH = 30 * 24 * BILLING_HOUR;
 const BEIJING_OFFSET = 8 * BILLING_HOUR;
 
+export function nextBillingReset(expiresAt: string, now = Date.now()): string | null {
+  const expires = Date.parse(expiresAt);
+  if (!Number.isFinite(expires) || expires <= now) return null;
+  const next = expires - Math.floor((expires - now - 1) / BILLING_MONTH) * BILLING_MONTH;
+  return next < expires ? new Date(next).toISOString() : null;
+}
+
 export type BillingResource = {
   billing?: BillingCycle;
   monthUpload: number;

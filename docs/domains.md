@@ -49,6 +49,8 @@ python3 /opt/hqip-control/releases/<SHA>/scripts/upgrade_domains.py upgrade --re
 
 数据库 schema 5 的多订阅发布不能回退至只支持 schema 4 的旧单套餐程序。脚本会在停止服务前检查目标版本；不兼容时保留新版本和当前数据，改用兼容版本修复。数据库快照不用于抹去升级后产生的流量。
 
+日期修正会保留已经产生的周期序号。只要数据库中出现非零 `cycle_offset`，回退目标必须声明 `serverBillingVersion: 2`；版本 1 无法读取这一序号。回退脚本在停服前后均复查，拒绝不兼容版本并保留现有用量。仅新增字段且全部偏移为零时仍允许回退至版本 1。
+
 先恢复站点代码／路由，再按节点备份恢复 Agent 地址：
 
 ```bash

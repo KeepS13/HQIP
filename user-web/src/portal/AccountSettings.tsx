@@ -16,6 +16,15 @@ import {
 import { passwordError } from "../config";
 import { userAPI } from "./api";
 import type { UserProfile, UserSession } from "./types";
+
+function sessionActive(session: UserSession, now: number) {
+  return !session.revoked && (!session.expiresAt || Date.parse(session.expiresAt) > now);
+}
+
+function sessionActivity(session: UserSession) {
+  return Date.parse(session.lastSeen || session.createdAt || "") || 0;
+}
+
 function Password({
   onClose,
   onDone,
@@ -110,9 +119,19 @@ export function AccountSettings({
 }) {
   const [password, setPassword] = useState(false),
     [session, setSession] = useState<UserSession | null>(null),
+    [revokedSessions, setRevokedSessions] = useState<Set<string>>(() => new Set()),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const toast = useToast();
+  const now = Date.now();
+  const sessions = (profile.sessions || [])
+    .map((item) => revokedSessions.has(item.id) ? { ...item, revoked: true } : item)
+    .sort((a, b) => {
+      const rank = (item: UserSession) => sessionActive(item, now) ? (item.current ? 0 : 1) : 2;
+      return rank(a) - rank(b) || sessionActivity(b) - sessionActivity(a) ||
+        (Date.parse(b.createdAt || "") || 0) - (Date.parse(a.createdAt || "") || 0) || a.id.localeCompare(b.id);
+    });
+  const selectedSession = sessions.find((item) => item.id === session?.id);
   return (
     <>
       <PageHeader
@@ -141,7 +160,7 @@ export function AccountSettings({
       <Panel title="登录会话" subtitle="退出不再使用的设备，保护你的账户">
         {profile.sessions?.length ? (
           <div className="portal-records">
-            {profile.sessions.map((s) => (
+            {sessions.map((s) => (
               <div key={s.id}>
                 <span className="portal-record-icon">
                   <Monitor size={19} />
@@ -153,11 +172,12 @@ export function AccountSettings({
                   </strong>
                   <p>最近活动 {date(s.lastSeen)}</p>
                 </section>
-                {s.current && <Badge tone="info">当前会话</Badge>}
-                {s.revoked && <Badge tone="muted">已退出</Badge>}
+                {sessionActive(s, now) ? (
+                  <Badge tone={s.current ? "info" : "success"}>{s.current ? "当前会话" : "已登录"}</Badge>
+                ) : <Badge tone="muted">{s.revoked ? "已退出" : "已过期"}</Badge>}
                 <Button
                   variant="ghost"
-                  disabled={s.revoked}
+                  disabled={!sessionActive(s, now)}
                   onClick={() => {
                     setError("");
                     setSession(s);
@@ -209,11 +229,14 @@ export function AccountSettings({
             </Button>
             <Button
               busy={busy}
+              disabled={!selectedSession || !sessionActive(selectedSession, now)}
               onClick={async () => {
+                if (!selectedSession || !sessionActive(selectedSession, Date.now())) return;
                 setBusy(true);
                 setError("");
                 try {
                   await userAPI(`/sessions/${session.id}/revoke`, "POST", {});
+                  setRevokedSessions((ids) => new Set(ids).add(session.id));
                   const current = session.current;
                   setSession(null);
                   if (current) onLogout();

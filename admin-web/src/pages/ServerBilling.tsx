@@ -28,6 +28,7 @@ import {
   billingFor,
   billingQuotaLabel,
   billingTotal,
+  nextBillingReset,
   parseBeijingExpiry,
   type BillingResource,
 } from "../billing";
@@ -45,6 +46,16 @@ export function ExpiryFields({
   onChange: (value: { day: string; hour: string }) => void;
   required?: boolean;
 }) {
+  function openDatePicker(input: HTMLInputElement) {
+    if (!input.showPicker) return false;
+    try {
+      input.showPicker();
+      return true;
+    } catch {
+      // Keep native date entry available when the browser blocks the picker.
+      return false;
+    }
+  }
   return (
     <div className="billing-expiry-fields">
       <Field label="到期日期（北京时间）">
@@ -54,6 +65,15 @@ export function ExpiryFields({
           required={required || !!hour}
           min={beijingHourParts(Date.now()).day}
           value={day}
+          onClick={(event) => openDatePicker(event.currentTarget)}
+          onKeyDown={(event) => {
+            if (
+              (event.key === "Enter" || event.key === " ") &&
+              openDatePicker(event.currentTarget)
+            ) {
+              event.preventDefault();
+            }
+          }}
           onChange={(event) => onChange({ day: event.target.value, hour })}
         />
       </Field>
@@ -74,8 +94,17 @@ export function ExpiryFields({
           ))}
         </select>
       </Field>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <ExpiryResetPreview expiresAt={day && hour ? `${day}T${hour}:00:00+08:00` : null} />
+      </div>
     </div>
   );
+}
+
+function ExpiryResetPreview({ expiresAt }: { expiresAt: string | null }) {
+  const valid = !!expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) > Date.now();
+  const next = valid ? nextBillingReset(expiresAt) : null;
+  return <div className="billing-preview"><span>下次周期重置（北京时间）</span><strong>{!valid ? "请选择未来的日期和小时" : next ? billingDate(next) : "到期前无重置安排"}</strong><small>从到期时间向前每 30 天计算；到期本身不重置用量。</small></div>;
 }
 
 export function BillingSummary({
@@ -120,13 +149,13 @@ export function BillingSummary({
           </dl>
           {!compact && (
             <p>
-              北京时间 · 提前续期按 30 天/月，具体重置时间见上方。仅到期不会停止节点，也不会自动清空用量；重置以已确认的续期为前提。
+              北京时间 · 设置或修改有效期后，按最新到期时间向前每 30 天计算未来重置时间。保存时保留本周期用量；到期本身不清空用量，也不停止节点。
             </p>
           )}
           {!compact && billing.cycleStartedAt && (
             <p>
               本周期开始：{billingDate(billing.cycleStartedAt)}
-              {!billing.cycleComplete ? " · 用量数据不完整，等待核对" : ""}
+              {!billing.cycleComplete ? " · 数据不完整，按已知用量计算" : ""}
             </p>
           )}
         </>
@@ -144,6 +173,7 @@ function RenewalHistory({ serverId }: { serverId: string }) {
     initial: "首次设置",
     advance: "提前续期",
     overdue: "到期后续期",
+    correction: "修改到期时间",
   };
   return (
     <section className="billing-history">
@@ -187,7 +217,9 @@ function RenewalHistory({ serverId }: { serverId: string }) {
                   ? `增加 ${record.months} 个月（${record.months * 30} 天），确认时保留本周期用量。`
                   : record.kind === "overdue"
                     ? "确认时开启新周期，服务器及其节点周期用量归零；历史数据保留。"
-                    : "首次配置有效期，保留此前已记录用量。"}
+                    : record.kind === "correction"
+                      ? "保留当前周期与已有用量，按新到期时间向前每 30 天重新安排未来重置。"
+                      : "首次配置有效期，保留此前已记录用量。"}
               </p>
             </article>
           ))}
@@ -353,6 +385,7 @@ function RenewalForm({
                 <strong>{billingDate(previewExpiry)}</strong>
                 <small>现在确认续期只延长有效期，本周期用量保持不变。</small>
               </div>
+              <ExpiryResetPreview expiresAt={previewExpiry} />
             </>
           )}
         </>
@@ -381,6 +414,10 @@ function RenewalForm({
             <div>
               <dt>用量处理</dt>
               <dd>{draft.overdue ? "立即开启新周期" : "保留当前周期用量"}</dd>
+            </div>
+            <div>
+              <dt>下次周期重置</dt>
+              <dd>{billingDate(nextBillingReset(draft.previewExpiresAt))}</dd>
             </div>
           </dl>
           <Notice tone={draft.overdue ? "warning" : "info"}>
@@ -430,6 +467,42 @@ function RenewalForm({
   );
 }
 
+function ExpiryCorrectionForm({ server, onSaved, onBusy, onCancel }: {
+  server: ManagedServer;
+  onSaved: (message: string) => void;
+  onBusy: (value: boolean) => void;
+  onCancel: () => void;
+}) {
+  const [dateParts, setDateParts] = useState(() => beijingHourParts(billingFor(server).expiresAt || ""));
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      const expiresAt = parseBeijingExpiry(dateParts.day, dateParts.hour);
+      setBusy(true);
+      onBusy(true);
+      await api(`/servers/${server.id}/expiry`, "PATCH", { expectedRevision: server.revision, requestId, expiresAt });
+      onSaved("已修改到期时间，保留当前用量并重新安排未来重置");
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      setBusy(false);
+      onBusy(false);
+    }
+  }
+  return <form className="form-stack" onSubmit={save}>
+    <h3>修改到期时间</h3>
+    <Notice>保存后保留当前周期和服务器、节点的已有用量，并从新到期时间向前每 30 天重新计算未来的重置时间。变更会记入有效期历史。</Notice>
+    <fieldset className="form-stack" disabled={busy} style={{ border: 0, padding: 0, margin: 0 }}>
+      <ExpiryFields {...dateParts} onChange={(value) => { setDateParts(value); setRequestId(crypto.randomUUID()); setError(""); }} />
+    </fieldset>
+    <ErrorNotice message={error} />
+    <div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>取消修改</Button><Button type="submit" busy={busy}>保存到期时间</Button></div>
+  </form>;
+}
+
 export function ServerBillingSettings({
   server,
   onClose,
@@ -442,6 +515,7 @@ export function ServerBillingSettings({
   const [snapshot] = useState(server),
     billing = billingFor(snapshot);
   const [tab, setTab] = useState<"quota" | "renewal" | "history">("quota");
+  const [editingExpiry, setEditingExpiry] = useState(false);
   const [name, setName] = useState(snapshot.name),
     [bandwidth, setBandwidth] = useState(
       snapshot.bandwidthMbps?.toString() || "",
@@ -521,6 +595,7 @@ export function ServerBillingSettings({
             disabled={busy}
             onClick={() => {
               setTab(item.id);
+              setEditingExpiry(false);
               setError("");
             }}
           >
@@ -535,7 +610,7 @@ export function ServerBillingSettings({
         </Notice>
       )}
       {tab === "quota" && (
-        <form className="form-stack" onSubmit={saveSettings}>
+        editingExpiry ? <ExpiryCorrectionForm server={snapshot} onSaved={onSaved} onBusy={setBusy} onCancel={() => setEditingExpiry(false)} /> : <form className="form-stack" onSubmit={saveSettings}>
           <Field label="服务器名称">
             <input
               required
@@ -569,10 +644,10 @@ export function ServerBillingSettings({
               />
             </section>
           ) : (
-            <BillingSummary resource={snapshot} />
+            <><BillingSummary resource={snapshot} /><Button type="button" variant="secondary" icon={CalendarClock} onClick={() => setEditingExpiry(true)}>修改到期时间</Button></>
           )}
           <Notice>
-            容量仅提醒，不限速、不断网。普通保存只修改名称和额度，不会重置流量；已配置的到期时间请在“续期确认”中调整。
+            容量仅提醒，不限速、不断网。普通保存只修改名称和额度，不会重置流量；可单独修改到期时间，实际续费请在“续期确认”中记录。
           </Notice>
           <ErrorNotice message={error} />
           <div className="modal-actions">

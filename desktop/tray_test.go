@@ -45,11 +45,14 @@ func TestTrayMenuRendersCurrentStateAndRefreshes(t *testing.T) {
 	menu := application.NewMenu()
 	defer clearTrayMenu(menu)
 	appendTrayEntries(menu, trayEntries(view, false), func(trayAction) {})
-	for label, enabled := range map[string]bool{"可用流量：16.8 MB": false, "连接": true, "断开": false, "备用节点 · 暂不可用": false, "测试50mb · emoved · 已移除": false} {
+	for label, enabled := range map[string]bool{"可用流量：16.8 MB": false, "连接": true, "断开": false, "备用节点 · 暂不可用": false} {
 		item := menu.FindByLabel(label)
 		if item == nil || item.Enabled() != enabled {
 			t.Fatalf("menu item %q missing or enabled incorrectly", label)
 		}
+	}
+	if menu.FindByLabel("测试50mb · emoved · 已移除") != nil {
+		t.Fatal("removed subscription remained in switch menu")
 	}
 	for _, label := range []string{"香港节点 · 默认", "规则", "测试50mb · on-one · 有效"} {
 		if item := menu.FindByLabel(label); item == nil || !item.Checked() {
@@ -87,14 +90,114 @@ func TestTrayUnavailableAndPendingStates(t *testing.T) {
 			menu := application.NewMenu()
 			defer clearTrayMenu(menu)
 			appendTrayEntries(menu, trayEntries(view, state == "busy"), func(trayAction) {})
-			if menu.FindByLabel("连接").Enabled() || menu.FindByLabel("香港节点 · 默认").Enabled() || menu.FindByLabel("测试50mb · on-one · 有效").Enabled() {
+			if menu.FindByLabel("连接").Enabled() || menu.FindByLabel("香港节点 · 默认").Enabled() {
 				t.Fatal("unavailable operation enabled")
+			}
+			item := menu.FindByLabel("测试50mb · on-one · 有效")
+			if state == "expired" {
+				if item != nil || menu.FindByLabel("暂无有效订阅") == nil {
+					t.Fatal("expired subscription must be hidden with an empty state")
+				}
+			} else if item == nil || item.Enabled() {
+				t.Fatal("valid subscription must remain disabled while unavailable")
 			}
 			if !menu.FindByLabel("断开").Enabled() {
 				t.Fatal("disconnect must remain available")
 			}
 		})
 	}
+}
+
+func TestTraySubscriptionChoicesOnlyIncludeActiveUnexpiredSubscriptions(t *testing.T) {
+	view := trayFixture()
+	valid := view.Subscriptions[0]
+	view.Subscriptions = []client.Subscription{valid}
+	for _, status := range []string{"expired", "exhausted", "removed", "revoked", "disabled", "pending", "unknown", ""} {
+		sub := valid
+		sub.ID, sub.Status = "status-"+status, status
+		view.Subscriptions = append(view.Subscriptions, sub)
+	}
+	for _, expiresAt := range []time.Time{time.Now().Add(-time.Minute), {}} {
+		sub := valid
+		sub.ID, sub.ExpiresAt = "time-"+expiresAt.String(), expiresAt
+		view.Subscriptions = append(view.Subscriptions, sub)
+	}
+	for _, entry := range trayEntries(view, false) {
+		if entry.label != "切换订阅" {
+			continue
+		}
+		if len(entry.children) != 1 {
+			t.Fatalf("switch choices include unavailable subscriptions: %+v", entry.children)
+		}
+		choice := entry.children[0]
+		if choice.action.value != valid.ID || choice.disabled || !choice.checked {
+			t.Fatalf("valid current subscription not preserved: %+v", choice)
+		}
+		return
+	}
+	t.Fatal("subscription switch menu missing")
+}
+
+func TestTrayUnavailableCurrentSubscriptionDoesNotSelectReplacement(t *testing.T) {
+	view := trayFixture()
+	view.Subscription.Status = "expired"
+	view.Subscriptions[0].Status = "expired"
+	replacement := view.Subscriptions[0]
+	replacement.ID, replacement.Status = "replacement", "active"
+	view.Subscriptions = append(view.Subscriptions, replacement)
+	for _, entry := range trayEntries(view, false) {
+		if entry.label != "切换订阅" {
+			continue
+		}
+		if len(entry.children) != 1 || entry.children[0].action.value != replacement.ID || entry.children[0].checked {
+			t.Fatalf("expired current subscription must not select its replacement: %+v", entry.children)
+		}
+		if view.DesiredSubscriptionID != "subscription-one" {
+			t.Fatal("menu changed the desired subscription")
+		}
+		return
+	}
+	t.Fatal("subscription switch menu missing")
+}
+
+func TestTraySubscriptionChoicesEmptyState(t *testing.T) {
+	for _, withHistory := range []bool{false, true} {
+		view := trayFixture()
+		if withHistory {
+			view.Subscriptions[0].ExpiresAt = time.Now().Add(-time.Second)
+		} else {
+			view.Subscriptions = nil
+		}
+		found := false
+		for _, entry := range trayEntries(view, false) {
+			if entry.label != "切换订阅" {
+				continue
+			}
+			found = true
+			if len(entry.children) != 1 || entry.children[0].label != "暂无有效订阅" || !entry.children[0].disabled || entry.children[0].action.kind != "" {
+				t.Fatalf("missing non-actionable empty state: %+v", entry.children)
+			}
+		}
+		if !found {
+			t.Fatal("subscription switch menu missing")
+		}
+	}
+}
+
+func TestTraySubscriptionExpirationAfterOpeningMenuIsRejected(t *testing.T) {
+	f := &trayFake{view: trayFixture()}
+	entries := trayEntries(f.view, false)
+	f.view.Subscriptions[0].ExpiresAt = time.Now().Add(-time.Second)
+	for _, entry := range entries {
+		if entry.label != "切换订阅" {
+			continue
+		}
+		if err := performTrayAction(f, entry.children[0].action); err == nil || len(f.calls) != 0 {
+			t.Fatalf("expired menu selection reached controller: %v, %+v", err, f.calls)
+		}
+		return
+	}
+	t.Fatal("subscription switch menu missing")
 }
 
 type trayFake struct {

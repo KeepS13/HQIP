@@ -100,6 +100,7 @@ type View struct {
 	Metrics           Dashboard      `json:"metrics"`
 	LoginPending      bool           `json:"loginPending"`
 	Connections       Connections    `json:"connections"`
+	NodeTests         NodeTestView   `json:"nodeTests"`
 	Status
 }
 type persisted struct {

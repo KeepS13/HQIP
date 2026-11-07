@@ -5,8 +5,6 @@ import {
   ArrowRight,
   BookOpen,
   Info,
-  ChevronDown,
-  Command,
   Eye,
   EyeOff,
   LayoutDashboard,
@@ -44,6 +42,7 @@ import { SubscriptionRequests } from "./pages/SubscriptionRequests";
 import { Servers, ServerPage } from "./pages/Servers";
 import { Domains } from "./pages/Domains";
 import { Notifications } from "./pages/Notifications";
+import { HostResources } from "./HostResources";
 
 function Brand() {
   return (
@@ -383,16 +382,6 @@ export default function App() {
           >
             <X size={22} />
           </button>
-          <div className="workspace">
-            <span>
-              <Command size={18} />
-            </span>
-            <div>
-              <strong>我的私人网络</strong>
-              <small>Personal workspace</small>
-            </div>
-            <ChevronDown size={14} />
-          </div>
           <div className="nav-caption">工作空间</div>
           <nav>
             <NavLink to="/" end>
@@ -416,6 +405,13 @@ export default function App() {
               <span>订阅管理</span>
             </NavLink>
             <NavLink to="/subscription-requests"><Package size={19} /><span>开通申请</span></NavLink>
+            <NavLink to="/notifications">
+              <BellRing size={19} />
+              <span>预警中心</span>
+            </NavLink>
+          </nav>
+          <div className="nav-caption nav-caption-second">系统设置</div>
+          <nav>
             <NavLink to="/turnstile">
               <ShieldCheck size={19} />
               <span>注册与安全验证</span>
@@ -423,10 +419,6 @@ export default function App() {
             <NavLink to="/domains">
               <Globe2 size={19} />
               <span>域名与证书</span>
-            </NavLink>
-            <NavLink to="/notifications">
-              <BellRing size={19} />
-              <span>预警中心</span>
             </NavLink>
           </nav>
           <div className="nav-caption nav-caption-second">支持</div>
@@ -437,13 +429,7 @@ export default function App() {
             </NavLink>
           </nav>
           <div className="sidebar-bottom">
-            <div className="private-note">
-              <ShieldCheck size={21} />
-              <div>
-                <strong>专属于你的连接</strong>
-                <p>独立凭据 · 加密传输</p>
-              </div>
-            </div>
+            <HostResources />
             <div className="sidebar-version">
               <span>
                 <span className="live-dot" />

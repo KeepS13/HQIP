@@ -152,6 +152,7 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	e := &model.UserSubscription{}
 	var created, expires int64
 	var revoked, userEnabled bool
+	var liveBudget bool
 	var raw string
 	err := q.QueryRow(`SELECT s.id,s.user_id,s.template_id,s.created_at,s.expires,s.revoked,s.revision,u.enabled,t.config,x.upload+x.download,x.reserved FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id JOIN portal_templates t ON t.id=s.template_id JOIN portal_usage x ON x.subscription_id=s.id WHERE s.id=? AND s.user_id=?`, id, user).Scan(&e.ID, &e.UserID, &e.TemplateID, &created, &expires, &revoked, &e.Revision, &userEnabled, &raw, &e.UsedBytes, &e.ReservedBytes)
 	if err != nil {
@@ -173,7 +174,10 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	if e.NodeIDs == nil {
 		e.NodeIDs = []string{}
 	}
-	if err = q.QueryRow("SELECT COUNT(*) FROM portal_leases WHERE subscription_id=? AND closed=0 AND expires>?", id, now.Unix()).Scan(&e.Occupied); err != nil {
+	// Keep an already-authorized tail usable. Reserved bytes alone may belong
+	// to a dead lease awaiting settlement and must neither count as usage nor
+	// keep an unusable subscription active.
+	if err = q.QueryRow("SELECT COUNT(*),COALESCE(MAX(CASE WHEN revoked=0 AND budget>upload+download THEN 1 ELSE 0 END),0) FROM portal_leases WHERE subscription_id=? AND closed=0 AND expires>?", id, now.Unix()).Scan(&e.Occupied, &liveBudget); err != nil {
 		return nil, err
 	}
 	switch {
@@ -183,7 +187,7 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 		e.Status = "disabled"
 	case expires <= now.Unix():
 		e.Status = "expired"
-	case e.QuotaBytes != nil && e.UsedBytes >= *e.QuotaBytes:
+	case e.QuotaBytes != nil && (e.UsedBytes >= *e.QuotaBytes || !liveBudget && *e.QuotaBytes-e.UsedBytes < model.MinimumSubscriptionLeaseBytes):
 		e.Status = "exhausted"
 	}
 	return e, nil

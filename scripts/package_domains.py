@@ -30,7 +30,7 @@ def main():
  hashes=dict(base['sha256'])
  for name,source in inputs.items():
   dest=out/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,dest);hashes[name]=digest(dest)
- manifest={'sourceSHA':sha,'previousSourceSHA':base['sourceSHA'],'upgradeKind':'domains-alerts','schemaVersion':5,'clientApiVersion':3,'serverBillingVersion':1,'agentTelemetryVersion':1,'sha256':hashes}
+ manifest={'sourceSHA':sha,'previousSourceSHA':base['sourceSHA'],'upgradeKind':'domains-alerts','schemaVersion':5,'clientApiVersion':3,'serverBillingVersion':2,'agentTelemetryVersion':1,'sha256':hashes}
  (out/'release.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
  archive=ROOT/'dist'/('hqip-domains-'+sha[:12]+'.tar.gz')
  with tarfile.open(archive,'w:gz') as tar:

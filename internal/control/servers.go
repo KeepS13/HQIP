@@ -36,6 +36,7 @@ func (s *Server) registerServerRoutes(m *http.ServeMux) {
 		"GET /api/v1/servers": s.listServers, "POST /api/v1/servers": s.createServer,
 		"GET /api/v1/servers/{id}": s.serverDetail, "PATCH /api/v1/servers/{id}": s.updateServer, "DELETE /api/v1/servers/{id}": s.deleteServer,
 		"PATCH /api/v1/servers/{id}/settings": s.updateServerSettings,
+		"PATCH /api/v1/servers/{id}/expiry":   s.correctServerExpiry,
 		"GET /api/v1/servers/{id}/traffic":    s.serverTraffic,
 		"GET /api/v1/servers/{id}/renewals":   s.serverRenewals, "POST /api/v1/servers/{id}/renewals": s.renewServer,
 		"GET /api/v1/servers/{id}/addresses": s.listAddresses, "POST /api/v1/servers/{id}/addresses": s.createAddress, "DELETE /api/v1/servers/{id}/addresses/{address}": s.deleteAddress,

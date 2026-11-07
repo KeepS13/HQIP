@@ -168,10 +168,17 @@ select option {
   display: flex;
   flex-direction: column;
   z-index: 30;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.sidebar > * {
+  flex-shrink: 0;
 }
 .brand-link {
   display: block;
   padding-left: 11px;
+  margin-bottom: 32px;
 }
 .brand {
   display: flex;
@@ -228,42 +235,6 @@ select option {
   color: #9099ad;
   margin-top: 4px;
 }
-.workspace {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  margin: 36px 0 31px;
-  border: 1px solid #303647;
-  padding: 12px 9px;
-  border-radius: 9px;
-  background: #1b202c;
-}
-.workspace > span {
-  width: 29px;
-  height: 29px;
-  background: #2c3047;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  color: #a9acda;
-}
-.workspace > div {
-  flex: 1;
-}
-.workspace strong {
-  font-size: 12px;
-  font-weight: 600;
-  display: block;
-}
-.workspace small {
-  font-size: 9px;
-  color: #8791a7;
-  display: block;
-  margin-top: 4px;
-}
-.workspace > svg {
-  color: #79839a;
-}
 .nav-caption {
   font-size: 10px;
   letter-spacing: 1.5px;
@@ -314,30 +285,6 @@ select option {
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 50px;
-}
-.private-note {
-  padding: 16px 10px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #919bb2;
-  background: linear-gradient(130deg, #242a3930, #151924);
-  border: 1px solid #2a3040;
-  border-radius: 9px;
-}
-.private-note svg {
-  color: #8c94ad;
-  flex-shrink: 0;
-}
-.private-note strong {
-  font-size: 11px;
-  color: #c2cbdd;
-  font-weight: 500;
-}
-.private-note p {
-  font-size: 9px;
-  margin-top: 5px;
-  letter-spacing: 0.1px;
 }
 .sidebar-version {
   height: 63px;
