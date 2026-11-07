@@ -78,7 +78,7 @@ func (s *Server) desktopRelease() (desktopRelease, error) {
 		return release, errors.New("desktop artifact checksum mismatch")
 	}
 	release.Platform = "windows-amd64"
-	release.URL = s.opts.PublicURL + "/downloads/" + desktopFilename
+	release.URL = s.opts.PublicURL + "/downloads/" + release.SHA256 + "/" + desktopFilename
 	if desktopCache.files == nil {
 		desktopCache.files = map[string]verifiedDesktop{}
 	}
@@ -106,9 +106,18 @@ func (s *Server) portalDownloadInfo(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, release)
 }
 func (s *Server) portalDownload(w http.ResponseWriter, r *http.Request) {
+	// The fixed legacy URL and failed versioned requests must never populate a
+	// reusable cache entry. Only verified bytes get immutable cache headers below.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("CDN-Cache-Control", "no-store")
 	release, err := s.desktopRelease()
 	if err != nil {
 		fail(w, 404, "客户端发布包暂不可用")
+		return
+	}
+	requestedHash := r.PathValue("sha256")
+	if requestedHash != "" && requestedHash != release.SHA256 {
+		fail(w, 404, "该版本发布包已不可用，请刷新下载页面")
 		return
 	}
 	f, err := os.Open(filepath.Join(s.opts.ArtifactDir, desktopFilename))
@@ -122,9 +131,24 @@ func (s *Server) portalDownload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "客户端发布包正在更新")
 		return
 	}
+	// The artifact can be replaced between desktopRelease and Open, including
+	// with a same-sized ZIP. Verify this handle, then serve that same handle so
+	// an atomic release replacement cannot publish new bytes at an old hash URL.
+	h := sha256.New()
+	if _, err = io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != release.SHA256 {
+		fail(w, 503, "客户端发布包正在更新")
+		return
+	}
+	if _, err = f.Seek(0, io.SeekStart); err != nil {
+		fail(w, 503, "客户端发布包暂不可用")
+		return
+	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename="+desktopFilename)
 	w.Header().Set("ETag", "\""+release.SHA256+"\"")
-	w.Header().Set("Cache-Control", "no-cache")
+	if requestedHash != "" {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("CDN-Cache-Control", "public, max-age=31536000, immutable")
+	}
 	http.ServeContent(w, r, desktopFilename, stat.ModTime(), f)
 }

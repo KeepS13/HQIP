@@ -39,6 +39,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/user/releases", s.portalReleases)
 	m.HandleFunc("GET /api/v1/user/download", s.portalDownloadInfo)
 	m.HandleFunc("GET /downloads/HQIP-Windows-x64.zip", s.portalDownload)
+	m.HandleFunc("GET /downloads/{sha256}/HQIP-Windows-x64.zip", s.portalDownload)
 	for pattern, handler := range map[string]portalHandler{
 		"GET /api/v1/user/profile": s.portalProfile, "POST /api/v1/user/logout": s.portalLogout, "POST /api/v1/user/password": s.portalPassword,
 		"GET /api/v1/user/catalog": s.userCatalog, "GET /api/v1/user/subscription-requests": s.userSubscriptionRequests, "POST /api/v1/user/subscription-requests": s.userSubscriptionRequests, "POST /api/v1/user/subscription-requests/{id}/cancel": s.cancelSubscriptionRequest,

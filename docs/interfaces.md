@@ -30,6 +30,8 @@
 
 ## 认证与限制
 
+客户端下载元数据由 `GET /api/v1/user/releases` 和 `GET /api/v1/user/download` 返回，均禁止缓存。`url` 指向 `/downloads/{sha256}/HQIP-Windows-x64.zip`，每次包内容变化都会生成新的下载路径；成功响应使用 `public, max-age=31536000, immutable`。服务端仅提供与当前已校验发布包摘要一致的路径，错误摘要和已替换的版本返回禁止缓存的 404，不会把新版字节放到旧摘要地址。旧 `/downloads/HQIP-Windows-x64.zip` 入口保留兼容，响应 `no-store`；下载页始终使用元数据中的 `url`。
+
 - 管理员 API：`/api/v1/session`、`/login`、`/logout`、`/password`。
 - 用户 API：`/api/v1/user/config`、`/register`、`/login`、`/session`、`/profile`、`/logout`、`/password`、`/sessions/{id}/revoke`。
 - 注册和用户密码重置／修改按 Unicode 字符数至少 6 个，最大 1024 字节；管理员自身密码策略独立。
