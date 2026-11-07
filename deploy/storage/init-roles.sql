@@ -1,8 +1,8 @@
 \set ON_ERROR_STOP on
 DO $roles$
 BEGIN
-  EXECUTE format('CREATE ROLE hqip_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 4 PASSWORD %L', trim(pg_read_file('/run/secrets/migration_password')));
-  EXECUTE format('CREATE ROLE hqip_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 96 PASSWORD %L', trim(pg_read_file('/run/secrets/app_password')));
+  EXECUTE format('CREATE ROLE hqip_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 4 PASSWORD %L', rtrim(pg_read_file('/run/secrets/migration_password'), chr(13) || chr(10)));
+  EXECUTE format('CREATE ROLE hqip_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 96 PASSWORD %L', rtrim(pg_read_file('/run/secrets/app_password'), chr(13) || chr(10)));
 END
 $roles$;
 ALTER DATABASE hqip OWNER TO hqip_migrator;
