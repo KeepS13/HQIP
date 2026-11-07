@@ -20,9 +20,30 @@ var assets embed.FS
 //go:embed assets/hqip.png
 var appIcon []byte
 
-type Desktop struct{ controller *client.Controller }
+type Desktop struct {
+	controller *client.Controller
+	updates    *client.UpdateChecker
+}
+type DesktopView struct {
+	client.View
+	Updates client.UpdateView `json:"updates"`
+}
 
-func (d *Desktop) State() client.View { return d.controller.View() }
+func (d *Desktop) State() DesktopView {
+	return DesktopView{View: d.controller.View(), Updates: d.updates.View()}
+}
+func (d *Desktop) CheckUpdates()       { _ = d.updates.Check(true) }
+func (d *Desktop) SnoozeUpdate() error { return d.updates.Snooze() }
+func (d *Desktop) DownloadUpdate() error {
+	url, err := d.updates.DownloadURL()
+	if err != nil {
+		return err
+	}
+	if err = winclient.OpenBrowser(url); err != nil {
+		return err
+	}
+	return d.updates.Snooze()
+}
 func (d *Desktop) LoginBrowser(server string) error {
 	return d.controller.LoginBrowser(server, winclient.OpenBrowser)
 }
@@ -61,7 +82,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go c.Run(ctx)
-	d := &Desktop{controller: c}
+	updates := client.NewUpdateChecker(dir, client.AppVersion, func() string { return c.View().ServerURL })
+	defer updates.Close()
+	d := &Desktop{controller: c, updates: updates}
 	files, _ := fs.Sub(assets, "frontend/dist")
 	var window *application.WebviewWindow
 	app := application.New(application.Options{Name: "HQIP", Description: "HQIP 私人网络", Icon: appIcon, Services: []application.Service{application.NewService(d)}, Assets: application.AssetOptions{Handler: application.BundledAssetFileServer(files)}, OnShutdown: func() { cancel(); c.Close() }, SingleInstance: &application.SingleInstanceOptions{UniqueID: "online.sharevps.hqip.client", OnSecondInstanceLaunch: func(application.SecondInstanceData) {
@@ -74,6 +97,7 @@ func main() {
 	// back to appIcon during development builds without generated resources.
 	window = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "HQIP · 私人网络", Frameless: true, Width: 1020, Height: 760, MinWidth: 760, MinHeight: 640, URL: "/", BackgroundColour: application.NewRGB(12, 17, 26)})
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { window.Hide(); event.Cancel() })
+	go updates.Run(func() { window.Show(); window.Focus() })
 	setupTray(app, window, c)
 	if e = app.Run(); e != nil {
 		log.Print("HQIP 窗口退出: ", e)

@@ -5,6 +5,7 @@ import argparse,hashlib,json,os,pathlib,subprocess,tempfile,urllib.request,zipfi
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 OUT=ROOT/'dist/desktop'
 VERSION='1.14.4'
+DESKTOP_VERSION='4.3.0'
 ZIP_HASH='99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df'
 CORE_HASH='8f30682ee198855440d2a7fe070d5d3653793b2d01bb8c85eea88f93bbe7c8b9'
 RESOURCE_TOOL=ROOT/'desktop/build/windows'
@@ -49,7 +50,7 @@ def main():
             with resource_path.open('xb') as resource:
                 resource_created=True
                 resource.write(generated.read_bytes())
-            subprocess.run(['go','build','-trimpath','-ldflags=-s -w -H windowsgui','-o',str(out/'HQIP.exe'),'.'],cwd=ROOT/'desktop',env=env,check=True)
+            subprocess.run(['go','build','-trimpath',f'-ldflags=-s -w -H windowsgui -X github.com/KeepS13/HQIP/internal/client.AppVersion={DESKTOP_VERSION}','-o',str(out/'HQIP.exe'),'.'],cwd=ROOT/'desktop',env=env,check=True)
         finally:
             if resource_created:resource_path.unlink()
     run(['go','run','-mod=readonly','.', '-icon',str(icon),'-verify',str(out/'HQIP.exe')],RESOURCE_TOOL)
@@ -58,7 +59,7 @@ def main():
     dirty=bool(subprocess.check_output(['git','status','--porcelain','--untracked-files=normal'],cwd=ROOT,text=True).strip())
     sources={'HQIP':f'https://github.com/KeepS13/HQIP/tree/{source_sha}','sing-box':f'https://github.com/SagerNet/sing-box/tree/v{VERSION}','Wails':'https://github.com/wailsapp/wails/tree/v3.1.0'}
     (out/'THIRD-PARTY-NOTICES.txt').write_text('HQIP Windows client\n\nsing-box '+VERSION+' (GPL-3.0-or-later): see sing-box-LICENSE.\nWails v3.1.0 (MIT).\nSource revisions:\n'+json.dumps(sources,indent=2)+'\nRouting data attribution is included in each authenticated rules bundle.\n',encoding='utf-8')
-    manifest={'version':'4.2.0','sourceSHA':source_sha,'dirty':dirty,'singBox':VERSION,'wails':'3.1.0','sources':sources,'windowsResources':{'generator':'github.com/tc-hib/winres@v0.3.1','iconSha256':sha(icon),'groupId':3},'sha256':{n:sha(out/n) for n in ['HQIP.exe','hqip-helper.exe','sing-box.exe','libcronet.dll']}}
+    manifest={'version':DESKTOP_VERSION,'sourceSHA':source_sha,'dirty':dirty,'singBox':VERSION,'wails':'3.1.0','sources':sources,'windowsResources':{'generator':'github.com/tc-hib/winres@v0.3.1','iconSha256':sha(icon),'groupId':3},'sha256':{n:sha(out/n) for n in ['HQIP.exe','hqip-helper.exe','sing-box.exe','libcronet.dll']}}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     readme=ROOT/'docs/client.md'
     if readme.exists():shutil.copyfile(readme,out/'使用说明.md')
@@ -68,7 +69,7 @@ def main():
     with zipfile.ZipFile(ROOT/'dist/HQIP-Windows-x64.zip','w',zipfile.ZIP_DEFLATED) as z:
         for name in PACKAGE_FILES:z.write(out/name,'HQIP/'+name)
     package=ROOT/'dist/HQIP-Windows-x64.zip'
-    release={'version':'4.2.0','sourceSHA':source_sha,'dirty':dirty,'filename':package.name,'sha256':sha(package),'size':package.stat().st_size}
+    release={'version':DESKTOP_VERSION,'sourceSHA':source_sha,'dirty':dirty,'filename':package.name,'sha256':sha(package),'size':package.stat().st_size}
     (ROOT/'dist/desktop-manifest.json').write_text(json.dumps(release,indent=2)+'\n',encoding='utf-8')
     print('Built dist/HQIP-Windows-x64.zip with verified sing-box core.')
 if __name__=='__main__':main()
