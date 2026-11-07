@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=hqip-control
 Group=hqip-control
+EnvironmentFile=-/etc/hqip-control/storage.env
 ExecStart=/opt/hqip-control/current/hqip serve --data-dir /var/lib/hqip-control --listen 127.0.0.1:18090 --public-listen 127.0.0.1:18091 --admin-origin https://cms-hqip.5202345.xyz --user-origin https://hqip.5202345.xyz --public-url https://api-hqip.5202345.xyz --artifact-dir /opt/hqip-control/current/artifacts
 Restart=always
 RestartSec=3

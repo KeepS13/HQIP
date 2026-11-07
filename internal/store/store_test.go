@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -9,9 +10,24 @@ import (
 
 func fixture(t *testing.T) (*Store, *time.Time) {
 	t.Helper()
+	return backendFixture(t, os.Getenv("HQIP_TEST_POSTGRES_URL") != "")
+}
+
+// Legacy SQLite schema migrations always exercise their source dialect, even
+// when the business repository regression suite targets PostgreSQL.
+func sqliteFixture(t *testing.T) (*Store, *time.Time) {
+	t.Helper()
+	return backendFixture(t, false)
+}
+
+func backendFixture(t *testing.T, postgres bool) (*Store, *time.Time) {
+	t.Helper()
 	s, err := Open(t.TempDir(), "https://panel.example.com")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if postgres {
+		s = postgresFixture(t, s)
 	}
 	now := time.Date(2026, 10, 31, 23, 59, 0, 0, Shanghai)
 	s.Now = func() time.Time { return now }
@@ -86,11 +102,10 @@ func TestUsageIdempotenceMonthBoundaryRestartAndRetention(t *testing.T) {
 	if got.MonthUpload != 20 || got.MonthDownload != 40 || got.TotalUpload != 120 || got.TotalDownload != 360 {
 		t.Fatalf("Shanghai month boundary incorrect: %+v", got)
 	}
-	path := s.DataDir
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path, s.BaseURL)
+	reopened, err := reopenFixture(s)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -150,14 +150,28 @@ func notificationServers(tx *sql.Tx, nodes []notificationNodeSnapshot, now time.
 		return nil, err
 	}
 	defer rows.Close()
-	out := []model.NotificationCondition{}
+	type record struct {
+		id, raw string
+		deleted int64
+	}
+	var records []record
 	for rows.Next() {
-		var id, raw string
-		var deleted int64
-		var server model.Server
-		if err = rows.Scan(&id, &raw, &deleted); err != nil {
+		var r record
+		if err = rows.Scan(&r.id, &r.raw, &r.deleted); err != nil {
 			return nil, err
 		}
+		records = append(records, r)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	out := []model.NotificationCondition{}
+	for _, record := range records {
+		id, raw, deleted := record.id, record.raw, record.deleted
+		var server model.Server
 		if deleted != 0 {
 			out = append(out, notificationRemoved("server.disk", id, "system"))
 			continue

@@ -120,7 +120,7 @@ func TestServerExpiryCorrectionKeepsUsageIdentityAndReanchorsFuture(t *testing.T
 	if v.Billing.NextResetAt == nil || !v.Billing.NextResetAt.Equal(now.Add(5*24*time.Hour)) {
 		t.Fatal("expired edit did not reanchor", v.Billing)
 	}
-	reopened, err := Open(s.DataDir, s.BaseURL)
+	reopened, err := reopenFixture(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestServerExpiryCorrectionKeepsUsageIdentityAndReanchorsFuture(t *testing.T
 }
 
 func TestServerBillingOffsetMigrationPreservesLegacyCycle(t *testing.T) {
-	s, now := fixture(t)
+	s, now := sqliteFixture(t)
 	v, _, _ := serverPair(t, s)
 	*now = now.Truncate(time.Hour)
 	v = configureBilling(t, s, v, now.Add(95*24*time.Hour))

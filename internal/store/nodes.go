@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -355,8 +356,15 @@ type Job struct {
 }
 
 func (s *Store) RecoverJobs() error {
-	_, err := s.DB.Exec("UPDATE jobs SET state='pending' WHERE state='running'; UPDATE jobs SET state='cancelled' WHERE state='cancelling'")
-	return err
+	for _, query := range []string{
+		"UPDATE jobs SET state='pending' WHERE state='running'",
+		"UPDATE jobs SET state='cancelled' WHERE state='cancelling'",
+	} {
+		if _, err := s.DB.Exec(query); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *Store) NextJob() (Job, error) {
 	var j Job
@@ -420,28 +428,24 @@ func (s *Store) Queue(id, kind, password string) (model.Node, error) {
 }
 
 func (s *Store) CheckIntegrity() error {
-	var result string
-	if err := s.DB.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
-		return err
-	}
-	if result != "ok" {
-		return errors.New("数据库完整性检查失败")
-	}
-	rows, err := s.DB.Query("SELECT password FROM credentials UNION ALL SELECT agent_secret FROM nodes UNION ALL SELECT token_secret FROM devices")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var v string
-		if err = rows.Scan(&v); err != nil {
+	if s.postgresDSN != "" {
+		var invalid int
+		if err := s.DB.QueryRow("SELECT COUNT(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND NOT i.indisvalid").Scan(&invalid); err != nil {
 			return err
 		}
-		if _, err = s.Vault.Decrypt(v); err != nil {
-			return secretError(err)
+		if invalid > 0 {
+			return errors.New("PostgreSQL 存在无效索引")
+		}
+	} else {
+		var result string
+		if err := s.DB.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
+			return err
+		}
+		if result != "ok" {
+			return errors.New("数据库完整性检查失败")
 		}
 	}
-	return rows.Err()
+	return validateVault(context.Background(), s.DB, s.Vault)
 }
 
 var _ = sql.ErrNoRows

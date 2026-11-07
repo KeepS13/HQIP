@@ -249,7 +249,16 @@ func TestNotificationSnapshotErrorNeverMeansRecovery(t *testing.T) {
 	t.Run("invalid-config", func(t *testing.T) {
 		s, _ := fixture(t)
 		n := newNode(t, s, "broken")
-		notificationExec(t, s, "UPDATE nodes SET config='invalid' WHERE id=?", n.ID)
+		_, writeErr := s.DB.Exec("UPDATE nodes SET config='invalid' WHERE id=?", n.ID)
+		if s.postgresDSN != "" {
+			if writeErr == nil {
+				t.Fatal("PostgreSQL accepted malformed node JSON")
+			}
+			return
+		}
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
 		if _, err := s.CollectNotificationConditions(); err == nil {
 			t.Fatal("malformed node config ignored")
 		}

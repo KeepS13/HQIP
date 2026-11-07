@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/control"
+	"github.com/KeepS13/HQIP/internal/pgstore"
+	"github.com/KeepS13/HQIP/internal/ratelimit"
 	"github.com/KeepS13/HQIP/internal/rules"
 	"github.com/KeepS13/HQIP/internal/secure"
 	"github.com/KeepS13/HQIP/internal/store"
@@ -45,8 +47,10 @@ func run(args []string) error {
 		return backup(args[1:])
 	case "restore":
 		return restore(args[1:])
+	case "storage-info":
+		return storageInfo(args[1:])
 	default:
-		return errors.New("未知命令；可用命令：serve、init-admin、backup、restore")
+		return errors.New("未知命令；可用命令：serve、init-admin、backup、restore、storage-info")
 	}
 }
 func serve(args []string) error {
@@ -80,7 +84,10 @@ func serve(args []string) error {
 			return errors.New("两个监听地址必须使用回环 IP，公网访问需经可信 HTTPS 反向代理")
 		}
 	}
-	db, err := store.Open(*dir, strings.TrimRight(*public, "/"))
+	if os.Getenv("HQIP_DATABASE_URL") != "" && os.Getenv("HQIP_REDIS_URL") == "" {
+		return errors.New("PostgreSQL 模式必须配置 HQIP_REDIS_URL，共享认证限流不能退回进程内计数")
+	}
+	db, err := store.OpenConfigured(*dir, strings.TrimRight(*public, "/"), os.Getenv("HQIP_DATABASE_URL"))
 	if err != nil {
 		return err
 	}
@@ -91,7 +98,22 @@ func serve(args []string) error {
 	if _, err = db.Rules(); err != nil {
 		return err
 	}
-	s := control.New(db, control.Options{PublicURL: strings.TrimRight(*public, "/"), AdminOrigin: strings.TrimRight(*adminOrigin, "/"), UserOrigin: strings.TrimRight(*userOrigin, "/"), ArtifactDir: *artifacts})
+	var limiter control.LoginLimiter
+	if address := os.Getenv("HQIP_REDIS_URL"); address != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		namespace := os.Getenv("HQIP_REDIS_NAMESPACE")
+		if namespace == "" {
+			namespace = "hqip"
+		}
+		shared, openErr := ratelimit.Open(ctx, address, namespace)
+		cancel()
+		if openErr != nil {
+			return openErr
+		}
+		defer shared.Close()
+		limiter = shared
+	}
+	s := control.New(db, control.Options{LoginLimiter: limiter, PublicURL: strings.TrimRight(*public, "/"), AdminOrigin: strings.TrimRight(*adminOrigin, "/"), UserOrigin: strings.TrimRight(*userOrigin, "/"), ArtifactDir: *artifacts})
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	adminListener, err := net.Listen("tcp", *listen)
@@ -104,13 +126,12 @@ func serve(args []string) error {
 		return err
 	}
 	defer publicListener.Close()
-	server := &http.Server{Addr: *listen, Handler: s.AdminHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	server := &http.Server{Addr: *listen, Handler: s.AdminHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	publicServer := &http.Server{Addr: *publicListen, Handler: s.PublicHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	errCh := make(chan error, 4)
-	go func() { errCh <- s.RunWorker(ctx) }()
-	notificationsDone := make(chan struct{})
-	go func() { defer close(notificationsDone); errCh <- s.RunNotifications(ctx) }()
-	defer func() { cancel(); <-notificationsDone }()
+	backgroundDone := make(chan struct{})
+	go func() { defer close(backgroundDone); errCh <- runBackground(ctx, db, s) }()
+	defer func() { cancel(); <-backgroundDone }()
 	go func() {
 		log.Printf("HQIP 本地管理服务正在监听 %s", *listen)
 		errCh <- server.Serve(adminListener)
@@ -152,6 +173,7 @@ func initAdmin(args []string) error {
 	username := f.String("username", "admin", "管理员用户名")
 	output := f.String("output", "", "初始凭据输出文件（0600，不会覆盖）")
 	rulesFile := f.String("rules", "", "可选：在空站初始化时导入无凭据规则包")
+	initializePostgres := f.Bool("initialize-postgres", false, "显式初始化空 PostgreSQL schema（仅限全新站点）")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -177,7 +199,24 @@ func initAdmin(args []string) error {
 		}
 		initialRules = &bundle
 	}
-	db, err := store.Open(*dir, "")
+	if *initializePostgres {
+		if os.Getenv("HQIP_DATABASE_URL") == "" {
+			return errors.New("初始化 PostgreSQL 需要 HQIP_DATABASE_URL")
+		}
+		if _, err := os.Stat(filepath.Join(*dir, "hqip.db")); err == nil {
+			return errors.New("已有 SQLite 数据，必须通过离线迁移导入，不能初始化空站")
+		}
+		if err := store.InitializePostgres(context.Background(), os.Getenv("HQIP_DATABASE_URL")); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(*dir, 0700); err != nil {
+			return err
+		}
+		if _, err := secure.Open(filepath.Join(*dir, "master.key")); err != nil {
+			return err
+		}
+	}
+	db, err := store.OpenConfigured(*dir, "", os.Getenv("HQIP_DATABASE_URL"))
 	if err != nil {
 		return err
 	}
@@ -225,10 +264,12 @@ func backup(args []string) error {
 	if *output == "" {
 		return errors.New("请指定 --output 备份文件")
 	}
-	if _, err := os.Stat(filepath.Join(*dir, "hqip.db")); err != nil {
-		return err
+	if os.Getenv("HQIP_DATABASE_URL") == "" {
+		if _, err := os.Stat(filepath.Join(*dir, "hqip.db")); err != nil {
+			return err
+		}
 	}
-	db, err := store.Open(*dir, "")
+	db, err := store.OpenConfigured(*dir, "", os.Getenv("HQIP_DATABASE_URL"))
 	if err != nil {
 		return err
 	}
@@ -241,9 +282,13 @@ func backup(args []string) error {
 		return err
 	}
 	defer os.RemoveAll(temp)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	if err = db.Snapshot(ctx, filepath.Join(temp, "hqip.db")); err != nil {
+	databaseFile, backend := "hqip.db", "sqlite"
+	if db.Postgres() {
+		databaseFile, backend = "hqip.pg.dump", "postgresql"
+	}
+	if err = db.Snapshot(ctx, filepath.Join(temp, databaseFile)); err != nil {
 		return err
 	}
 	key, err := os.ReadFile(filepath.Join(*dir, "master.key"))
@@ -253,7 +298,7 @@ func backup(args []string) error {
 	if err = os.WriteFile(filepath.Join(temp, "master.key"), key, 0600); err != nil {
 		return err
 	}
-	manifest, _ := json.Marshal(map[string]any{"version": 1, "createdAt": time.Now().UTC(), "containsSecrets": true})
+	manifest, _ := json.Marshal(map[string]any{"version": 1, "backend": backend, "createdAt": time.Now().UTC(), "containsSecrets": true})
 	if err = os.WriteFile(filepath.Join(temp, "manifest.json"), manifest, 0600); err != nil {
 		return err
 	}
@@ -270,7 +315,7 @@ func backup(args []string) error {
 	}()
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
-	for _, name := range []string{"hqip.db", "master.key", "manifest.json"} {
+	for _, name := range []string{databaseFile, "master.key", "manifest.json"} {
 		path := filepath.Join(temp, name)
 		info, e := os.Stat(path)
 		if e != nil {
@@ -352,7 +397,7 @@ func restore(args []string) error {
 		if e != nil {
 			return e
 		}
-		if h.Name != "hqip.db" && h.Name != "master.key" && h.Name != "manifest.json" {
+		if h.Name != "hqip.db" && h.Name != "hqip.pg.dump" && h.Name != "master.key" && h.Name != "manifest.json" {
 			return errors.New("备份包含不允许的文件")
 		}
 		if seen[h.Name] || h.Typeflag != tar.TypeReg || h.Size < 0 || h.Size > 4<<30 {
@@ -369,10 +414,21 @@ func restore(args []string) error {
 			return e
 		}
 	}
-	if !seen["hqip.db"] || !seen["master.key"] {
+	if seen["hqip.db"] == seen["hqip.pg.dump"] || !seen["master.key"] {
 		return errors.New("备份缺少数据库或主密钥")
 	}
-	db, err := store.Open(temp, "")
+	postgres := seen["hqip.pg.dump"]
+	if postgres != (os.Getenv("HQIP_DATABASE_URL") != "") {
+		return errors.New("备份类型与 HQIP_DATABASE_URL 配置不匹配")
+	}
+	if postgres {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if err = pgstore.Restore(ctx, os.Getenv("HQIP_DATABASE_URL"), filepath.Join(temp, "hqip.pg.dump")); err != nil {
+			return err
+		}
+	}
+	db, err := store.OpenConfigured(temp, "", os.Getenv("HQIP_DATABASE_URL"))
 	if err != nil {
 		return err
 	}
@@ -387,7 +443,11 @@ func restore(args []string) error {
 	if err = os.MkdirAll(abs, 0700); err != nil {
 		return err
 	}
-	for _, name := range []string{"master.key", "hqip.db"} {
+	dataFile := "hqip.db"
+	if postgres {
+		dataFile = "postgresql.enabled"
+	}
+	for _, name := range []string{"master.key", dataFile} {
 		if err = os.Rename(filepath.Join(temp, name), filepath.Join(abs, name)); err != nil {
 			return err
 		}

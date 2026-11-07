@@ -1,6 +1,6 @@
 """Atomic three-domain upgrade. Rollback restores code/routes, never accounting."""
 from __future__ import annotations
-import argparse,hashlib,json,os,shutil,sqlite3,sys,time
+import argparse,hashlib,json,os,shlex,shutil,sqlite3,subprocess,sys,time
 from pathlib import Path
 from contextlib import closing
 sys.dont_write_bytecode=True
@@ -10,8 +10,39 @@ SITE=Path('/etc/nginx/sites-available/hqip.conf')
 UNIT=Path('/etc/systemd/system/hqip-control.service')
 BACKUPS=Path('/root/backups')
 PREP=Path('/etc/nginx/sites-enabled/hqip-domains-prepare.conf')
+STORAGE_ENV=Path('/etc/hqip-control/storage.env')
+
+def postgres_enabled():
+ return (control.DATA/'postgresql.enabled').is_file()
+
+def storage_environment():
+ # A deliberately small EnvironmentFile subset: one quoted KEY=value per line,
+ # no shell evaluation, interpolation, includes or inherited PG credentials.
+ # The probe/backup binary needs only these explicitly parsed settings. Do not
+ # forward the deployer's ambient environment (which may contain unrelated
+ # cloud or database credentials) into a long-lived child process.
+ env={}
+ if STORAGE_ENV.is_symlink() or not STORAGE_ENV.is_file():raise ValueError('PostgreSQL storage environment is missing')
+ if os.name!='nt' and STORAGE_ENV.stat().st_mode & 0o077:raise ValueError('Storage environment must have mode 0600')
+ for line in STORAGE_ENV.read_text().splitlines():
+  parts=shlex.split(line,comments=True,posix=True)
+  if not parts:continue
+  if len(parts)!=1 or '=' not in parts[0]:raise ValueError('Invalid storage environment line')
+  key,value=parts[0].split('=',1)
+  if key not in {'HQIP_DATABASE_URL','HQIP_REDIS_URL','HQIP_REDIS_NAMESPACE'} or not value:raise ValueError('Unexpected or empty storage setting')
+  env[key]=value
+ if not env.get('HQIP_DATABASE_URL') or not env.get('HQIP_REDIS_URL'):raise ValueError('Both PostgreSQL and Redis configuration are required')
+ return env
+
+def postgres_info():
+ process=subprocess.run([str(control.BASE/'current/hqip'),'storage-info','--data-dir',str(control.DATA)],env=storage_environment(),capture_output=True,text=True,timeout=30,check=False)
+ if process.returncode:raise ValueError('PostgreSQL deployment probe failed; live storage was not changed')
+ value=json.loads(process.stdout)
+ if value.get('backend')!='postgresql' or value.get('postgresSchemaVersion')!=1:raise ValueError('Unsupported PostgreSQL schema')
+ return value
 
 def schema_version():
+ if postgres_enabled():return postgres_info()['schemaVersion']
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
   row=db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
   if row not in [('4',),('5',)]:raise ValueError('Unexpected schema version')
@@ -26,12 +57,13 @@ def subscription_migration_ready():
 
 def data_identity():
  if control.DATA.is_symlink() or not control.DATA.is_dir():raise ValueError('Invalid live data directory')
- database,key=control.DATA/'hqip.db',control.DATA/'master.key'
+ database,key=control.DATA/('postgresql.enabled' if postgres_enabled() else 'hqip.db'),control.DATA/'master.key'
  if any(p.is_symlink() or not p.is_file() for p in (database,key)):raise ValueError('Database and paired key required')
  schema_version()
  return hashlib.sha256(key.read_bytes()).hexdigest()
 
 def disable_feishu():
+ if postgres_enabled():return
  with closing(sqlite3.connect(control.DATA/'hqip.db')) as db,db:
   if db.execute("SELECT 1 FROM sqlite_master WHERE name='feishu_settings'").fetchone():
    db.execute("UPDATE feishu_settings SET enabled=0,webhook='',secret=''")
@@ -52,6 +84,10 @@ def verify_agent_assets(release,old,manifest):
  return {'artifacts/manifest.json',*('artifacts/'+name for name in names)}
 
 def require_billing_compatible(manifest):
+ if postgres_enabled():
+  if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
+  if manifest.get('serverBillingVersion',0)<2:raise ValueError('PostgreSQL requires serverBillingVersion 2')
+  return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
   initialized=db.execute("SELECT 1 FROM sqlite_master WHERE name IN ('server_billing','node_hourly_coverage') LIMIT 1").fetchone()
   # The schema gate also covers an upgraded Agent before its first report. Old
@@ -122,7 +158,10 @@ def upgrade(release,state):
   if data_identity()!=info['masterSHA256']:raise ValueError('Stopped data identity changed')
   if manifest.get('schemaVersion',4)==5:subscription_migration_ready()
   if any(p.is_symlink() for p in control.DATA.rglob('*')):raise ValueError('Symlink in live data')
-  shutil.copytree(control.DATA,state/'data.before')
+  if postgres_enabled():
+   process=subprocess.run([str(previous/'hqip'),'backup','--data-dir',str(control.DATA),'--output',str(state/'postgres.before.tar.gz')],env=storage_environment(),capture_output=True,timeout=1900,check=False)
+   if process.returncode:raise RuntimeError('PostgreSQL backup failed; release activation refused')
+  else:shutil.copytree(control.DATA,state/'data.before')
   for p in state.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
   disable_feishu()
   control.point_current(release)

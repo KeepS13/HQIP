@@ -21,7 +21,11 @@ type Installer interface {
 	Install(context.Context, provision.Input, provision.LogFunc, provision.PinFunc) (provision.Result, error)
 	Verify(context.Context, provision.Input, provision.LogFunc) (provision.Result, error)
 }
+type LoginLimiter interface {
+	Allow(context.Context, string, int, time.Duration) (bool, error)
+}
 type Options struct {
+	LoginLimiter                                    LoginLimiter
 	TurnstileClient                                 *http.Client
 	PublicURL, AdminOrigin, UserOrigin, ArtifactDir string
 	Installer                                       Installer
@@ -58,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) AdminHandler() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("GET /readyz", s.ready)
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]bool{"ok": true}) })
 	m.HandleFunc("GET /api/v1/session", s.session)
 	m.HandleFunc("POST /api/v1/login", s.login)
@@ -95,6 +100,7 @@ func (s *Server) AdminHandler() http.Handler {
 // It remains safe even if the reverse proxy forwards an unexpected URL.
 func (s *Server) PublicHandler() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("GET /readyz", s.ready)
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]bool{"ok": true}) })
 	m.HandleFunc("GET /api/v1/agents/config", s.agentConfig)
 	m.HandleFunc("POST /api/v1/agents/report", s.agentReport)
@@ -123,6 +129,9 @@ func (s *Server) legacyClientGate(next http.Handler) http.Handler {
 }
 
 func (s *Server) headers(m http.Handler, origin string) http.Handler {
+	// Bound concurrent work before parsing bodies or waiting for a database
+	// connection. Overload is explicit and retryable, not an unbounded queue.
+	slots := make(chan struct{}, 64)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		browserAPI := strings.HasPrefix(r.URL.Path, "/api/") && (origin == s.opts.AdminOrigin || strings.HasPrefix(r.URL.Path, "/api/v1/user/"))
 		if browserAPI {
@@ -172,8 +181,35 @@ func (s *Server) headers(m http.Handler, origin string) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/sub/") || strings.HasPrefix(r.URL.Path, "/usub/") || r.URL.Path == "/authorize" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
+		if r.URL.Path != "/healthz" {
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			default:
+				w.Header().Set("Retry-After", "1")
+				fail(w, http.StatusServiceUnavailable, "服务繁忙，请稍后重试")
+				return
+			}
+		}
 		m.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := s.Store.DB.PingContext(ctx); err != nil {
+		fail(w, 503, "服务暂不可用")
+		return
+	}
+	if s.opts.LoginLimiter != nil {
+		probe, ok := s.opts.LoginLimiter.(interface{ Ping(context.Context) error })
+		if !ok || probe.Ping(ctx) != nil {
+			fail(w, 503, "服务暂不可用")
+			return
+		}
+	}
+	reply(w, 200, map[string]bool{"ok": true})
 }
 
 func reply(w http.ResponseWriter, status int, v any) {
@@ -294,7 +330,22 @@ func clientIP(r *http.Request) string {
 	}
 	return host
 }
-func (s *Server) allowLogin(ip string) bool {
+func (s *Server) allowLogin(w http.ResponseWriter, r *http.Request, ip string) bool {
+	if s.opts.LoginLimiter != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		allowed, err := s.opts.LoginLimiter.Allow(ctx, ip, 10, 15*time.Minute)
+		if err != nil {
+			w.Header().Set("Retry-After", "5")
+			fail(w, http.StatusServiceUnavailable, "安全校验服务暂不可用，请稍后重试")
+			return false
+		}
+		if !allowed {
+			w.Header().Set("Retry-After", "900")
+			fail(w, http.StatusTooManyRequests, "尝试过多，请稍后重试")
+		}
+		return allowed
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.Store.Now()
@@ -314,9 +365,13 @@ func (s *Server) allowLogin(ip string) bool {
 		}
 	}
 	if len(s.attempts[ip]) >= 10 {
+		w.Header().Set("Retry-After", "900")
+		fail(w, http.StatusTooManyRequests, "尝试过多，请稍后重试")
 		return false
 	}
 	if len(s.attempts) > 10000 {
+		w.Header().Set("Retry-After", "900")
+		fail(w, http.StatusTooManyRequests, "请求繁忙，请稍后重试")
 		return false
 	}
 	s.attempts[ip] = append(s.attempts[ip], now)
@@ -334,9 +389,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if !s.allowLogin(clientIP(r)) {
-		w.Header().Set("Retry-After", "900")
-		fail(w, 429, "登录尝试过多，请 15 分钟后重试")
+	if !s.allowLogin(w, r, clientIP(r)) {
 		return
 	}
 	if len(body.Username) > 80 || len(body.Password) > 1024 {
@@ -380,6 +433,10 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, map[string]bool{"ok": true})
 }
 func (s *Server) password(w http.ResponseWriter, r *http.Request) {
+	if !s.beginPasswordWork(w, r, "admin") {
+		return
+	}
+	defer func() { <-s.authSlots }()
 	var b struct {
 		Current string `json:"currentPassword"`
 		New     string `json:"newPassword"`

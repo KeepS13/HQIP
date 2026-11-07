@@ -18,7 +18,7 @@ import (
 
 func newServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
-	s, err := store.Open(t.TempDir(), "https://panel.example.com")
+	s, err := controlTestStore(t)
 	if err != nil {
 		t.Fatal(err)
 	}

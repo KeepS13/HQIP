@@ -13,6 +13,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/pgstore"
 	"github.com/KeepS13/HQIP/internal/secure"
 	_ "modernc.org/sqlite"
 )
@@ -21,11 +22,12 @@ var Shanghai, _ = time.LoadLocation("Asia/Shanghai")
 var ErrNotFound = errors.New("记录不存在")
 
 type Store struct {
-	DB      *sql.DB
-	Vault   *secure.Vault
-	BaseURL string
-	DataDir string
-	Now     func() time.Time
+	postgresDSN string
+	DB          *sql.DB
+	Vault       *secure.Vault
+	BaseURL     string
+	DataDir     string
+	Now         func() time.Time
 }
 
 const schema = `
@@ -48,6 +50,11 @@ INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version','1');
 `
 
 func Open(dataDir, baseURL string) (*Store, error) {
+	if _, err := os.Stat(filepath.Join(dataDir, "postgresql.enabled")); err == nil {
+		return nil, errors.New("此目录已切换 PostgreSQL；必须配置 HQIP_DATABASE_URL，禁止回退到旧 SQLite")
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, err
 	}
@@ -216,6 +223,9 @@ func (s *Store) Events(nodeID string, after int64) ([]model.TaskEvent, error) {
 }
 
 func (s *Store) Snapshot(ctx context.Context, destination string) error {
+	if s.Postgres() {
+		return pgstore.Dump(ctx, s.postgresDSN, destination)
+	}
 	// VACUUM INTO produces a consistent SQLite snapshot including WAL transactions.
 	_, err := s.DB.ExecContext(ctx, "VACUUM INTO ?", destination)
 	return err
@@ -239,13 +249,19 @@ func (s *Store) ReconcileRestore() error {
 	if _, err = tx.Exec("UPDATE client_sessions SET revoked=1"); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`UPDATE portal_sessions SET revoked=1;
-UPDATE portal_authorizations SET consumed=1;
-UPDATE portal_leases SET revoked=1;
-DELETE FROM portal_credentials;
-UPDATE portal_subscriptions SET subscription_hash='',subscription_secret='',revision=revision+1;
-UPDATE portal_users SET revision=revision+1;`); err != nil {
-		return err
+	// Keep each statement separate: the PostgreSQL driver uses the extended
+	// protocol, which intentionally rejects multi-command SQL strings.
+	for _, query := range []string{
+		"UPDATE portal_sessions SET revoked=1",
+		"UPDATE portal_authorizations SET consumed=1",
+		"UPDATE portal_leases SET revoked=1",
+		"DELETE FROM portal_credentials",
+		"UPDATE portal_subscriptions SET subscription_hash='',subscription_secret='',revision=revision+1",
+		"UPDATE portal_users SET revision=revision+1",
+	} {
+		if _, err = tx.Exec(query); err != nil {
+			return err
+		}
 	}
 	for key, value := range map[string]string{"portal_recovery_hold": "true", "portal_recovery_epoch": NewID(), "portal_recovery_started": fmt.Sprint(s.Now().Unix())} {
 		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {

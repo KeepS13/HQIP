@@ -10,7 +10,7 @@ import (
 )
 
 func TestVersionTwoServerMigrationPreservesIDsGrantsAndCounters(t *testing.T) {
-	s, now := fixture(t)
+	s, now := sqliteFixture(t)
 	a := newNode(t, s, "legacy-good")
 	b := newNode(t, s, "legacy-owner-conflict")
 	d := newDevice(t, s, "existing-device")

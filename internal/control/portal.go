@@ -238,8 +238,7 @@ func (s *Server) portalLoginAttempt(w http.ResponseWriter, r *http.Request, acti
 		fail(w, 403, "请求来源无效")
 		return b, false
 	}
-	if !s.allowLogin("portal:" + clientIP(r)) {
-		fail(w, 429, "尝试过多，请稍后重试")
+	if !s.allowLogin(w, r, "portal:"+clientIP(r)) {
 		return b, false
 	}
 	if !readJSON(w, r, &b) {
@@ -249,8 +248,7 @@ func (s *Server) portalLoginAttempt(w http.ResponseWriter, r *http.Request, acti
 		fail(w, 400, "邮箱或密码格式无效")
 		return b, false
 	}
-	if !s.allowLogin("portal-account:" + secure.Hash(strings.ToLower(strings.TrimSpace(b.Email)))) {
-		fail(w, 429, "该账号尝试过多，请稍后重试")
+	if !s.allowLogin(w, r, "portal-account:"+secure.Hash(strings.ToLower(strings.TrimSpace(b.Email)))) {
 		return b, false
 	}
 	if !s.verifyTurnstile(r.Context(), b.TurnstileToken, clientIP(r), action) {
@@ -325,6 +323,10 @@ func (s *Server) portalLogout(w http.ResponseWriter, r *http.Request, user, sess
 	portalResult(w, map[string]bool{"ok": true}, err)
 }
 func (s *Server) portalPassword(w http.ResponseWriter, r *http.Request, user, session string) {
+	if !s.beginPasswordWork(w, r, "user:"+user) {
+		return
+	}
+	defer func() { <-s.authSlots }()
 	var b struct {
 		Current string `json:"currentPassword"`
 		New     string `json:"newPassword"`
@@ -419,8 +421,7 @@ func (s *Server) portalAuthorize(w http.ResponseWriter, r *http.Request, user, s
 	portalResult(w, map[string]string{"redirectUrl": redirect}, err)
 }
 func (s *Server) nativeBegin(w http.ResponseWriter, r *http.Request) {
-	if !s.allowLogin("native-authorize:" + clientIP(r)) {
-		fail(w, 429, "请求过多")
+	if !s.allowLogin(w, r, "native-authorize:"+clientIP(r)) {
 		return
 	}
 	var b struct {
@@ -437,8 +438,7 @@ func (s *Server) nativeBegin(w http.ResponseWriter, r *http.Request) {
 	portalResult(w, map[string]any{"requestId": id, "authorizationUrl": s.opts.UserOrigin + "/authorize?request=" + id, "expiresAt": expires}, err)
 }
 func (s *Server) nativeToken(w http.ResponseWriter, r *http.Request) {
-	if !s.allowLogin("native-token:" + clientIP(r)) {
-		fail(w, 429, "请求过多")
+	if !s.allowLogin(w, r, "native-token:"+clientIP(r)) {
 		return
 	}
 	var b struct {

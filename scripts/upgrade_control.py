@@ -67,7 +67,8 @@ def healthy():
     for _ in range(30):
         try:
             for port in [18090, 18091]:
-                with opener.open(f'http://127.0.0.1:{port}/healthz', timeout=2) as response:
+                endpoint='readyz' if (DATA/'postgresql.enabled').is_file() else 'healthz'
+                with opener.open(f'http://127.0.0.1:{port}/{endpoint}', timeout=2) as response:
                     if response.status != 200 or not json.load(response).get('ok'):
                         raise ValueError('Unhealthy controller')
             if run('systemctl', 'is-active', SERVICE) == 'active':
@@ -78,6 +79,8 @@ def healthy():
 
 
 def rollback(state):
+    if (DATA/'postgresql.enabled').exists():
+        raise ValueError('PostgreSQL data cannot use the legacy SQLite rollback; use upgrade_domains.py')
     if state.is_symlink() or not state.is_dir() or state.resolve() != state:
         raise ValueError('Unsafe backup directory')
     info = json.loads((state / 'state.json').read_text())
@@ -136,6 +139,8 @@ def assert_pre_activation(state):
 
 
 def upgrade(release, state):
+    if (DATA/'postgresql.enabled').exists():
+        raise ValueError('PostgreSQL requires the schema-aware upgrade_domains.py workflow')
     release, manifest = verify_release(release)
     previous = (BASE / 'current').resolve(strict=True)
     verify_release(previous)

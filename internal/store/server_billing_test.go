@@ -186,7 +186,7 @@ func TestServerPrepaidRenewalIdempotenceBoundariesAndRestart(t *testing.T) {
 	if err != nil || v.Billing.Status != "expired" || v.Billing.CycleID != finalCycle || v.Billing.CycleUpload != 40 {
 		t.Fatal("final expiry reset usage", v.Billing, err)
 	}
-	reopened, err := Open(s.DataDir, s.BaseURL)
+	reopened, err := reopenFixture(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,10 @@ func TestServerBillingOldAgentGapKeepsVerifiedDaysAndExcludesAmbiguousDays(t *te
 	if err != nil || v.Billing.CycleUpload != 100 || v.Billing.CycleDownload != 200 || v.Billing.CycleComplete {
 		t.Fatal("old Agent gap charged ambiguous days or erased earlier known day", v.Billing, err)
 	}
-	if _, err = s.DB.Exec("DELETE FROM daily WHERE start>?;DELETE FROM native_hourly", DayStart(knownDay)); err != nil {
+	if _, err = s.DB.Exec("DELETE FROM daily WHERE start>?", DayStart(knownDay)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec("DELETE FROM native_hourly"); err != nil {
 		t.Fatal(err)
 	}
 	v, err = s.Server(v.ID)

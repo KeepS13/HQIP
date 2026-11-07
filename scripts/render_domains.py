@@ -37,6 +37,7 @@ def tls_host(host):
 def render():
  text='''# Included in nginx http; never log tokens, queries or authorization codes.
 log_format hqip_control_safe '$remote_addr [$time_local] $request_method $status $body_bytes_sent $request_time';
+limit_conn_zone $binary_remote_addr zone=hqip_api_connections:10m;
 '''
  text+=f'''map $request_uri $hqip_user_csp {{
  default "{BASE_CSP}";
@@ -64,6 +65,12 @@ map $uri $hqip_static_cache {{ default "no-store"; ~^/assets/ "public, max-age=3
  text+=''.join(' set_real_ip_from '+cidr+';\n' for cidr in CF_RANGES)
  text+=''' real_ip_header CF-Connecting-IP;
  real_ip_recursive off;
+ limit_conn hqip_api_connections 200;
+ limit_conn_status 429;
+ client_header_timeout 15s;
+ client_body_timeout 15s;
+ send_timeout 30s;
+ reset_timedout_connection on;
  client_max_body_size 10m;
  proxy_http_version 1.1;
  proxy_set_header Host $host;
@@ -73,7 +80,7 @@ map $uri $hqip_static_cache {{ default "no-store"; ~^/assets/ "public, max-age=3
  proxy_set_header Connection "";
  proxy_buffering off; proxy_cache off;
  proxy_read_timeout 3600s;
- location ~ ^/(api/v1/(client|agents|user)(/|$)|api/v[23]/client(/|$)|sub/|usub/|healthz$|downloads/) { proxy_pass http://127.0.0.1:18091; }
+ location ~ ^/(api/v1/(client|agents|user)(/|$)|api/v[23]/client(/|$)|sub/|usub/|healthz$|readyz$|downloads/) { proxy_pass http://127.0.0.1:18091; }
  location /api/ { proxy_pass http://127.0.0.1:18090; }
  location / { return 404; }
 }

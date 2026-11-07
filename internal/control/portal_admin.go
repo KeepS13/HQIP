@@ -29,6 +29,10 @@ func (s *Server) portalAdminEnabled(w http.ResponseWriter, r *http.Request) {
 	s.portalAdminUser(w, r)
 }
 func (s *Server) portalAdminPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.beginPasswordWork(w, r, "reset:"+r.PathValue("id")) {
+		return
+	}
+	defer func() { <-s.authSlots }()
 	var b struct {
 		Password string `json:"password"`
 	}

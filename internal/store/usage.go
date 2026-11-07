@@ -44,105 +44,108 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 			return errors.New("分钟流量数据格式无效")
 		}
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var desired int64
 	var lifecycle string
-	if err = tx.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", nodeID).Scan(&desired, &lifecycle); err != nil {
-		return notFound(err)
-	}
-	if r.Revision < 0 || r.Revision > desired {
-		return errors.New("配置版本无效")
-	}
-	// Portal lease identities remain valid for historical ledger reports after
-	// credential rotation or expiry. Quota is settled only by lease reports;
-	// these buckets feed node/server traffic graphs and never charge it again.
-	rows, err := tx.Query("SELECT c.device_id FROM credentials c JOIN devices d ON d.id=c.device_id WHERE c.node_id=? UNION SELECT accounting_id FROM node_accounting_identities WHERE node_id=?", nodeID, nodeID)
-	if err != nil {
-		return err
-	}
-	valid := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
+	err := retryDatabaseError(func() error {
+		tx, err := s.DB.Begin()
+		if err != nil {
 			return err
 		}
-		valid[id] = true
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	online := map[string]int{}
-	for id, count := range r.Online {
-		if count < 0 || count > 100000 {
-			return errors.New("在线实例数量无效")
+		defer tx.Rollback()
+		var desired int64
+		if err = tx.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", nodeID).Scan(&desired, &lifecycle); err != nil {
+			return notFound(err)
 		}
-		if valid[id] && count > 0 {
-			online[id] = count
+		if r.Revision < 0 || r.Revision > desired {
+			return errors.New("配置版本无效")
 		}
-	}
-	for _, b := range r.Daily {
-		if !valid[b.DeviceID] || b.Start < dailyCutoff {
-			continue
+		// Portal lease identities remain valid for historical ledger reports after
+		// credential rotation or expiry. Quota is settled only by lease reports;
+		// these buckets feed node/server traffic graphs and never charge it again.
+		rows, err := tx.Query("SELECT c.device_id FROM credentials c JOIN devices d ON d.id=c.device_id WHERE c.node_id=? UNION SELECT accounting_id FROM node_accounting_identities WHERE node_id=?", nodeID, nodeID)
+		if err != nil {
+			return err
 		}
-		up, down, e := upsertBucket(tx, "daily", nodeID, b)
-		if e != nil {
-			return e
+		valid := map[string]bool{}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			valid[id] = true
 		}
-		if up > 0 || down > 0 {
-			if _, err = tx.Exec("INSERT INTO lifetime(node_id,device_id,upload,download) VALUES(?,?,?,?) ON CONFLICT(node_id,device_id) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download", nodeID, b.DeviceID, up, down); err != nil {
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		online := map[string]int{}
+		for id, count := range r.Online {
+			if count < 0 || count > 100000 {
+				return errors.New("在线实例数量无效")
+			}
+			if valid[id] && count > 0 {
+				online[id] = count
+			}
+		}
+		for _, b := range r.Daily {
+			if !valid[b.DeviceID] || b.Start < dailyCutoff {
+				continue
+			}
+			up, down, e := upsertBucket(tx, "daily", nodeID, b)
+			if e != nil {
+				return e
+			}
+			if up > 0 || down > 0 {
+				if _, err = tx.Exec("INSERT INTO lifetime(node_id,device_id,upload,download) VALUES(?,?,?,?) ON CONFLICT(node_id,device_id) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download", nodeID, b.DeviceID, up, down); err != nil {
+					return err
+				}
+			}
+		}
+		for _, b := range r.Minutes {
+			if !valid[b.DeviceID] || b.Start < minuteCutoff {
+				continue
+			}
+			up, down, e := upsertBucket(tx, "minute", nodeID, b)
+			if e != nil {
+				return e
+			}
+			if up > 0 || down > 0 {
+				if _, err = tx.Exec("INSERT INTO hourly(node_id,device_id,start,upload,download) VALUES(?,?,?,?,?) ON CONFLICT(node_id,device_id,start) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download", nodeID, b.DeviceID, b.Start/3600*3600, up, down); err != nil {
+					return err
+				}
+			}
+		}
+		if err = recordHourlyReport(tx, nodeID, r, valid, now); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("UPDATE nodes SET managed=1,applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
+			return err
+		}
+		if err = s.recordRemovals(tx, nodeID, r.Removals); err != nil {
+			return err
+		}
+		if err = s.recordLifecycle(tx, nodeID, r); err != nil {
+			return err
+		}
+		if len(r.Warnings) > 0 {
+			// Agent messages can contain runtime diagnostics; persist a bounded,
+			// non-secret notice rather than arbitrary remote text in audit logs.
+			if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "agent-warning:"+nodeID, "节点 Agent 报告撤销处理告警，请检查节点日志"); err != nil {
 				return err
 			}
 		}
-	}
-	for _, b := range r.Minutes {
-		if !valid[b.DeviceID] || b.Start < minuteCutoff {
-			continue
-		}
-		up, down, e := upsertBucket(tx, "minute", nodeID, b)
-		if e != nil {
-			return e
-		}
-		if up > 0 || down > 0 {
-			if _, err = tx.Exec("INSERT INTO hourly(node_id,device_id,start,upload,download) VALUES(?,?,?,?,?) ON CONFLICT(node_id,device_id,start) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download", nodeID, b.DeviceID, b.Start/3600*3600, up, down); err != nil {
+		if r.HistoryCompacted {
+			if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "history:"+nodeID, fmt.Sprint(now.Unix())); err != nil {
 				return err
 			}
 		}
-	}
-	if err = recordHourlyReport(tx, nodeID, r, valid, now); err != nil {
-		return err
-	}
-	if _, err = tx.Exec("UPDATE nodes SET managed=1,applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
-		return err
-	}
-	if err = s.recordRemovals(tx, nodeID, r.Removals); err != nil {
-		return err
-	}
-	if err = s.recordLifecycle(tx, nodeID, r); err != nil {
-		return err
-	}
-	if len(r.Warnings) > 0 {
-		// Agent messages can contain runtime diagnostics; persist a bounded,
-		// non-secret notice rather than arbitrary remote text in audit logs.
-		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "agent-warning:"+nodeID, "节点 Agent 报告撤销处理告警，请检查节点日志"); err != nil {
+		if err = RecordServerBillingUsage(tx, nodeID, now); err != nil {
 			return err
 		}
-	}
-	if r.HistoryCompacted {
-		if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "history:"+nodeID, fmt.Sprint(now.Unix())); err != nil {
-			return err
-		}
-	}
-	if err = RecordServerBillingUsage(tx, nodeID, now); err != nil {
-		return err
-	}
-	if err = tx.Commit(); err != nil {
+		return tx.Commit()
+	})
+	if err != nil {
 		return err
 	}
 	if r.Certificate != nil && lifecycle == "active" {

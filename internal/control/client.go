@@ -15,6 +15,10 @@ import (
 )
 
 func (s *Server) clientAccount(w http.ResponseWriter, r *http.Request) {
+	if !s.beginPasswordWork(w, r, "legacy:"+r.PathValue("id")) {
+		return
+	}
+	defer func() { <-s.authSlots }()
 	var b struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -66,9 +70,7 @@ func (s *Server) clientLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := "client:" + clientIP(r)
-	if !s.allowLogin(ip) {
-		w.Header().Set("Retry-After", "900")
-		fail(w, 429, "登录尝试过多，请 15 分钟后重试")
+	if !s.allowLogin(w, r, ip) {
 		return
 	}
 	select {

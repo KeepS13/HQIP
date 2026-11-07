@@ -38,8 +38,16 @@ func (s *Store) ActivatePortal() error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec(`UPDATE metadata SET value='true' WHERE key='portal_enabled'; UPDATE devices SET enabled=0; UPDATE client_sessions SET revoked=1; UPDATE removals SET immediate=1 WHERE status NOT IN ('revoked','cancelled'); UPDATE nodes SET desired_revision=desired_revision+1;`); err != nil {
-		return err
+	for _, query := range []string{
+		"UPDATE metadata SET value='true' WHERE key='portal_enabled'",
+		"UPDATE devices SET enabled=0",
+		"UPDATE client_sessions SET revoked=1",
+		"UPDATE removals SET immediate=1 WHERE status NOT IN ('revoked','cancelled')",
+		"UPDATE nodes SET desired_revision=desired_revision+1",
+	} {
+		if _, err = tx.Exec(query); err != nil {
+			return err
+		}
 	}
 	if err = tx.Commit(); err == nil {
 		s.Audit("portal.activate", "legacy-device-auth-disabled")

@@ -1,0 +1,43 @@
+name: hqip-storage
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hqip
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+    ports: ['127.0.0.1:15432:5432']
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./init-roles.sql:/docker-entrypoint-initdb.d/10-hqip-roles.sql:ro
+    secrets: [postgres_password, app_password, migration_password]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d hqip']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: ['postgres', '-c', 'max_connections=120', '-c', 'log_min_error_statement=panic']
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    ports: ['127.0.0.1:16379:6379']
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    secrets: [redis_acl]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+volumes:
+  postgres_data:
+  redis_data:
+secrets:
+  postgres_password: {file: ./secrets/postgres-password}
+  app_password: {file: ./secrets/app-password}
+  migration_password: {file: ./secrets/migration-password}
+  redis_acl: {file: ./secrets/redis-acl}

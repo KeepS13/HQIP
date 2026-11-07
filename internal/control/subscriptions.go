@@ -121,8 +121,7 @@ func (s *Server) userSubscriptionRequests(w http.ResponseWriter, r *http.Request
 		portalResult(w, v, err)
 		return
 	}
-	if !s.allowLogin("subscription-request:" + user) {
-		fail(w, 429, "申请过于频繁，请稍后重试")
+	if !s.allowLogin(w, r, "subscription-request:"+user) {
 		return
 	}
 	var b struct {

@@ -81,11 +81,8 @@ func (s *Store) QueueNetworkQuality(id, password string, revision int64) (model.
 	if requested > 0 && s.Now().Unix()-requested < 600 {
 		return model.NetworkQualityStatus{}, ErrQualityCooldown
 	}
-	res, err := tx.Exec("INSERT INTO jobs(node_id,kind,created_at) VALUES(?,'quality',?)", id, s.Now().Unix())
-	if err != nil {
-		return model.NetworkQualityStatus{}, err
-	}
-	jobID, err := res.LastInsertId()
+	var jobID int64
+	err = tx.QueryRow("INSERT INTO jobs(node_id,kind,created_at) VALUES(?,'quality',?) RETURNING id", id, s.Now().Unix()).Scan(&jobID)
 	if err != nil {
 		return model.NetworkQualityStatus{}, err
 	}

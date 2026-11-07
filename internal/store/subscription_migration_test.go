@@ -41,7 +41,7 @@ INSERT OR REPLACE INTO metadata VALUES('portal_enabled','true'),('portal_registr
 }
 
 func TestSubscriptionMigrationRequiresExplicitDrainAndPreservesHistory(t *testing.T) {
-	s, now := fixture(t)
+	s, now := sqliteFixture(t)
 	n := newNode(t, s, "migration-node")
 	legacySubscriptionFixture(t, s, n.ID)
 	if _, err := s.DB.Exec("INSERT INTO daily VALUES(?,'user_old-user',?,100,200)", n.ID, DayStart(*now)); err != nil {
@@ -113,7 +113,7 @@ func TestSubscriptionMigrationRequiresExplicitDrainAndPreservesHistory(t *testin
 }
 
 func TestSubscriptionMigrationEmptyDevelopmentDatabaseCanUpgrade(t *testing.T) {
-	s, _ := fixture(t)
+	s, _ := sqliteFixture(t)
 	n := newNode(t, s, "empty-migration")
 	legacySubscriptionFixture(t, s, n.ID)
 	if _, err := s.DB.Exec("DELETE FROM portal_rates;DELETE FROM portal_leases;DELETE FROM portal_users;DELETE FROM portal_plans"); err != nil {

@@ -41,11 +41,48 @@ jobs:
           name: linux-release
           path: |
             dist/hqip-linux-amd64
+            dist/hqip-migrate-postgres-linux-amd64
             dist/agent-linux-amd64
             dist/agent-linux-arm64
             admin-web/dist
             user-web/dist
           if-no-files-found: error
+  postgres:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: hqip_test
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: hqip_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U hqip_test -d hqip_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      HQIP_TEST_POSTGRES_URL: postgres://hqip_test:test-only-password@127.0.0.1:5432/hqip_test?sslmode=disable
+      HQIP_TEST_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install matching PostgreSQL backup tools
+        run: |
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/hqip-pgdg.asc >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/hqip-pgdg.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/hqip-pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-18
+          echo '/usr/lib/postgresql/18/bin' >> "$GITHUB_PATH"
+      - run: go test -race ./internal/store ./internal/control ./internal/pgstore ./internal/ratelimit ./cmd/hqip
   windows:
     runs-on: windows-latest
     steps:
@@ -92,7 +129,7 @@ jobs:
           if-no-files-found: error
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [check, windows]
+    needs: [check, windows, postgres]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:

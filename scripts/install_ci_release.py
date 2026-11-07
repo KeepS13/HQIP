@@ -58,7 +58,7 @@ def materialize(archive, expected, sha, current, release):
                 shutil.copyfile(source, destination)
             if digest(destination) != expected_hash:
                 raise ValueError('Payload checksum mismatch: ' + name)
-            destination.chmod(0o755 if name == 'hqip' or name.startswith('artifacts/') and '-linux-' in name else 0o644)
+            destination.chmod(0o755 if name in {'hqip','hqip-migrate-postgres'} or name.startswith('artifacts/') and '-linux-' in name else 0o644)
         (release / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
         (release / 'release.json').chmod(0o644)
 

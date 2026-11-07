@@ -14,7 +14,7 @@ def main():
  desktop=json.loads((ROOT/'dist/desktop-manifest.json').read_text(encoding='utf-8'))
  if desktop['sourceSHA']!=sha or desktop['dirty'] or digest(ROOT/'dist/HQIP-Windows-x64.zip')!=desktop['sha256']:raise ValueError('Desktop release must match current clean commit')
  out=ROOT/'dist'/('domains-'+sha);out.mkdir(exist_ok=False)
- inputs={'hqip':ROOT/'dist/hqip-domains-linux-amd64','artifacts/HQIP-Windows-x64.zip':ROOT/'dist/HQIP-Windows-x64.zip','artifacts/desktop-manifest.json':ROOT/'dist/desktop-manifest.json'}
+ inputs={'hqip':ROOT/'dist/hqip-domains-linux-amd64','hqip-migrate-postgres':ROOT/'dist/hqip-migrate-postgres-linux-amd64','artifacts/HQIP-Windows-x64.zip':ROOT/'dist/HQIP-Windows-x64.zip','artifacts/desktop-manifest.json':ROOT/'dist/desktop-manifest.json'}
  for arch in ['amd64','arm64']:
   name='agent-linux-'+arch;source=ROOT/'dist'/name;inputs['artifacts/'+name]=source;node_manifest['sha256'][name]=digest(source)
  node_manifest['agentTelemetryVersion']=1
@@ -30,7 +30,7 @@ def main():
  hashes=dict(base['sha256'])
  for name,source in inputs.items():
   dest=out/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,dest);hashes[name]=digest(dest)
- manifest={'sourceSHA':sha,'previousSourceSHA':base['sourceSHA'],'upgradeKind':'domains-alerts','schemaVersion':5,'clientApiVersion':3,'serverBillingVersion':2,'agentTelemetryVersion':1,'sha256':hashes}
+ manifest={'sourceSHA':sha,'previousSourceSHA':base['sourceSHA'],'upgradeKind':'domains-alerts','schemaVersion':5,'postgresSchemaVersion':1,'clientApiVersion':3,'serverBillingVersion':2,'agentTelemetryVersion':1,'sha256':hashes}
  (out/'release.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
  archive=ROOT/'dist'/('hqip-domains-'+sha[:12]+'.tar.gz')
  with tarfile.open(archive,'w:gz') as tar:

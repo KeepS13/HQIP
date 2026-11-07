@@ -104,7 +104,7 @@ func TestAlertQuotaCycleAndReopenPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reopening a connection exercises schema migration without resetting state.
-	other, err := Open(s.DataDir, s.BaseURL)
+	other, err := reopenFixture(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestJobAlertsPersistUntilSameKindSuccess(t *testing.T) {
 }
 
 func TestLegacyRobotMigrationDisablesSecretsAndRetainsOnlyBusinessHistory(t *testing.T) {
-	s, now := fixture(t)
+	s, now := sqliteFixture(t)
 	notificationExec(t, s, "DELETE FROM metadata WHERE key='alerts_migrated'")
 	notificationExec(t, s, `CREATE TABLE feishu_settings(enabled INTEGER,webhook TEXT,secret TEXT);INSERT INTO feishu_settings VALUES(1,'encrypted-webhook','encrypted-secret');
  CREATE TABLE notifications(id TEXT,category TEXT,level TEXT,title TEXT,message TEXT,detail_path TEXT,created_at INTEGER,status TEXT,claim TEXT,claim_until INTEGER,next_attempt INTEGER,last_error TEXT);`)
@@ -206,7 +206,7 @@ func TestLegacyRobotMigrationDisablesSecretsAndRetainsOnlyBusinessHistory(t *tes
 }
 
 func TestUserAlertsAreRemovedWithActivityButInfrastructureRemains(t *testing.T) {
-	s, _ := fixture(t)
+	s, _ := sqliteFixture(t)
 	user := model.NotificationCondition{Key: "package.expiry:old", Category: "package", Kind: "package.expiry", ResourceID: "old", Title: "Old account", Message: "Expired", DetailPath: "/users/old", Level: "warning", Stage: 1}
 	node := user
 	node.Key, node.Category, node.Kind, node.DetailPath = "node.month:n:2026-10", "capacity", "node.month", "/nodes/n"

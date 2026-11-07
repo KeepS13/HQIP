@@ -1,6 +1,6 @@
 module github.com/KeepS13/HQIP/desktop/build/windows
 
-go 1.26.5
+go 1.26.10
 
 require github.com/tc-hib/winres v0.3.1
 
