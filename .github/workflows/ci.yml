@@ -83,6 +83,8 @@ jobs:
           sudo apt-get install -y postgresql-client-18
           echo '/usr/lib/postgresql/18/bin' >> "$GITHUB_PATH"
       - run: go test -race ./internal/store ./internal/control ./internal/pgstore ./internal/ratelimit ./cmd/hqip
+      - name: Repeat concurrent payment idempotency and settings checks
+        run: go test -race ./internal/store -run '^TestPayment(DoubleClick|ConcurrentSettings|LateClosed)' -count=15
       - name: Start generated storage configuration with restricted roles
         run: |
           python3 scripts/prepare_storage.py --output "$RUNNER_TEMP/hqip-storage"

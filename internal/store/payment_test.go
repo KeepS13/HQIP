@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -71,6 +72,22 @@ func paymentNotice(o model.PaymentOrder, secret string) url.Values {
 	return url.Values{"merchantNum": {"merchant1"}, "orderNo": {o.OrderNo}, "amount": {amount}, "state": {"1"}, "type": {"alipay"}, "platformOrderNo": {platform}, "actualPayAmount": {amount}, "payTime": {"2020-01-01 00:00:00"}, "sign": {hex.EncodeToString(h[:])}}
 }
 
+func paymentConcurrentStore(t *testing.T, s *Store) *Store {
+	t.Helper()
+	// Production SQLite intentionally uses one connection / one Store. Real
+	// PostgreSQL CI also exercises separate pools, with no process-local lock.
+	if s.postgresDSN == "" {
+		return s
+	}
+	other, err := reopenFixture(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Now = s.Now
+	t.Cleanup(func() { other.Close() })
+	return other
+}
+
 func TestPaymentSettingsEncryptMaskCASAndDoNotReuseAcrossMerchantIdentities(t *testing.T) {
 	s, _, _, _, config := paymentFixture(t)
 	raw, _ := json.Marshal(config)
@@ -110,6 +127,8 @@ func TestPaymentSettingsEncryptMaskCASAndDoNotReuseAcrossMerchantIdentities(t *t
 
 func TestPaymentDoubleClickCallsProviderOnceAndSnapshotsPrice(t *testing.T) {
 	s, _, u, p, _ := paymentFixture(t)
+	other := paymentConcurrentStore(t, s)
+	stores := []*Store{s, other}
 	var calls atomic.Int32
 	client := paymentTestClient()
 	inner := client.Transport
@@ -119,12 +138,17 @@ func TestPaymentDoubleClickCallsProviderOnceAndSnapshotsPrice(t *testing.T) {
 		return inner.RoundTrip(r)
 	})
 	var wg sync.WaitGroup
+	var ready sync.WaitGroup
+	start := make(chan struct{})
 	ids := make(chan string, 8)
-	for range 8 {
+	for i := range 8 {
 		wg.Add(1)
+		ready.Add(1)
 		go func() {
 			defer wg.Done()
-			o, e := s.CreatePaymentOrder(context.Background(), u.ID, model.PaymentOrderInput{RequestID: "double-click", TemplateID: p.ID, TemplateRevision: p.Revision}, client)
+			ready.Done()
+			<-start
+			o, e := stores[i%len(stores)].CreatePaymentOrder(context.Background(), u.ID, model.PaymentOrderInput{RequestID: "double-click", TemplateID: p.ID, TemplateRevision: p.Revision}, client)
 			if e != nil {
 				t.Error(e)
 				return
@@ -132,6 +156,8 @@ func TestPaymentDoubleClickCallsProviderOnceAndSnapshotsPrice(t *testing.T) {
 			ids <- o.ID
 		}()
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
 	close(ids)
 	set := map[string]bool{}
@@ -150,8 +176,119 @@ func TestPaymentDoubleClickCallsProviderOnceAndSnapshotsPrice(t *testing.T) {
 	}
 }
 
+func TestPaymentConcurrentSettingsOnlyOneRevisionWinsAcrossPools(t *testing.T) {
+	s, _, _, _, config := paymentFixture(t)
+	other := paymentConcurrentStore(t, s)
+	stores := []*Store{s, other}
+	type result struct {
+		index int
+		value model.PaymentSettings
+		err   error
+	}
+	results := make(chan result, 8)
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	for i := range 8 {
+		ready.Add(1)
+		go func() {
+			secret := fmt.Sprintf("concurrent-test-secret-%d", i)
+			in := model.PaymentSettingsInput{Enabled: true, APIBaseURL: config.APIBaseURL, MerchantNum: config.MerchantNum, PayType: config.PayType, PayDurationMinutes: i + 1, Secret: &secret, ExpectedRevision: config.Revision}
+			ready.Done()
+			<-start
+			value, err := stores[i%len(stores)].SavePaymentSettings(in, "test-admin")
+			results <- result{i, value, err}
+		}()
+	}
+	ready.Wait()
+	close(start)
+	winner, successes := -1, 0
+	for range 8 {
+		r := <-results
+		if r.err == nil {
+			winner = r.index
+			successes++
+			if r.value.Revision != config.Revision+1 || r.value.PayDurationMinutes != r.index+1 {
+				t.Errorf("winning configuration changed: %+v", r.value)
+			}
+		} else if !errors.Is(r.err, ErrConflict) {
+			t.Errorf("concurrent stale editor must receive ErrConflict: %v", r.err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected one settings winner, got %d", successes)
+	}
+	var versions, audits int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM payment_config_versions").Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM audit WHERE action='payments.settings'").Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 2 || audits != 2 {
+		t.Fatalf("losing edits persisted version or audit: versions=%d audits=%d", versions, audits)
+	}
+	var ciphertext string
+	if err := s.DB.QueryRow("SELECT secret FROM payment_config_versions WHERE version=?", config.Revision+1).Scan(&ciphertext); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := s.Vault.Decrypt(ciphertext)
+	if err != nil || secret != fmt.Sprintf("concurrent-test-secret-%d", winner) {
+		t.Fatal("stored key does not belong to the winning editor", err)
+	}
+}
+
+func TestPaymentDoubleClickIndependentKeysKeepSeparateOrders(t *testing.T) {
+	s, _, u, p, _ := paymentFixture(t)
+	other := paymentConcurrentStore(t, s)
+	stores := []*Store{s, other}
+	var calls atomic.Int32
+	client := paymentTestClient()
+	inner := client.Transport
+	client.Transport = paymentTestTransport(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return inner.RoundTrip(r)
+	})
+	type result struct {
+		key string
+		id  string
+		err error
+	}
+	results := make(chan result, 8)
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	for i := range 8 {
+		ready.Add(1)
+		go func() {
+			key := fmt.Sprintf("separate-purchase-%d", i%2)
+			ready.Done()
+			<-start
+			o, err := stores[(i/2)%len(stores)].CreatePaymentOrder(context.Background(), u.ID, model.PaymentOrderInput{RequestID: key, TemplateID: p.ID, TemplateRevision: p.Revision}, client)
+			results <- result{key, o.ID, err}
+		}()
+	}
+	ready.Wait()
+	close(start)
+	ids := map[string]string{}
+	for range 8 {
+		r := <-results
+		if r.err != nil {
+			t.Error(r.err)
+			continue
+		}
+		if old := ids[r.key]; old != "" && old != r.id {
+			t.Error("same key created different orders")
+		}
+		ids[r.key] = r.id
+	}
+	if calls.Load() != 2 || len(ids) != 2 || ids["separate-purchase-0"] == ids["separate-purchase-1"] {
+		t.Fatal("different purchase keys were merged or dispatched twice", calls.Load(), ids)
+	}
+}
+
 func TestPaymentLateClosedDuplicateNotificationsGrantExactlyOneWithOriginalDuration(t *testing.T) {
 	s, now, u, p, _ := paymentFixture(t)
+	other := paymentConcurrentStore(t, s)
+	stores := []*Store{s, other}
 	o := makePaymentOrder(t, s, u, p, "late-notice-order")
 	if _, e := s.ClosePaymentOrder(u.ID, o.ID, o.Revision); e != nil {
 		t.Fatal(e)
@@ -167,26 +304,45 @@ func TestPaymentLateClosedDuplicateNotificationsGrantExactlyOneWithOriginalDurat
 	v := paymentNotice(o, "test-payment-secret-v1")
 	v.Set("attch", "different-order")
 	var wg sync.WaitGroup
-	for range 8 {
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	for i := range 8 {
 		wg.Add(1)
+		ready.Add(1)
 		go func() {
 			defer wg.Done()
-			if e := s.ProcessPaymentNotify(v); e != nil {
+			ready.Done()
+			<-start
+			if e := stores[i%len(stores)].ProcessPaymentNotify(v); e != nil {
 				t.Error(e)
 			}
 		}()
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
-	for range 4 {
+	start = make(chan struct{})
+	var fulfilled atomic.Int32
+	for i := range 4 {
 		wg.Add(1)
+		ready.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, e := s.FulfillPaymentOrders(20); e != nil {
+			ready.Done()
+			<-start
+			n, e := stores[i%len(stores)].FulfillPaymentOrders(20)
+			if e != nil {
 				t.Error(e)
 			}
+			fulfilled.Add(int32(n))
 		}()
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
+	if fulfilled.Load() != 1 {
+		t.Fatal("expected exactly one successful fulfillment", fulfilled.Load())
+	}
 	result, e := s.PaymentOrder(u.ID, o.ID)
 	if e != nil || result.Status != "fulfilled" {
 		t.Fatal(result, e)
@@ -195,6 +351,9 @@ func TestPaymentLateClosedDuplicateNotificationsGrantExactlyOneWithOriginalDurat
 	s.DB.QueryRow("SELECT COUNT(*) FROM portal_subscriptions WHERE grant_key=?", "payment:"+o.ID).Scan(&count)
 	if count != 1 {
 		t.Fatal("duplicate grant", count)
+	}
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM payment_activities WHERE order_id=? AND kind='fulfilled'", o.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("duplicate fulfillment history", count, err)
 	}
 	sub, e := s.UserSubscription(u.ID, result.SubscriptionID)
 	if e != nil || !sub.CreatedAt.Equal(*now) || !sub.ExpiresAt.Equal(now.Add(24*time.Hour)) || *sub.BandwidthMbps != 20 {

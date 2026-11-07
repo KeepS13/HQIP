@@ -147,6 +147,20 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 			}
 			return false, tx.Commit()
 		}
+		// Serialize fulfillment on the order before creating its unique grant.
+		// A competing PostgreSQL transaction must retry its stale snapshot here,
+		// not discover the race as an unrelated grant-key unique violation later.
+		claimed, err := tx.Exec("UPDATE payment_orders SET revision=revision WHERE id=? AND revision=? AND payment_state='paid' AND fulfillment_state!='fulfilled'", id, r.Order.Revision)
+		if err != nil {
+			return false, err
+		}
+		changed, err := claimed.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if changed != 1 {
+			return false, nil
+		}
 		e, err := grantSubscriptionWithValidity(tx, r.Order.UserID, r.Order.TemplateID, "payment:"+id, -1, template.Revision, now, r.Order.ValidityDays)
 		if err != nil {
 			return false, err

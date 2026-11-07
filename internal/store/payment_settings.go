@@ -125,9 +125,9 @@ func (s *Store) SavePaymentSettings(in model.PaymentSettingsInput, actor string)
 		if in.Enabled && secret == "" {
 			return errors.New("启用支付前请配置商户接口及密钥")
 		}
-		if _, e = tx.Exec("INSERT INTO payment_config_versions(version,api_base_url,merchant_num,pay_type,pay_duration_minutes,query_enabled,secret,identity,created_at) VALUES(?,?,?,?,?,?,?,?,?)", revision+1, in.APIBaseURL, in.MerchantNum, in.PayType, in.PayDurationMinutes, in.QueryEnabled, encrypted, identity, s.Now().Unix()); e != nil {
-			return e
-		}
+		// Claim the settings revision before inserting its immutable config.
+		// Concurrent editors then produce a serializable retry / ErrConflict,
+		// never an unrelated 23505 on the version primary key.
 		result, e := tx.Exec("UPDATE payment_settings SET enabled=?,current_version=?,revision=revision+1,updated_at=? WHERE id=1 AND revision=?", in.Enabled, revision+1, s.Now().Unix(), revision)
 		if e != nil {
 			return e
@@ -135,6 +135,9 @@ func (s *Store) SavePaymentSettings(in model.PaymentSettingsInput, actor string)
 		changed, _ := result.RowsAffected()
 		if changed != 1 {
 			return ErrConflict
+		}
+		if _, e = tx.Exec("INSERT INTO payment_config_versions(version,api_base_url,merchant_num,pay_type,pay_duration_minutes,query_enabled,secret,identity,created_at) VALUES(?,?,?,?,?,?,?,?,?)", revision+1, in.APIBaseURL, in.MerchantNum, in.PayType, in.PayDurationMinutes, in.QueryEnabled, encrypted, identity, s.Now().Unix()); e != nil {
+			return e
 		}
 		if _, e = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'payments.settings',?)", s.Now().Unix(), fmt.Sprintf("%s revision:%d", actor, revision+1)); e != nil {
 			return e

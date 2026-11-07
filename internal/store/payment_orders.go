@@ -230,6 +230,7 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 	type prepared struct {
 		id       string
 		dispatch bool
+		raced    bool
 		request  payment.CreateRequest
 	}
 	p, err := retryDatabase(func() (prepared, error) {
@@ -303,8 +304,20 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		out.id = NewID()
 		now := s.Now()
 		expires := now.Add(time.Duration(config.Config.PayDurationMinutes) * time.Minute)
-		if _, e = tx.Exec("INSERT INTO payment_orders(id,order_no,user_id,template_id,request_key,template_revision,template_name,template_snapshot,amount,validity_days,config_version,provider_identity,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", out.id, no, userID, template.ID, in.RequestID, template.Revision, template.Name, jsonString(template), *template.PriceCents, template.ValidityDays, configVersion, config.Identity, now.Unix(), expires.Unix()); e != nil {
+		result, e := tx.Exec("INSERT INTO payment_orders(id,order_no,user_id,template_id,request_key,template_revision,template_name,template_snapshot,amount,validity_days,config_version,provider_identity,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,request_key) DO NOTHING", out.id, no, userID, template.ID, in.RequestID, template.Revision, template.Name, jsonString(template), *template.PriceCents, template.ValidityDays, configVersion, config.Identity, now.Unix(), expires.Unix())
+		if e != nil {
 			return out, e
+		}
+		inserted, e := result.RowsAffected()
+		if e != nil {
+			return out, e
+		}
+		if inserted == 0 {
+			// Only the explicit idempotency key can suppress this insert. Leave
+			// this transaction's stale snapshot and resolve the committed winner
+			// below; unrelated unique violations still propagate as errors.
+			out.raced = true
+			return out, nil
 		}
 		if e = paymentActivity(tx, out.id, "created", "订单已创建，正在获取支付链接", now.Unix()); e != nil {
 			return out, e
@@ -315,6 +328,16 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 	})
 	if err != nil {
 		return model.PaymentOrder{}, err
+	}
+	if p.raced {
+		var template string
+		var revision int64
+		if err = s.DB.QueryRow("SELECT id,template_id,template_revision FROM payment_orders WHERE user_id=? AND request_key=?", userID, in.RequestID).Scan(&p.id, &template, &revision); err != nil {
+			return model.PaymentOrder{}, err
+		}
+		if template != in.TemplateID || revision != in.TemplateRevision {
+			return model.PaymentOrder{}, ErrConflict
+		}
 	}
 	if p.dispatch {
 		created, createErr := client.Create(ctx, p.request)
