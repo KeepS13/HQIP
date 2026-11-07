@@ -21,7 +21,9 @@ def storage_environment():
  # The probe/backup binary needs only these explicitly parsed settings. Do not
  # forward the deployer's ambient environment (which may contain unrelated
  # cloud or database credentials) into a long-lived child process.
- env={}
+ # pg_dump/pg_restore are child processes of the backup binary. Supply only
+ # trusted system directories, never the caller's potentially writable PATH.
+ env={'PATH':'/usr/bin:/bin'}
  if STORAGE_ENV.is_symlink() or not STORAGE_ENV.is_file():raise ValueError('PostgreSQL storage environment is missing')
  if os.name!='nt' and STORAGE_ENV.stat().st_mode & 0o077:raise ValueError('Storage environment must have mode 0600')
  for line in STORAGE_ENV.read_text().splitlines():

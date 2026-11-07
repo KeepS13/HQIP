@@ -9,6 +9,17 @@ import upgrade_domains as deploy
 
 
 class PostgresReleaseTests(unittest.TestCase):
+    def test_backup_environment_has_trusted_tool_path_without_inheriting_credentials(self):
+        with tempfile.TemporaryDirectory() as folder:
+            file=Path(folder)/'storage.env'
+            file.write_text('HQIP_DATABASE_URL="postgres://user:test@127.0.0.1/hqip"\nHQIP_REDIS_URL="redis://:test@127.0.0.1:6379"\n')
+            file.chmod(0o600)
+            with patch.object(deploy,'STORAGE_ENV',file), patch.dict(deploy.os.environ,{'PATH':'/untrusted','PGPASSWORD':'unrelated','DEPLOY_SSH_KEY':'unrelated'}):
+                env=deploy.storage_environment()
+            self.assertEqual(env['PATH'],'/usr/bin:/bin')
+            self.assertNotIn('PGPASSWORD',env)
+            self.assertNotIn('DEPLOY_SSH_KEY',env)
+
     def test_postgres_marker_blocks_sqlite_rollback_without_opening_sqlite(self):
         with tempfile.TemporaryDirectory() as folder:
             data=Path(folder)

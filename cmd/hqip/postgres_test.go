@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -45,6 +46,11 @@ func testDatabase(t *testing.T) string {
 func TestPostgresBackupRestoreRoundTrip(t *testing.T) {
 	if os.Getenv("HQIP_TEST_POSTGRES_URL") == "" {
 		t.Skip("PostgreSQL integration environment not configured")
+	}
+	if runtime.GOOS == "linux" {
+		// Match the deployer's sanitized environment, not the CI runner's
+		// extended PATH that could hide missing backup-tool resolution.
+		t.Setenv("PATH", "/usr/bin:/bin")
 	}
 	for _, tool := range []string{"pg_dump", "pg_restore"} {
 		if _, err := exec.LookPath(tool); err != nil {
