@@ -13,15 +13,20 @@ def prepare(directory):
     directory.mkdir(mode=0o700,exist_ok=False)
     secret_dir=directory/'secrets'
     secret_dir.mkdir(mode=0o700)
+    # Compose file-backed secrets are read-only bind mounts: it cannot remap
+    # their UID or mode. The unprivileged postgres/redis container users need
+    # read access. Both host parent directories remain owner-only (0700), so
+    # other host users cannot traverse to these files. Environment files stay
+    # 0600 and are never mounted into either container.
     passwords={key:secrets.token_urlsafe(40) for key in ('postgres','app','migration','redis')}
     for key in ('postgres','app','migration'):
         file=secret_dir/(key+'-password')
         file.write_text(passwords[key]+'\n')
-        file.chmod(0o600)
+        file.chmod(0o444)
     # Redis receives only the password hash, and only the commands/keys used by
     # the limiter. No CONFIG, FLUSH, ACL mutation, replication, or arbitrary keys.
     acl='user default off\nuser hqip on #'+hashlib.sha256(passwords['redis'].encode()).hexdigest()+' ~hqip:rate:* -@all +ping +hello +client|setinfo +client|setname +select +eval +evalsha +script|load +time +zremrangebyscore +zcard +zadd +pexpire\n'
-    file=secret_dir/'redis-acl';file.write_text(acl);file.chmod(0o600)
+    file=secret_dir/'redis-acl';file.write_text(acl);file.chmod(0o444)
     for file in ('compose.yaml','init-roles.sql','redis.conf'):
         shutil.copyfile(ROOT/'deploy/storage'/file,directory/file)
     for filename,role,key in (('storage.env','hqip_app','app'),('migration.env','hqip_migrator','migration')):

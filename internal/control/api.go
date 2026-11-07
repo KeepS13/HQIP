@@ -419,11 +419,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		result(w, nil, err)
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		fail(w, 500, "当前连接不支持实时进度")
 		return
 	}
+	stream := http.NewResponseController(w)
 	after, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
 	if after < 0 {
 		after = 0
@@ -440,6 +441,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
+		// The server's absolute WriteTimeout bounds ordinary responses. SSE
+		// instead bounds each batch, allowing healthy long-lived progress streams
+		// while still terminating clients that stop reading.
+		if err = stream.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			return false
+		}
 		for _, event := range events {
 			raw, _ := json.Marshal(event)
 			if _, err = fmt.Fprintf(w, "id: %d\nevent: progress\ndata: %s\n\n", event.ID, raw); err != nil {
@@ -447,8 +454,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			after = event.ID
 		}
-		flusher.Flush()
-		return true
+		return stream.Flush() == nil
 	}
 	if !send() {
 		return
@@ -465,10 +471,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if _, err := s.Store.Session(cookieToken(r)); err != nil {
 				return
 			}
+			if err := stream.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				return
+			}
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
-			flusher.Flush()
+			if err := stream.Flush(); err != nil {
+				return
+			}
 		}
 	}
 }

@@ -24,6 +24,17 @@
 - 数据库与 Redis 仅允许内网/回环访问。生产使用独立应用角色、SCRAM/TLS、受限密钥文件；开发测试身份不得复用。
 - 生产脚本的 SQLite 备份/版本检查需同步升级，不能绕过现有发布与回滚检查。
 
+## 配置文件与角色
+
+`python3 scripts/prepare_storage.py --output /etc/hqip-storage` 只生成新的私有配置目录，不启动服务、不迁移数据，也不会覆盖已有目录。使用其中的 `compose.yaml` 启动隔离存储环境后，按以下角色执行操作：
+
+- `migration.env` 使用 `hqip_migrator`，仅供离线导入、全新站点 `init-admin --initialize-postgres`、空数据库恢复使用。它拥有 schema 创建权限，不得作为控制服务的长期身份。
+- `storage.env` 使用 `hqip_app`，仅有应用表的读写及序列使用权限。完成初始化或迁移后才将这个文件以 `0600` 安装至 `/etc/hqip-control/storage.env`；正常启动和备份都使用这个身份。不要使用应用身份执行建表或恢复。
+- PostgreSQL 备份工具 `pg_dump`、`pg_restore` 必须单独安装在控制机上，并与数据库主版本兼容。环境文件不安装这些工具。
+- `secrets/` 和其父目录保持 `0700`，宿主机其他用户不能访问。挂载给容器的文件为只读 `0444`，供容器内部的非 root 用户读取；连接配置文件保持 `0600`。Docker Compose 的本地文件 secret 使用 bind mount，不会代为转换文件权限，见 [Docker 官方说明](https://docs.docker.com/reference/compose-file/services/#secrets)。
+
+现有 SQLite 站点发布代码时无需创建 `storage.env`，不会自动迁移存储。数据库切换是单独的离线操作，需完成上面的快照核对与回退准备。CI 会启动生成的 Compose 配置，验证应用身份不能建表、业务读写可用，且 Redis ACL 允许限流并拒绝其他键和管理命令。
+
 ## Redis 认证限流配置
 
 控制程序读取 `HQIP_REDIS_URL` 与 `HQIP_REDIS_NAMESPACE`（默认 `hqip`）。配置文件通过 systemd EnvironmentFile 或部署密钥管理注入，不将密码写入命令行、仓库或日志。所有同站点控制实例必须使用相同 Redis 和命名空间。

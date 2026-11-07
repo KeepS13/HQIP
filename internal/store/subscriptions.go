@@ -283,23 +283,25 @@ func grantSubscription(tx *sql.Tx, user, template, key string, expectedUser, exp
 	return *e, nil
 }
 func (s *Store) AssignSubscription(user, template, key string, expectedUser, expectedTemplate int64) (model.UserSubscription, error) {
-	var empty model.UserSubscription
-	if !validRequestKey(key) {
-		return empty, errors.New("请求标识无效")
-	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return empty, err
-	}
-	defer tx.Rollback()
-	e, err := grantSubscription(tx, user, template, "admin:"+key, expectedUser, expectedTemplate, s.Now())
-	if err != nil {
-		return empty, err
-	}
-	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.assigned',?)", s.Now().Unix(), e.ID); err != nil {
-		return empty, err
-	}
-	return e, tx.Commit()
+	return retryDatabase(func() (model.UserSubscription, error) {
+		var empty model.UserSubscription
+		if !validRequestKey(key) {
+			return empty, errors.New("请求标识无效")
+		}
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return empty, err
+		}
+		defer tx.Rollback()
+		e, err := grantSubscription(tx, user, template, "admin:"+key, expectedUser, expectedTemplate, s.Now())
+		if err != nil {
+			return empty, err
+		}
+		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.assigned',?)", s.Now().Unix(), e.ID); err != nil {
+			return empty, err
+		}
+		return e, tx.Commit()
+	})
 }
 func (s *Store) RevokeSubscription(user, id string, expected int64) error {
 	tx, err := s.DB.Begin()
@@ -381,130 +383,136 @@ func (s *Store) SubscriptionRequests(user string) ([]model.SubscriptionRequest, 
 	return out, rows.Err()
 }
 func (s *Store) CreateSubscriptionRequest(user, template, key string, expectedTemplate int64) (model.SubscriptionRequest, error) {
-	var empty model.SubscriptionRequest
-	if !validRequestKey(key) {
-		return empty, errors.New("请求标识无效")
-	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return empty, err
-	}
-	defer tx.Rollback()
-	r, err := scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.user_id=? AND r.request_key=?", user, key))
-	if err == nil {
-		if r.TemplateID != template {
+	return retryDatabase(func() (model.SubscriptionRequest, error) {
+		var empty model.SubscriptionRequest
+		if !validRequestKey(key) {
+			return empty, errors.New("请求标识无效")
+		}
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return empty, err
+		}
+		defer tx.Rollback()
+		r, err := scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.user_id=? AND r.request_key=?", user, key))
+		if err == nil {
+			if r.TemplateID != template {
+				return empty, ErrConflict
+			}
+			return r, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return empty, err
+		}
+		var enabled bool
+		if err = tx.QueryRow("SELECT enabled FROM portal_users WHERE id=?", user).Scan(&enabled); err != nil {
+			return empty, notFound(err)
+		}
+		if !enabled {
+			return empty, ErrUnauthorized
+		}
+		p, err := subscriptionTemplate(tx, template)
+		if err != nil {
+			return empty, err
+		}
+		if !p.Enabled || !p.Listed {
+			return empty, ErrEntitlement
+		}
+		if p.Revision != expectedTemplate {
 			return empty, ErrConflict
 		}
-		return r, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return empty, err
-	}
-	var enabled bool
-	if err = tx.QueryRow("SELECT enabled FROM portal_users WHERE id=?", user).Scan(&enabled); err != nil {
-		return empty, notFound(err)
-	}
-	if !enabled {
-		return empty, ErrUnauthorized
-	}
-	p, err := subscriptionTemplate(tx, template)
-	if err != nil {
-		return empty, err
-	}
-	if !p.Enabled || !p.Listed {
-		return empty, ErrEntitlement
-	}
-	if p.Revision != expectedTemplate {
-		return empty, ErrConflict
-	}
-	id := NewID()
-	if _, err = tx.Exec("INSERT INTO portal_requests(id,user_id,template_id,status,requested_at,request_key) VALUES(?,?,?,'pending',?,?)", id, user, template, s.Now().Unix(), key); err != nil {
-		return empty, err
-	}
-	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.requested',?)", s.Now().Unix(), id); err != nil {
-		return empty, err
-	}
-	r, err = scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=?", id))
-	if err != nil {
-		return empty, err
-	}
-	return r, tx.Commit()
+		id := NewID()
+		if _, err = tx.Exec("INSERT INTO portal_requests(id,user_id,template_id,status,requested_at,request_key) VALUES(?,?,?,'pending',?,?)", id, user, template, s.Now().Unix(), key); err != nil {
+			return empty, err
+		}
+		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.requested',?)", s.Now().Unix(), id); err != nil {
+			return empty, err
+		}
+		r, err = scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=?", id))
+		if err != nil {
+			return empty, err
+		}
+		return r, tx.Commit()
+	})
 }
 func (s *Store) DecideSubscriptionRequest(id, action, note string, expectedRequest, expectedTemplate int64) (model.SubscriptionRequest, error) {
-	var empty model.SubscriptionRequest
-	if action != "approve" && action != "reject" {
-		return empty, errors.New("审批操作无效")
-	}
-	if !utf8.ValidString(note) || utf8.RuneCountInString(note) > 2000 {
-		return empty, errors.New("备注最多2000个字符")
-	}
-	target := "approved"
-	if action == "reject" {
-		target = "rejected"
-	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return empty, err
-	}
-	defer tx.Rollback()
-	r, err := scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=?", id))
-	if err != nil {
-		return empty, err
-	}
-	if r.Status == target {
-		return r, nil
-	}
-	if r.Status != "pending" || r.Revision != expectedRequest {
-		return empty, ErrConflict
-	}
-	p, err := subscriptionTemplate(tx, r.TemplateID)
-	if err != nil {
-		return empty, err
-	}
-	if p.Revision != expectedTemplate {
-		return empty, ErrConflict
-	}
-	sub := ""
-	if action == "approve" {
-		e, eerr := grantSubscription(tx, r.UserID, r.TemplateID, "request:"+id, -1, expectedTemplate, s.Now())
-		if eerr != nil {
-			return empty, eerr
+	return retryDatabase(func() (model.SubscriptionRequest, error) {
+		var empty model.SubscriptionRequest
+		if action != "approve" && action != "reject" {
+			return empty, errors.New("审批操作无效")
 		}
-		sub = e.ID
-	}
-	if _, err = tx.Exec("UPDATE portal_requests SET status=?,decided_at=?,note=?,subscription_id=?,revision=revision+1 WHERE id=?", target, s.Now().Unix(), strings.TrimSpace(note), sub, id); err != nil {
-		return empty, err
-	}
-	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,?,?)", s.Now().Unix(), "subscription.request_"+target, id); err != nil {
-		return empty, err
-	}
-	r, err = scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=?", id))
-	if err != nil {
-		return empty, err
-	}
-	return r, tx.Commit()
+		if !utf8.ValidString(note) || utf8.RuneCountInString(note) > 2000 {
+			return empty, errors.New("备注最多2000个字符")
+		}
+		target := "approved"
+		if action == "reject" {
+			target = "rejected"
+		}
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return empty, err
+		}
+		defer tx.Rollback()
+		r, err := scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=?", id))
+		if err != nil {
+			return empty, err
+		}
+		if r.Status == target {
+			return r, nil
+		}
+		if r.Status != "pending" || r.Revision != expectedRequest {
+			return empty, ErrConflict
+		}
+		p, err := subscriptionTemplate(tx, r.TemplateID)
+		if err != nil {
+			return empty, err
+		}
+		if p.Revision != expectedTemplate {
+			return empty, ErrConflict
+		}
+		sub := ""
+		if action == "approve" {
+			e, eerr := grantSubscription(tx, r.UserID, r.TemplateID, "request:"+id, -1, expectedTemplate, s.Now())
+			if eerr != nil {
+				return empty, eerr
+			}
+			sub = e.ID
+		}
+		if _, err = tx.Exec("UPDATE portal_requests SET status=?,decided_at=?,note=?,subscription_id=?,revision=revision+1 WHERE id=?", target, s.Now().Unix(), strings.TrimSpace(note), sub, id); err != nil {
+			return empty, err
+		}
+		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,?,?)", s.Now().Unix(), "subscription.request_"+target, id); err != nil {
+			return empty, err
+		}
+		r, err = scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=?", id))
+		if err != nil {
+			return empty, err
+		}
+		return r, tx.Commit()
+	})
 }
 func (s *Store) CancelSubscriptionRequest(user, id string, expected int64) error {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	r, err := scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=? AND r.user_id=?", id, user))
-	if err != nil {
-		return err
-	}
-	if r.Status == "cancelled" {
-		return nil
-	}
-	if r.Status != "pending" || r.Revision != expected {
-		return ErrConflict
-	}
-	if _, err = tx.Exec("UPDATE portal_requests SET status='cancelled',decided_at=?,revision=revision+1 WHERE id=?", s.Now().Unix(), id); err != nil {
-		return err
-	}
-	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.request_cancelled',?)", s.Now().Unix(), id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return retryDatabaseError(func() error {
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		r, err := scanSubscriptionRequest(tx.QueryRow(subscriptionRequestSelect+"WHERE r.id=? AND r.user_id=?", id, user))
+		if err != nil {
+			return err
+		}
+		if r.Status == "cancelled" {
+			return nil
+		}
+		if r.Status != "pending" || r.Revision != expected {
+			return ErrConflict
+		}
+		if _, err = tx.Exec("UPDATE portal_requests SET status='cancelled',decided_at=?,revision=revision+1 WHERE id=?", s.Now().Unix(), id); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.request_cancelled',?)", s.Now().Unix(), id); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }

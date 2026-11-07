@@ -83,6 +83,26 @@ jobs:
           sudo apt-get install -y postgresql-client-18
           echo '/usr/lib/postgresql/18/bin' >> "$GITHUB_PATH"
       - run: go test -race ./internal/store ./internal/control ./internal/pgstore ./internal/ratelimit ./cmd/hqip
+      - name: Start generated storage configuration with restricted roles
+        run: |
+          python3 scripts/prepare_storage.py --output "$RUNNER_TEMP/hqip-storage"
+          docker compose -f "$RUNNER_TEMP/hqip-storage/compose.yaml" up -d --wait --wait-timeout 120
+      - name: Verify application database role and restricted Redis ACL
+        run: |
+          set -a
+          . "$RUNNER_TEMP/hqip-storage/migration.env"
+          HQIP_TEST_POSTGRES_MIGRATION_URL="$HQIP_DATABASE_URL"
+          . "$RUNNER_TEMP/hqip-storage/storage.env"
+          HQIP_TEST_POSTGRES_APP_URL="$HQIP_DATABASE_URL"
+          HQIP_TEST_REDIS_ACL_URL="$HQIP_REDIS_URL"
+          set +a
+          go test -race ./internal/store ./internal/ratelimit -run 'TestPostgresApplicationRole|TestRealRedisRestrictedACL' -count=1
+      - name: Remove isolated storage stack
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/hqip-storage/compose.yaml" ]; then
+            docker compose -f "$RUNNER_TEMP/hqip-storage/compose.yaml" down --volumes --remove-orphans
+          fi
   windows:
     runs-on: windows-latest
     steps:

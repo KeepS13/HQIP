@@ -134,6 +134,17 @@ func recordServerRenewal(tx *sql.Tx, r model.ServerRenewal, payload string) erro
 }
 
 func (s *Store) RenewServer(server string, request ServerRenewalRequest, actor string) (model.Server, model.ServerRenewal, error) {
+	var v model.Server
+	var record model.ServerRenewal
+	err := retryDatabaseError(func() error {
+		var err error
+		v, record, err = s.renewServerAttempt(server, request, actor)
+		return err
+	})
+	return v, record, err
+}
+
+func (s *Store) renewServerAttempt(server string, request ServerRenewalRequest, actor string) (model.Server, model.ServerRenewal, error) {
 	var empty model.Server
 	var record model.ServerRenewal
 	if !validRequestKey(request.RequestID) || request.RequestID == "initial" || request.ExpectedRevision < 1 || (request.Months == nil) == (request.ExpiresAt == nil) {
