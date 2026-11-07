@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -262,15 +261,20 @@ func (c *Core) Alive() bool {
 	}
 }
 func Probe(ctx context.Context, port int, expectedIP ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
 	u, _ := url.Parse("http://127.0.0.1:" + portString(port))
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = http.ProxyURL(u)
+	transport.TLSHandshakeTimeout = 8 * time.Second
 	defer transport.CloseIdleConnections()
-	h := &http.Client{Transport: transport, Timeout: 12 * time.Second}
+	h := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	ready := false
 	for i := 0; i < 30; i++ {
-		conn, e := net.DialTimeout("tcp", u.Host, 100*time.Millisecond)
+		conn, e := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(ctx, "tcp", u.Host)
 		if e == nil {
 			conn.Close()
+			ready = true
 			break
 		}
 		select {
@@ -279,28 +283,14 @@ func Probe(ctx context.Context, port int, expectedIP ...string) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", "https://www.cloudflare.com/cdn-cgi/trace", nil)
-	resp, e := h.Do(req)
-	if e != nil {
-		return errors.New("目标节点代理连接失败，已停止代理；不会回退旧节点")
+	if !ready {
+		return errors.New("本地代理端口未就绪，已停止代理")
 	}
-	defer resp.Body.Close()
-	data, e := io.ReadAll(io.LimitReader(resp.Body, 32768))
-	if e != nil || resp.StatusCode != 200 || !bytes.Contains(data, []byte("ip=")) {
-		return errors.New("目标节点 HTTPS/出口验证失败")
+	expected := ""
+	if len(expectedIP) > 0 {
+		expected = expectedIP[0]
 	}
-	if len(expectedIP) > 0 && expectedIP[0] != "" {
-		found := ""
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "ip=") {
-				found = strings.TrimPrefix(line, "ip=")
-			}
-		}
-		if net.ParseIP(found) == nil || !net.ParseIP(found).Equal(net.ParseIP(expectedIP[0])) {
-			return errors.New("出口 IP 与目标节点不一致，已停止代理")
-		}
-	}
-	return nil
+	return probeExit(ctx, h, expected, exitProbeTargets)
 }
 func (c *Core) Select(ctx context.Context, id string) error {
 	c.mu.Lock()
