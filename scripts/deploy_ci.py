@@ -104,7 +104,7 @@ def main():
                 raise
         finally:
             remote(['rm', '-rf', '--', incoming])
-        summary = f'Deployed `{sha}` to https://hqip.5202345.xyz\n\nBackup: `{state}`\n'
+        summary = f'Deployed `{sha}` to https://hqip.sharevps.online\n\nBackup: `{state}`\n'
         print(summary)
         if os.environ.get('GITHUB_STEP_SUMMARY'):
             with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
@@ -113,8 +113,8 @@ def main():
 
 def check_public():
     # curl retries transient edge failures; inspect JSON as well as HTTP status.
-    for url in ['https://hqip.5202345.xyz/', 'https://cms-hqip.5202345.xyz/',
-                'https://api-hqip.5202345.xyz/healthz']:
+    for url in ['https://hqip.sharevps.online/', 'https://cms-hqip.sharevps.online/',
+                'https://api-hqip.sharevps.online/healthz']:
         result = command(['curl', '--fail', '--silent', '--show-error', '--retry', '5',
                           '--retry-delay', '2', '--retry-all-errors', '--max-time', '20',
                           '--user-agent', 'Go-http-client/1.1', url], capture_output=True, text=True)

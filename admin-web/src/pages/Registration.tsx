@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowRight, Save, ShieldCheck } from "lucide-react";
 import { api, usePolling } from "../api";
+import { USER_URL } from "../config";
 import {
   Badge,
   Button,
@@ -217,7 +218,7 @@ export function TurnstileSettingsPage() {
             用户邮箱仅作登录名，不发送验证邮件。忘记密码由管理员重置。
           </p>
           <a
-            href="https://hqip.5202345.xyz/"
+            href={USER_URL}
             target="_blank"
             rel="noreferrer"
             className="text-link"

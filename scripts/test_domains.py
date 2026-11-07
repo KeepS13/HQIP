@@ -18,9 +18,24 @@ class DomainReleaseTests(unittest.TestCase):
   self.assertIn('root /opt/hqip-control/current/admin-web',text)
   self.assertIn('api/v[23]/client',text)
   self.assertIn('real_ip_header CF-Connecting-IP',text)
-  self.assertNotIn('*.5202345.xyz',text)
+  self.assertNotIn('*.sharevps.online',text)
+  self.assertNotIn('5202345.xyz',text)
+  self.assertNotIn('http2 on;',text)
+  self.assertEqual(text.count('listen 443 ssl http2;'),3)
+  self.assertEqual(text.count('listen [::]:443 ssl http2;'),3)
   self.assertIn('map $request_uri $hqip_user_csp',text)
   self.assertIn('~^/(login|register|authorize)(\\?|$)',text)
+ def test_official_domains_match_service_and_certificate_paths(self):
+  self.assertEqual((render.USER,render.ADMIN,render.API),('hqip.sharevps.online','cms-hqip.sharevps.online','api-hqip.sharevps.online'))
+  text=render.render()
+  unit=(Path(__file__).resolve().parents[1]/'deploy/hqip-control.service').read_text(encoding='utf-8')
+  for host in (render.USER,render.ADMIN,render.API):
+   self.assertIn(f'ssl_certificate /etc/letsencrypt/live/{host}/fullchain.pem;',text)
+   self.assertIn(f'ssl_certificate_key /etc/letsencrypt/live/{host}/privkey.pem;',text)
+  for flag,host in [('admin-origin',render.ADMIN),('user-origin',render.USER),('public-url',render.API)]:
+   self.assertIn(f'--{flag} https://{host} ',unit)
+  self.assertIn('--listen 127.0.0.1:18090 --public-listen 127.0.0.1:18091',unit)
+  self.assertNotIn('5202345.xyz',unit)
  def test_retiring_feishu_preserves_business_usage(self):
   with tempfile.TemporaryDirectory() as folder:
    root=Path(folder)

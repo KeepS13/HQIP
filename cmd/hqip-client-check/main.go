@@ -28,7 +28,7 @@ func main() {
 	}
 }
 func run() error {
-	server := flag.String("server", "https://api-hqip.5202345.xyz", "account API origin")
+	server := flag.String("server", client.DefaultServerURL, "account API origin")
 	subscription := flag.String("subscription", "", "subscription instance to use on this test installation")
 	corePath := flag.String("core", "dist/desktop/sing-box.exe", "fixed sing-box executable")
 	state := flag.String("state", ".local/client-check", "isolated state directory")

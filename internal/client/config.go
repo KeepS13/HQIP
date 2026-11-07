@@ -39,11 +39,10 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 	domains := []string{}
 	cidrs := []string{}
 	u, _ := url.Parse(o.ServerURL)
-	if u != nil && u.Hostname() != "" {
+	if migrateOfficialServerURL(o.ServerURL) == DefaultServerURL {
+		domains = append(domains, officialBypassDomains()...)
+	} else if u != nil && u.Hostname() != "" {
 		domains = append(domains, u.Hostname())
-	}
-	if u != nil && u.Hostname() == "api-hqip.5202345.xyz" {
-		domains = append(domains, "hqip.5202345.xyz")
 	}
 	for _, n := range o.Profile.Nodes {
 		if n.ID == "" || n.Server == "" || n.SNI == "" || n.Password == "" || n.Port < 1 || n.Port > 65535 {

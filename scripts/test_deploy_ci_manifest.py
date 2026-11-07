@@ -3,9 +3,9 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from deploy_ci import copy_remote_manifest
+from deploy_ci import copy_remote_manifest, check_public
 
 
 class ManifestTransferTests(unittest.TestCase):
@@ -24,6 +24,32 @@ class ManifestTransferTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 copy_remote_manifest(Mock(return_value=SimpleNamespace(stdout='{}\n')), '/manifest', output)
             self.assertFalse(output.exists())
+
+    def test_public_checks_only_current_official_domains(self):
+        urls = []
+
+        def response(args, **kwargs):
+            urls.append(args[-1])
+            return SimpleNamespace(stdout='{"ok":true}' if args[-1].endswith('/healthz') else '<!doctype html>')
+
+        with patch('deploy_ci.command', side_effect=response):
+            check_public()
+        self.assertEqual(urls, ['https://hqip.sharevps.online/',
+                                'https://cms-hqip.sharevps.online/',
+                                'https://api-hqip.sharevps.online/healthz'])
+
+    def test_public_api_business_failure_rejects_release(self):
+        with patch('deploy_ci.command', return_value=SimpleNamespace(stdout='{"ok":false}')):
+            with self.assertRaisesRegex(ValueError, 'Public API is unhealthy'):
+                check_public()
+
+    def test_workflow_uses_new_environment_url_and_secret_selected_host(self):
+        workflow = (Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text(encoding='utf-8')
+        self.assertIn('url: https://hqip.sharevps.online', workflow)
+        self.assertNotIn('5202345.xyz', workflow)
+        for setting in ['HOST', 'PORT', 'USER', 'SSH_KEY', 'KNOWN_HOSTS']:
+            name = 'DEPLOY_' + setting
+            self.assertIn(name + ': ${{ secrets.' + name + ' }}', workflow)
 
 
 if __name__ == '__main__':

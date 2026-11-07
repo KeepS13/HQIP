@@ -2,11 +2,13 @@
 
 | 入口 | 地址 |
 | --- | --- |
-| 用户网页 | https://hqip.5202345.xyz |
-| 管理网页 | https://cms-hqip.5202345.xyz |
-| API、订阅、客户端下载 | https://api-hqip.5202345.xyz |
+| 用户网页 | https://hqip.sharevps.online |
+| 管理网页 | https://cms-hqip.sharevps.online |
+| API、订阅、客户端下载 | https://api-hqip.sharevps.online |
 
-管理端页面没有 `/admin` 前缀。旧用户域名上的 API、订阅和下载文件接口返回 410，旧 `/admin` 返回 404。客户端使用 API 域名、用户浏览器授权使用用户域名；自定义客户端地址保持原值。订阅升级清理旧开发账户，需使用新注册账户与独立订阅实例。
+管理端页面没有 `/admin` 前缀。三个入口由 `107.151.244.106` 承载；客户端使用 API 域名，浏览器授权使用用户域名，自定义客户端地址保持原值。此次主机与域名迁移保留现有账户、订阅、订单和流量数据，不重新初始化数据库；切换到新域名后需要重新登录。
+
+迁移期间，旧 `5202345.xyz` 三个入口临时转发到新主机的同一个控制中心，保障已有支付回调和客户端过渡。旧主机不能同时运行独立写入的控制服务。确认旧订单结算及入口迁移完成后，再单独下线临时代理；本次不提前返回 410 丢弃旧支付回调。详见[服务器与域名迁移](server-migration-sharevps.md)。
 
 ## 开发与构建
 
@@ -21,7 +23,7 @@ go test ./...
 python -m unittest discover -s scripts -p "test_*.py"
 ```
 
-本地开发分别将两端 `.env.example` 复制为 `.env`；管理 Vite 端口 5173、用户 Vite 端口 5174，Go 管理 API 8080、公共 API 8081。初始化私有测试数据后运行：
+本地开发分别将两端 `.env.example` 复制为 `.env`；管理 Vite 端口 5173、用户 Vite 端口 5174，Go 管理 API 8080、公共 API 8081。两个前端均支持 `VITE_API_URL` 和 `VITE_ADMIN_URL`；管理前端另支持 `VITE_USER_URL`，用于打开用户门户。未配置时使用上表的正式地址，构建时的环境变量优先。初始化私有测试数据后运行：
 
 ```powershell
 go run ./cmd/hqip serve --data-dir .local/dev-data --listen 127.0.0.1:8080 --public-listen 127.0.0.1:8081 --admin-origin http://127.0.0.1:5173 --user-origin http://127.0.0.1:5174 --public-url http://127.0.0.1:8081 --artifact-dir dist
@@ -33,7 +35,7 @@ go run ./cmd/hqip serve --data-dir .local/dev-data --listen 127.0.0.1:8080 --pub
 
 固定提交后构建控制二进制 `dist/hqip-domains-linux-amd64`、两个架构的 Agent、两个网页和 Windows 包。执行 `python scripts/package_domains.py --base-manifest <当前生产release.json> --base-node-manifest <当前生产artifacts/manifest.json>` 生成叠加发布包；未包含文件只允许从原发布目录按清单校验后复用，不能从运行数据目录复制。节点清单仅更新 Agent 校验和及来源提交，HY2 等其他固定产物保持原值。
 
-两个新域名必须在 Cloudflare 指向目标服务器。Nginx 仅增加这三个准确名称的虚拟主机，不修改其他站点。新域名通过 Certbot webroot 签发证书，保留 `/.well-known/acme-challenge/`，续期部署钩子 reload Nginx。API 信任 Cloudflare 官方地址段提供的客户端 IP；非可信来源不能伪造限流身份。Cloudflare 不应对 API、SSE、订阅或授权页面启用缓存、交互式挑战或 URL 重写。
+三个域名必须在 Cloudflare 指向目标服务器 `107.151.244.106`。Nginx 仅配置这三个准确名称的虚拟主机，不修改其他站点。新域名通过 Certbot webroot 签发证书，保留 `/.well-known/acme-challenge/`，续期部署钩子 reload Nginx。API 信任 Cloudflare 官方地址段提供的客户端 IP；非可信来源不能伪造限流身份。Cloudflare 不应对 API、SSE、订阅或授权页面启用缓存、交互式挑战或 URL 重写。
 
 先使新 API HTTPS 入口可达，再逐节点运行 `migrate_agent_api.py migrate --node-id <ID>`。脚本验证已有安装归属，备份节点配置和一致性账本，只更新该 Agent 的控制地址并重启 Agent。HY2 核心和连接凭据不变。
 

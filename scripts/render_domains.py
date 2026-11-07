@@ -1,9 +1,9 @@
 """Generate the three exact HQIP virtual hosts; no wildcard/default takeover."""
 from pathlib import Path
 
-API='api-hqip.5202345.xyz'
-USER='hqip.5202345.xyz'
-ADMIN='cms-hqip.5202345.xyz'
+API='api-hqip.sharevps.online'
+USER='hqip.sharevps.online'
+ADMIN='cms-hqip.sharevps.online'
 CF_RANGES=('173.245.48.0/20','103.21.244.0/22','103.22.200.0/22','103.31.4.0/22','141.101.64.0/18','108.162.192.0/18','190.93.240.0/20','188.114.96.0/20','197.234.240.0/22','198.41.128.0/17','162.158.0.0/15','104.16.0.0/13','104.24.0.0/14','172.64.0.0/13','131.0.72.0/22','2400:cb00::/32','2606:4700::/32','2803:f800::/32','2405:b500::/32','2405:8100::/32','2a06:98c0::/29','2c0f:f248::/32')
 BASE_CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://"+API+"; frame-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 AUTH_CSP=BASE_CSP.replace("script-src 'self'","script-src 'self' https://challenges.cloudflare.com").replace("; frame-src 'none'"," https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com")
@@ -21,7 +21,7 @@ def http_host(host):
 
 def tls_host(host):
  return f'''server {{
- listen 443 ssl; listen [::]:443 ssl; http2 on;
+ listen 443 ssl http2; listen [::]:443 ssl http2;
  server_name {host};
  ssl_certificate /etc/letsencrypt/live/{host}/fullchain.pem;
  ssl_certificate_key /etc/letsencrypt/live/{host}/privkey.pem;

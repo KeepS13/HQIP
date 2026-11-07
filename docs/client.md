@@ -1,6 +1,6 @@
 # HQIP Windows 4.2 客户端
 
-用户入口为 [hqip.5202345.xyz](https://hqip.5202345.xyz)，管理入口为 [cms-hqip.5202345.xyz](https://cms-hqip.5202345.xyz)。客户端连接 API `https://api-hqip.5202345.xyz`，使用邮箱账户通过系统浏览器完成 PKCE 授权；客户端不保存账户密码，DPAPI 保护令牌和连接配置。用户网页注册、改密及管理员重置密码均至少 6 个 Unicode 字符、最多 1024 字节。注册、网页登录仍需要 Turnstile。
+用户入口为 [hqip.sharevps.online](https://hqip.sharevps.online)，管理入口为 [cms-hqip.sharevps.online](https://cms-hqip.sharevps.online)。客户端连接 API `https://api-hqip.sharevps.online`，使用邮箱账户通过系统浏览器完成 PKCE 授权；客户端不保存账户密码，DPAPI 保护令牌和连接配置。用户网页注册、改密及管理员重置密码均至少 6 个 Unicode 字符、最多 1024 字节。注册、网页登录仍需要 Turnstile。
 
 ## 订阅与连接
 

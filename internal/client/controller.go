@@ -51,7 +51,7 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		return nil, e
 	}
 	c := &Controller{dir: dir, platform: platform, engine: engine, wake: make(chan struct{}, 1)}
-	c.saved = persisted{AccountVersion: 3, InstallationID: randomID(), Mode: "rule", ServerURL: "https://api-hqip.5202345.xyz", Preferences: map[string]SelectionPreference{}}
+	c.saved = persisted{AccountVersion: 3, InstallationID: randomID(), Mode: "rule", ServerURL: DefaultServerURL, Preferences: map[string]SelectionPreference{}}
 	if encrypted, e := os.ReadFile(filepath.Join(dir, "session.dat")); e == nil {
 		b, e := platform.Unprotect(encrypted)
 		if e != nil {
@@ -61,9 +61,8 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 			return nil, e
 		}
 	}
-	if c.saved.ServerURL == "https://hqip.5202345.xyz" || c.saved.ServerURL == "https://hqip.5202345.xyz/" {
-		c.saved.ServerURL = "https://api-hqip.5202345.xyz"
-	}
+	previousServerURL := c.saved.ServerURL
+	c.saved.ServerURL = migrateOfficialServerURL(c.saved.ServerURL)
 	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{RunState: "disconnected", Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, CoreVersion: CoreVersion}}
 	if c.saved.AccountVersion != 3 {
 		c.saved.Tokens = Tokens{}
@@ -96,6 +95,12 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 		}
 	}
 	c.workCtx, c.cancelWork = context.WithCancel(context.Background())
+	if c.saved.ServerURL != previousServerURL {
+		if err := c.persistLocked(); err != nil {
+			c.cancelWork()
+			return nil, err
+		}
+	}
 	return c, nil
 }
 func (c *Controller) View() View {

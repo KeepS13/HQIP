@@ -1,19 +1,21 @@
-# 独立服务器部署与旧系统下线
+# 独立服务器部署与历史替换记录
 
-正式入口为 https://hqip.5202345.xyz，由 207.57.127.105 运行 Go 服务与内嵌网页。客户端、Agent 和管理员均使用该地址，不再依赖 Windows 本机或反向隧道。原 testvps.sharevps.online 不再提供订阅兼容入口，旧设备账号需重新创建。
+当前部署目标为 `107.151.244.106`：用户入口 https://hqip.sharevps.online，管理入口 https://cms-hqip.sharevps.online，API 入口 https://api-hqip.sharevps.online。两个独立前端由 Nginx 托管，Go 仅提供 API，不依赖 Windows 本机或反向隧道。日常发布参阅[三域名部署与恢复](domains.md)，本次迁移参阅[服务器与域名迁移](server-migration-sharevps.md)。
+
+**以下“首次替换部署”和“旧环境退役”是历史空站部署记录，不是本次迁移步骤。** 当前迁移必须保留已有数据库、主密钥、用户、订阅、订单及账本，不得重复初始化空站或按历史步骤停用仍在使用的节点。
 
 ## 服务与数据
 
 - 服务：`hqip-control.service`；运行用户 `hqip-control`。
 - 程序：`/opt/hqip-control/releases/<提交 SHA>`，`current` 指向发布版本。
-- 数据：`/var/lib/hqip-control`，包含 SQLite、主密钥和初始规则；目录权限 700。
+- 运行目录：`/var/lib/hqip-control`，保存主密钥、规则及运行文件，目录权限 700；业务数据库按当前配置使用 PostgreSQL 或 SQLite。备份须覆盖实际业务数据库，不得只复制目录中的旧 SQLite 文件。
 - 管理/公共监听：`127.0.0.1:18090`、`127.0.0.1:18091`，仅由 Nginx 访问。
-- Nginx：`/etc/nginx/sites-available/hqip.conf`；证书沿用 `/etc/letsencrypt/live/hqip.5202345.xyz/` 和现有 Certbot。
+- Nginx：`/etc/nginx/sites-available/hqip.conf`；三个正式域名各自使用有效证书，保留 Certbot 自动续期及 Nginx reload 钩子。
 - 日志：`journalctl --namespace=hqip-control -u hqip-control`，限制 100 MiB/7 天；Nginx 访问日志只保留方法、状态和耗时，不记录 URI、查询参数、Cookie 或 Authorization，错误请求详情不落盘。
 
 管理员根地址可配置为 HTTPS；HTTP 只允许 `127.0.0.1` 本地开发。两个 Go 监听器仍强制绑定回环 IP。Nginx 覆盖来源 IP 转发头，避免客户端伪造头绕过登录限流；公共接口不会注册管理员路由。
 
-## 首次替换部署
+## 历史：首次空站替换部署
 
 这是“新建空站”，不恢复旧业务库。只导入经过审查、不含节点或订阅凭据的 1,709 条规则和大陆 IP 数据。部署前备份旧 PostgreSQL、活动发布目录、共享配置、PM2 清单及 Nginx；本地 SQLite/主密钥及旧节点账本另行备份。
 
@@ -33,7 +35,7 @@ python3 /root/deploy_nginx.py finalize --state /root/backups/hqip-control-RELEAS
 
 初始管理员为 `admin`，随机密码写在 `/var/lib/hqip-control/bootstrap-admin.json`，首次登录必须修改。部署验收可能已完成首次改密，交付的受限凭据文件是最新密码。旧管理密码、设备账号与订阅均不适用于新站。备份或部署日志不得打印密码。
 
-## 旧环境退役与客户端
+## 历史：旧环境退役与设备版客户端
 
 新站验收后，停止 Windows `Stop-HQIP.ps1`，运行 `Register-HQIPStartup.ps1 -Remove`，备份最终数据并把旧控制配置标记为退役。23.175.24.91 的 `hqip`、`hqip-agent`、`hqip-hysteria`、`hqip-caddy` 保持停止及禁用，删除已备份的隧道公钥授权；保留数据和证书档案。
 
@@ -41,7 +43,7 @@ python3 /root/deploy_nginx.py finalize --state /root/backups/hqip-control-RELEAS
 
 ## 升级、备份与回退
 
-后续升级保留 `/var/lib/hqip-control`，先备份，再停止服务、切换 `current` 至验证后的新发布目录、重新启动和检查。不要重复运行首次替换脚本，不要重新初始化主密钥。
+后续升级保留 `/var/lib/hqip-control` 和实际业务数据库，先备份，再停止服务、切换 `current` 至验证后的新发布目录、重新启动和检查。不要重复运行首次替换脚本，不要重新初始化主密钥。下列命令是 SQLite 环境示例；PostgreSQL 环境按照[数据库运行说明](postgresql-redis-upgrade.md)备份，不用 SQLite 快照替代在线 PostgreSQL 数据。
 
 ```sh
 runuser -u hqip-control -- /opt/hqip-control/current/hqip backup --data-dir /var/lib/hqip-control --output /var/lib/hqip-control/backup-YYYYMMDD.tar.gz

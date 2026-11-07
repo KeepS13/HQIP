@@ -159,7 +159,7 @@ jobs:
       cancel-in-progress: false
     environment:
       name: production
-      url: https://hqip.5202345.xyz
+      url: https://hqip.sharevps.online
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

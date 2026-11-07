@@ -369,18 +369,26 @@ func (c *Controller) accountWatchdog(ctx context.Context) {
 
 // Official deployments separate API and browser origins. Other servers retain same-origin authorization.
 func trustedAuthorizationOrigin(api, page *url.URL) bool {
-	if api == nil || page == nil {
+	if api == nil || page == nil || api.User != nil || page.User != nil || api.Opaque != "" || page.Opaque != "" || page.Fragment != "" {
 		return false
 	}
 	if page.Scheme == api.Scheme && strings.EqualFold(page.Host, api.Host) {
 		return true
 	}
-	return api.Scheme == "https" && strings.EqualFold(api.Host, "api-hqip.5202345.xyz") && page.Scheme == "https" && strings.EqualFold(page.Host, "hqip.5202345.xyz") && page.Path == "/authorize"
+	if api.Scheme != "https" || page.Scheme != "https" || page.Path != "/authorize" || page.RawPath != "" {
+		return false
+	}
+	if strings.EqualFold(api.Host, "api-hqip.sharevps.online") {
+		return strings.EqualFold(page.Host, "hqip.sharevps.online")
+	}
+	// The old API temporarily forwards to the new service during migration.
+	// Retain its old official pair and explicitly allow the new user origin.
+	return strings.EqualFold(api.Host, "api-hqip.5202345.xyz") && (strings.EqualFold(page.Host, "hqip.sharevps.online") || strings.EqualFold(page.Host, "hqip.5202345.xyz"))
 }
 
 func AccountURL(server string) string {
-	if strings.TrimRight(server, "/") == "https://api-hqip.5202345.xyz" {
-		return "https://hqip.5202345.xyz/subscriptions"
+	if migrateOfficialServerURL(server) == DefaultServerURL {
+		return UserSiteURL + "/subscriptions"
 	}
 	return strings.TrimRight(server, "/") + "/subscriptions"
 }

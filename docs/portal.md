@@ -1,6 +1,6 @@
 # 用户账户、多份订阅与节点准入
 
-用户端为 `https://hqip.5202345.xyz`，管理端为 `https://cms-hqip.5202345.xyz`，API 为 `https://api-hqip.5202345.xyz`。用户通过邮箱和密码注册；密码至少 6 个 Unicode 字符、最多 1024 字节。注册和网页登录需要 Turnstile，未配置或验证服务不可用时不会绕过验证。用户登录本身不授予 VPN 权限。
+用户端为 `https://hqip.sharevps.online`，管理端为 `https://cms-hqip.sharevps.online`，API 为 `https://api-hqip.sharevps.online`。用户通过邮箱和密码注册；密码至少 6 个 Unicode 字符、最多 1024 字节。注册和网页登录需要 Turnstile，未配置或验证服务不可用时不会绕过验证。用户登录本身不授予 VPN 权限。
 
 ## 订阅模板与用户实例
 

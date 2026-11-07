@@ -5,8 +5,8 @@ from pathlib import Path
 sys.dont_write_bytecode=True
 import upgrade_node_admission as node_ops
 
-OLD='https://hqip.5202345.xyz'
-NEW='https://api-hqip.5202345.xyz'
+OLD_ORIGINS={'https://hqip.5202345.xyz','https://api-hqip.5202345.xyz'}
+NEW='https://api-hqip.sharevps.online'
 
 def write_config(path,value):
  temporary=path.with_suffix('.domain-new')
@@ -17,7 +17,8 @@ def migrate(node):
  config,state,cfg=node_ops.owned_paths(node)
  units=node_ops.node_units(node);node_ops.verify_units(node,config,units)
  if cfg['controlUrl']==NEW:print(json.dumps({'node':node,'alreadyMigrated':True}));return
- if cfg['controlUrl']!=OLD:raise ValueError('Unexpected controller origin')
+ old=cfg['controlUrl']
+ if old not in OLD_ORIGINS:raise ValueError('Unexpected controller origin')
  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
  # Exercise the same edge policy as the Go Agent; Cloudflare can reject
  # urllib's default user agent before the request reaches the application.
@@ -37,14 +38,15 @@ def migrate(node):
  except Exception:
   shutil.copyfile(backup/'config/agent.json',config/'agent.json')
   node_ops.command('systemctl','restart',units['agent']);raise
- (backup/'state.json').write_text(json.dumps({'node':node,'old':OLD,'new':NEW}));(backup/'state.json').chmod(0o600)
+ (backup/'state.json').write_text(json.dumps({'node':node,'old':old,'new':NEW}));(backup/'state.json').chmod(0o600)
  print(json.dumps({'node':node,'backup':str(backup),'controlUrl':NEW}))
 
 def rollback(backup):
  if backup.parent!=Path('/root/backups') or backup.is_symlink():raise ValueError('Invalid backup')
  info=json.loads((backup/'state.json').read_text());config,_,cfg=node_ops.owned_paths(info['node'])
+ if info.get('new')!=NEW or info.get('old') not in OLD_ORIGINS:raise ValueError('Unexpected migration origins')
  if cfg['controlUrl']!=NEW:raise ValueError('Controller origin already changed')
- cfg['controlUrl']=OLD;write_config(config/'agent.json',cfg)
+ cfg['controlUrl']=info['old'];write_config(config/'agent.json',cfg)
  node_ops.command('systemctl','restart',node_ops.node_units(info['node'])['agent'])
 
 if __name__=='__main__':
