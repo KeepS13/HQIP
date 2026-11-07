@@ -54,7 +54,10 @@ func pgTool(ctx context.Context, dsn, tool string, args ...string) error {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
-	cmd.Env = append(cmd.Env, "PGSERVICEFILE="+service, "PGSERVICE=hqip")
+	// Debian's pg_wrapper can select an unrelated local cluster's old tool
+	// version even when PGSERVICE is set. The explicit, non-secret target
+	// disables local-cluster selection; authentication remains in service.conf.
+	cmd.Env = append(cmd.Env, "PGSERVICEFILE="+service, "PGSERVICE=hqip", "PGHOST="+c.Host)
 	if err = cmd.Run(); err != nil {
 		return errors.New(tool + " 执行失败；请检查工具版本、连接权限与备份文件")
 	}
