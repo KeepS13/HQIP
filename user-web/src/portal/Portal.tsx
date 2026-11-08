@@ -206,11 +206,15 @@ function Auth({
             />
           ) : (
             <form className="form-stack" onSubmit={submit}>
-              {!ready && (
+              {!config.data?.portalEnabled ? (
                 <Notice tone="warning">
-                  用户入口尚未准备好，请稍后重试或联系管理员。
+                  用户门户尚未启用，请联系管理员。
                 </Notice>
-              )}
+              ) : !ready ? (
+                <Notice tone="warning">
+                  用户登录的安全验证尚未配置完成，请联系管理员。
+                </Notice>
+              ) : null}
               {config.data?.recoveryHold && (
                 <Notice tone="warning">
                   备份恢复核对中，暂时不能建立新连接。

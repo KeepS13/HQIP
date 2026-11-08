@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Save, ShieldCheck } from "lucide-react";
 import { api, usePolling } from "../api";
 import { USER_URL } from "../config";
 import {
   Badge,
   Button,
+  Confirm,
   ErrorNotice,
   Field,
   Loading,
@@ -28,7 +29,13 @@ export function TurnstileSettingsPage() {
     [initialized, setInitialized] = useState(false),
     [busy, setBusy] = useState(false),
     [registrationBusy, setRegistrationBusy] = useState(false),
+    [activationBusy, setActivationBusy] = useState(false),
+    [confirmActivation, setConfirmActivation] = useState(false),
     [error, setError] = useState("");
+  const activationInFlight = useRef(false);
+  const turnstileReady = !!(
+    settings.data?.secretConfigured && settings.data.siteKey
+  );
   const toast = useToast();
   useEffect(() => {
     if (settings.data && !initialized) {
@@ -55,6 +62,7 @@ export function TurnstileSettingsPage() {
       setSecret("");
       setRevision(saved.revision);
       await settings.refresh();
+      await portal.refresh();
       toast("Turnstile 设置已保存");
     } catch (e) {
       setError((e as Error).message);
@@ -149,7 +157,7 @@ export function TurnstileSettingsPage() {
               <Button
                 type="button"
                 variant="secondary"
-                disabled={busy}
+                disabled={busy || activationBusy}
                 onClick={async () => {
                   setBusy(true);
                   setError("");
@@ -171,14 +179,67 @@ export function TurnstileSettingsPage() {
               >
                 重新读取设置
               </Button>
-              <Button icon={Save} type="submit" busy={busy}>
+              <Button
+                icon={Save}
+                type="submit"
+                busy={busy}
+                disabled={activationBusy}
+              >
                 保存安全验证设置
               </Button>
             </div>
           </form>
         )}
       </Panel>
-      <Panel title="公开注册" subtitle="用户可以申请订阅，由管理员确认开通">
+      <Panel
+        title="用户门户"
+        subtitle="保存安全验证设置后，需明确启用用户入口。公开注册由下方开关单独控制。"
+        action={
+          portal.data && (
+            <Badge tone={portal.data.portalEnabled ? "success" : "warning"}>
+              {portal.data.portalEnabled ? "已启用" : "未启用"}
+            </Badge>
+          )
+        }
+      >
+        {portal.loading ? (
+          <Loading />
+        ) : (
+          <div className="account-control account-registration">
+            <div>
+              <strong>
+                {portal.data?.portalEnabled
+                  ? "用户门户已启用"
+                  : "用户门户尚未启用"}
+              </strong>
+              <p>
+                {portal.data?.portalEnabled
+                  ? "已有用户可完成安全验证后登录，关闭公开注册不会关闭登录入口。"
+                  : turnstileReady
+                    ? "安全验证已配置，启用后即可开放用户登录入口。"
+                    : "请先保存完整的 Cloudflare Turnstile 设置，再启用用户门户。"}
+              </p>
+            </div>
+            {!portal.data?.portalEnabled && (
+              <Button
+                busy={activationBusy}
+                disabled={
+                  !portal.data ||
+                  !!portal.error ||
+                  !!settings.error ||
+                  !turnstileReady ||
+                  busy ||
+                  registrationBusy
+                }
+                onClick={() => setConfirmActivation(true)}
+              >
+                启用用户门户
+              </Button>
+            )}
+          </div>
+        )}
+      </Panel>
+      <Panel title="公开注册" subtitle="仅控制新用户注册，不会自动启用用户门户">
         <div className="account-control">
           <div className="account-registration">
             <div>
@@ -192,7 +253,7 @@ export function TurnstileSettingsPage() {
             <Button
               variant="secondary"
               busy={registrationBusy}
-              disabled={!portal.data}
+              disabled={!portal.data || activationBusy}
               onClick={async () => {
                 setRegistrationBusy(true);
                 setError("");
@@ -227,6 +288,32 @@ export function TurnstileSettingsPage() {
           </a>
         </div>
       </Panel>
+      {confirmActivation && (
+        <Confirm
+          title="启用用户门户"
+          confirm="确认启用"
+          description={`启用后将停用旧设备鉴权、撤销旧客户端会话，并要求活动节点同步新配置。此操作不会修改公开注册开关；当前${portal.data?.registrationEnabled ? "允许新用户注册" : "不开放新用户注册"}。`}
+          onClose={() => setConfirmActivation(false)}
+          onConfirm={async () => {
+            if (activationInFlight.current || portal.data?.portalEnabled) return;
+            if (!turnstileReady || !portal.data || portal.error || settings.error)
+              throw new Error("请先读取并保存完整的安全验证设置");
+            activationInFlight.current = true;
+            setActivationBusy(true);
+            try {
+              await api("/settings/portal/activate", "POST", { confirm: true });
+              portal.setData((current) =>
+                current ? { ...current, portalEnabled: true } : current,
+              );
+              await portal.refresh();
+              toast("用户门户已启用");
+            } finally {
+              activationInFlight.current = false;
+              setActivationBusy(false);
+            }
+          }}
+        />
+      )}
     </>
   );
 }
