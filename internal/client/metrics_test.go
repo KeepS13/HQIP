@@ -157,12 +157,16 @@ func TestLateMetricsCannotReplaceNewConnection(t *testing.T) {
 }
 
 func TestAccountURLUsesUserFrontend(t *testing.T) {
-	for _, address := range []string{DefaultServerURL, DefaultServerURL + "/", legacyServerURL, legacyUserSiteURL} {
+	for _, address := range []string{DefaultServerURL, DefaultServerURL + "/", UserSiteURL, UserSiteURL + "/"} {
 		if AccountURL(address) != "https://hqip.sharevps.online/subscriptions" {
 			t.Fatal("account link used API host or old user domain")
 		}
 	}
-	if AccountURL("https://custom.example") != "https://custom.example/subscriptions" {
-		t.Fatal("custom origin changed")
+	for _, address := range []string{"https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444", legacyServerURL, legacyUserSiteURL} {
+		for _, suffix := range []string{"", "/"} {
+			if AccountURL(address+suffix) != address+"/subscriptions" {
+				t.Fatal("custom account origin changed", address)
+			}
+		}
 	}
 }

@@ -5,6 +5,7 @@ from pathlib import Path
 from contextlib import closing
 sys.dont_write_bytecode=True
 import upgrade_control as control
+from fresh_deploy import require_free_space
 
 SITE=Path('/etc/nginx/sites-available/hqip.conf')
 UNIT=Path('/etc/systemd/system/hqip-control.service')
@@ -112,10 +113,10 @@ def verify(release):
   if path not in manifest['sha256']:raise ValueError('Missing domain release asset: '+path)
  old=(control.BASE/'current').resolve(strict=True)
  _,previous=control.verify_release(old)
- if release==old or manifest.get('upgradeKind')!='domains-alerts' or manifest.get('previousSourceSHA')!=previous['sourceSHA']:raise ValueError('Release is not based on active version')
- allowed=verify_agent_assets(release,old,manifest)|{'artifacts/HQIP-Windows-x64.zip','artifacts/desktop-manifest.json'}
- for name,digest in previous['sha256'].items():
-  if name.startswith('artifacts/') and name not in allowed and manifest['sha256'].get(name)!=digest:raise ValueError('Unexpected node artifact change')
+ if release==old or manifest.get('upgradeKind')!='full-release' or manifest.get('previousSourceSHA')!=previous['sourceSHA']:raise ValueError('Release is not based on active version')
+ from release_bundle import verify_full_release
+ verify_full_release(release,manifest)
+ if not postgres_enabled():raise ValueError('Normal releases require the initialized PostgreSQL station; use the separate fresh deployment workflow')
  data_identity()
  require_billing_compatible(manifest)
  if manifest.get('schemaVersion',4)<schema_version():raise ValueError('Release cannot read the current database schema; downgrade refused')
@@ -170,6 +171,11 @@ def upgrade(release,state):
   else:shutil.copytree(control.DATA,state/'data.before')
   for p in state.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
   disable_feishu()
+  # Backups can be larger than the uploaded release. Check actual remaining
+  # space after backup and before changing the active code or service files.
+  require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
+  from fresh_deploy import install_log_limits
+  install_log_limits(release)
   control.point_current(release)
   shutil.copyfile(release/'deploy/hqip-control.service',UNIT);UNIT.chmod(0o644)
   shutil.copyfile(release/'deploy/nginx-hqip.conf',SITE);SITE.chmod(0o644)

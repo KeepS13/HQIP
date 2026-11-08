@@ -33,7 +33,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install paramiko
       - run: python -m unittest discover -s scripts -p "test_*.py"
-      - run: python3 scripts/build.py --skip-web --skip-download
+      - run: python3 scripts/build.py --skip-web
       - run: go test -race ./core/server ./core/internal/integration_tests ./app/cmd
         working-directory: runtime/hysteria
       - uses: actions/upload-artifact@v4
@@ -44,6 +44,10 @@ jobs:
             dist/hqip-migrate-postgres-linux-amd64
             dist/agent-linux-amd64
             dist/agent-linux-arm64
+            dist/hysteria-linux-amd64
+            dist/hysteria-linux-arm64
+            dist/caddy-linux-amd64
+            dist/manifest.json
             admin-web/dist
             user-web/dist
           if-no-files-found: error
@@ -150,7 +154,7 @@ jobs:
             dist/desktop-manifest.json
           if-no-files-found: error
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.HQIP_DEPLOY_PAUSED != 'true'
     needs: [check, windows, postgres]
     runs-on: ubuntu-latest
     timeout-minutes: 30

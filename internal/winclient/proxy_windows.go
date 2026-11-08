@@ -224,6 +224,16 @@ func (p *ProxyManager) Restore() error {
 		return p.restoreLocked(os.Getpid(), stamp)
 	})
 }
+
+func ownedProxyValues(port int) map[string]proxyValue {
+	return map[string]proxyValue{
+		"ProxyEnable":   {Present: true, Kind: registry.DWORD, Number: 1},
+		"ProxyServer":   {Present: true, Kind: registry.SZ, Text: fmt.Sprintf("127.0.0.1:%d", port)},
+		"ProxyOverride": {Present: true, Kind: registry.SZ, Text: "<local>;api-hqip.sharevps.online;hqip.sharevps.online"},
+		"AutoConfigURL": {},
+	}
+}
+
 func (p *ProxyManager) Enable(port int) error {
 	if port < 1 || port > 65535 {
 		return errors.New("系统代理端口无效")
@@ -254,7 +264,7 @@ func (p *ProxyManager) Enable(port int) error {
 		if err != nil {
 			return err
 		}
-		lease := proxyLease{PID: os.Getpid(), Stamp: stamp, Before: before, Owned: map[string]proxyValue{"ProxyEnable": {Present: true, Kind: registry.DWORD, Number: 1}, "ProxyServer": {Present: true, Kind: registry.SZ, Text: fmt.Sprintf("127.0.0.1:%d", port)}, "ProxyOverride": {Present: true, Kind: registry.SZ, Text: "<local>;api-hqip.sharevps.online;hqip.sharevps.online;api-hqip.5202345.xyz;hqip.5202345.xyz"}, "AutoConfigURL": {}}}
+		lease := proxyLease{PID: os.Getpid(), Stamp: stamp, Before: before, Owned: ownedProxyValues(port)}
 		if err = p.save(lease); err != nil {
 			return err
 		}

@@ -173,7 +173,14 @@ func (s *Store) PortalCredential(user, subscription, node, scope string) (string
 	if err != nil {
 		return "", err
 	}
-	if !entitlementAllows(e, node) || !activeCredentialSession(tx, user, subscription, scope, s.Now()) {
+	if !entitlementAllows(e, node) {
+		return "", ErrEntitlement
+	}
+	active, err := activeCredentialSession(tx, user, subscription, scope, s.Now())
+	if err != nil {
+		return "", err
+	}
+	if !active {
 		return "", ErrEntitlement
 	}
 	var enc string

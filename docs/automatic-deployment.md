@@ -1,35 +1,27 @@
 # GitHub 自动部署
 
-推送或合并到 `main` 后，`CI` 的 Linux `check` 和 `windows` 作业分别测试、构建。同一次运行中的两个作业都成功后，`deploy` 才更新生产服务器。PR 只测试；也可以在 Actions → CI → Run workflow 选择 `main` 手动重跑。过时的提交跳过部署，正在执行的部署不会因新推送而被取消。
+`main`的CI先运行Linux、Windows及真实PostgreSQL/Redis回归，全部成功才允许部署。PR只测试。过时提交跳过，正在执行的部署不会被新推送取消。
 
-服务继续由 systemd 的 `hqip-control.service` 管理，两个网页由 Nginx 提供，不需要安装 PM2。本地保存文件不会上线，必须提交并推送。
+仓库变量`HQIP_DEPLOY_PAUSED=true`只暂停deploy作业，测试与构建继续运行。全新重建期间保持暂停；新站验收完成后将其设为`false`或删除。日常CI不会调用`init-admin`、重置数据或运行fresh activate。
 
 ## 一次性配置
 
-仓库 Settings → Secrets and variables → Actions 中配置：
+目标必须先通过[全新空站部署](fresh-deployment.md)建立可验证的正式基线。配置Actions secrets：`DEPLOY_HOST`（新服务器）、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`。SSH严格验证主机身份，部署用户需要root或受控的免交互sudo。只给新目标配置部署授权，移除旧HQIP部署专用授权。
 
-| Secret | 内容 |
-| --- | --- |
-| `DEPLOY_HOST` | 生产服务器 IP 或主机名 |
-| `DEPLOY_PORT` | SSH 端口 |
-| `DEPLOY_USER` | SSH 用户，当前为 root；其他用户必须支持 `sudo -n` |
-| `DEPLOY_SSH_KEY` | 无口令部署专用 OpenSSH 私钥 |
-| `DEPLOY_KNOWN_HOSTS` | 从可信 SSH 会话核验的主机公钥记录 |
+控制服务运行PostgreSQL＋Redis；存储环境文件必需。主机需有Python3.11+、匹配PG18的备份工具、三个正式站点和证书。不要把密码、运行数据或旧备份放进发布包。
 
-部署公钥须已加入该用户的 `authorized_keys`。默认 22 端口的主机记录为 `主机名 ssh-ed25519 公钥`，其他端口为 `[主机名]:端口 ssh-ed25519 公钥`。服务器需要 Python 3.11+、现有三域名服务、证书和完整 `release.json` 清单。
+## 完整发布与回退
 
-## 发布与回退
+Linux作业构建控制程序、两架构Agent/HY2及校验过的Caddy，输出当前提交的manifest；Windows作业生成同一提交的客户端。部署作业将上述产物和两个网页打成完整包。安装器要求包内文件与清单完全一致，缺失任何文件即失败，不能从旧release补齐。
 
-发布包含已测试的 Go 控制程序、管理网页、用户网页和同提交的 Windows 下载包。Agent 和 HY2 节点产物从当前发布目录按 SHA-256 校验复用；节点升级仍使用已有专门流程。部署不会自动在节点上运行升级或重新初始化账号、数据库和主密钥。
+当前生产SHA只作为并发部署基线检查；旧目录不再提供构建输入或节点二进制。服务器重新核验每个文件摘要、节点核心来源和客户端来源，拒绝错基线、路径越界、符号链接和重复发布目录。
 
-SSH 严格校验主机身份。服务器再次核验上传包和所有文件摘要，拒绝错基线、路径越界和重复发布目录。升级复用 `upgrade_domains.py`：先冷备份数据库与主密钥及 Nginx/systemd 配置，然后切换版本、检查本机两路健康接口，再检查公网三个域名。失败回退代码与路由，保留实时用量数据库。数据库 schema 不兼容的升级需要专门设计迁移方案。
+升级先冷备份PG和配套密钥，切换代码及准确站点配置，检查本机两路`/readyz`、公网两个网页以及API的`/healthz`和`/readyz`。两个API探针都须通过。失败仅回退兼容的代码与路由，保留实时PG数据库。数据结构不兼容时拒绝回退并向前修复。
 
-Actions 的部署摘要记录提交 SHA 和 `/root/backups/hqip-ci-<SHA>-<运行ID>-<重试次数>`。备份包含私密数据，不能上传到 Actions 或仓库。保留发布目录和备份；清理策略需按实际磁盘空间另行制定。
+Actions摘要记录提交和`/root/backups/hqip-ci-<SHA>-<运行ID>-<重试次数>`。备份含密钥，必须另行加密、独立保存，不能上传Actions或源码库。手动回退使用对应失败运行的精确状态目录：
 
-手动回退（使用失败运行摘要中的精确路径；不能覆盖后来成功部署的版本）：
-
-```bash
+```sh
 python3 -B /opt/hqip-control/releases/<SHA>/scripts/upgrade_domains.py rollback --state /root/backups/hqip-ci-<SHA>-<运行ID>-<重试次数>
 ```
 
-上传或校验失败发生在停止服务之前。若已有同 SHA 的失败发布目录，先核对当前指向和失败原因再处理该目录，脚本不会覆盖它。服务器恢复后可重跑 CI；已是同提交的活动版本仅进行公网健康检查。
+不得覆盖随后成功的发布，或用旧SQLite/旧站备份抹去新站数据。同提交已经活动时只验收就绪状态；失败发布目录不会被重复覆盖。

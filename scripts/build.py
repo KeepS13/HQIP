@@ -72,7 +72,9 @@ def main():
     names += ["caddy-linux-amd64"]
     names += [f"{name}-windows-{arch}.exe" for arch in ["amd64", "arm64"] for name in ["hqip", "hysteria"]]
     extension = OUT / "hqip-hysteria-manifest.json"
-    manifest = {"hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names if (OUT / name).exists()}}
+    source_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip())
+    manifest = {"sourceSHA": source_sha, "dirty": dirty, "hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names if (OUT / name).exists()}}
     if extension.exists():
         manifest["hysteriaSource"] = json.loads(extension.read_text(encoding="utf-8"))
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

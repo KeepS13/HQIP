@@ -1,0 +1,16 @@
+.login-service{margin-top:18px;border-top:1px solid #293344;padding-top:14px;min-width:0}
+.login-service summary{display:flex;align-items:center;gap:10px;cursor:pointer;color:#a5b4c9;font-size:11px;list-style:none;min-width:0;border-radius:4px}
+.login-service summary::-webkit-details-marker{display:none}
+.login-service summary:focus-visible{outline:2px solid #b5a9fa;outline-offset:5px}
+.login-service summary>span:first-child{flex-shrink:0}
+.login-service-current{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;color:#7f91a8;font-size:10px}
+.login-service summary>svg{flex-shrink:0;transition:transform .15s}
+.login-service[open] summary>svg{transform:rotate(180deg)}
+.login-service-fields{padding-top:16px;text-align:left}
+.login-card .login-service-fields label{margin:0}
+.login-service-fields input{min-width:0}
+.login-service-fields input:disabled{opacity:.6;cursor:not-allowed}
+.login-card .login-service-fields p{font-size:10px;line-height:1.6;margin:9px 0;color:#8495ad}
+.login-service-reset{display:block;margin:10px 0 0 auto;color:#b8adf7;font-size:11px;padding:5px 0}
+.login-card form.login-form{display:block;width:100%;max-width:420px;margin:0 auto}
+.login-card .login-form>.primary{margin:0 auto}

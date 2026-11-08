@@ -17,7 +17,9 @@ func rebalancePortalRates(tx *sql.Tx, subscription string, e *model.UserSubscrip
 		pending, revoked       bool
 		node                   string
 	}
-	rows, err := tx.Query("SELECT l.id,l.bandwidth,r.ceiling,r.version,r.pending,l.revoked,l.node_id FROM portal_leases l JOIN portal_rates r ON r.lease_id=l.id WHERE l.subscription_id=? AND l.closed=0 AND l.expires>? ORDER BY l.created_at,l.rowid", subscription, now.Unix())
+	// Correlated primary-key reads avoid a hash join that scans every rate row
+	// and takes Serializable predicate locks for unrelated subscriptions.
+	rows, err := tx.Query("SELECT l.id,l.bandwidth,(SELECT ceiling FROM portal_rates WHERE lease_id=l.id),(SELECT version FROM portal_rates WHERE lease_id=l.id),(SELECT pending FROM portal_rates WHERE lease_id=l.id),l.revoked,l.node_id FROM portal_leases l WHERE l.subscription_id=? AND l.closed=0 AND l.expires>? ORDER BY l.created_at,l.rowid", subscription, now.Unix())
 	if err != nil {
 		return err
 	}

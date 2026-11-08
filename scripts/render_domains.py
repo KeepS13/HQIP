@@ -12,7 +12,7 @@ def http_host(host):
  return f'''server {{
  listen 80; listen [::]:80;
  server_name {host};
- access_log /var/log/nginx/hqip-control.access.log hqip_control_safe;
+ access_log /var/log/nginx/hqip-control/access.log hqip_control_safe;
  error_log /dev/null crit;
  location ^~ /.well-known/acme-challenge/ {{ root /var/www/letsencrypt; try_files $uri =404; }}
  location / {{ return 301 https://{host}$request_uri; }}
@@ -26,7 +26,7 @@ def tls_host(host):
  ssl_certificate /etc/letsencrypt/live/{host}/fullchain.pem;
  ssl_certificate_key /etc/letsencrypt/live/{host}/privkey.pem;
  ssl_protocols TLSv1.2 TLSv1.3;
- access_log /var/log/nginx/hqip-control.access.log hqip_control_safe;
+ access_log /var/log/nginx/hqip-control/access.log hqip_control_safe;
  error_log /dev/null crit;
  add_header Strict-Transport-Security "max-age=31536000" always;
  add_header X-Content-Type-Options nosniff always;

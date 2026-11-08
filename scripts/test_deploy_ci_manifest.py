@@ -30,13 +30,21 @@ class ManifestTransferTests(unittest.TestCase):
 
         def response(args, **kwargs):
             urls.append(args[-1])
-            return SimpleNamespace(stdout='{"ok":true}' if args[-1].endswith('/healthz') else '<!doctype html>')
+            return SimpleNamespace(stdout='{"ok":true}' if args[-1].endswith(('/healthz', '/readyz')) else '<!doctype html>')
 
         with patch('deploy_ci.command', side_effect=response):
             check_public()
         self.assertEqual(urls, ['https://hqip.sharevps.online/',
                                 'https://cms-hqip.sharevps.online/',
-                                'https://api-hqip.sharevps.online/healthz'])
+                                'https://api-hqip.sharevps.online/healthz',
+                                'https://api-hqip.sharevps.online/readyz'])
+
+    def test_alive_process_with_unavailable_storage_rejects_release(self):
+        def response(args, **kwargs):
+            return SimpleNamespace(stdout='{"ok":false}' if args[-1].endswith('/readyz') else '{"ok":true}')
+        with patch('deploy_ci.command', side_effect=response):
+            with self.assertRaisesRegex(ValueError, 'Public API is unhealthy'):
+                check_public()
 
     def test_public_api_business_failure_rejects_release(self):
         with patch('deploy_ci.command', return_value=SimpleNamespace(stdout='{"ok":false}')):

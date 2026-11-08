@@ -378,12 +378,7 @@ func trustedAuthorizationOrigin(api, page *url.URL) bool {
 	if api.Scheme != "https" || page.Scheme != "https" || page.Path != "/authorize" || page.RawPath != "" {
 		return false
 	}
-	if strings.EqualFold(api.Host, "api-hqip.sharevps.online") {
-		return strings.EqualFold(page.Host, "hqip.sharevps.online")
-	}
-	// The old API temporarily forwards to the new service during migration.
-	// Retain its old official pair and explicitly allow the new user origin.
-	return strings.EqualFold(api.Host, "api-hqip.5202345.xyz") && (strings.EqualFold(page.Host, "hqip.sharevps.online") || strings.EqualFold(page.Host, "hqip.5202345.xyz"))
+	return strings.EqualFold(api.Host, "api-hqip.sharevps.online") && strings.EqualFold(page.Host, "hqip.sharevps.online")
 }
 
 func AccountURL(server string) string {
