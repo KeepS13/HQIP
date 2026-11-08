@@ -33,7 +33,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install paramiko
       - run: python -m unittest discover -s scripts -p "test_*.py"
-      - run: python3 scripts/build.py --skip-web
+      - run: python3 scripts/build.py --skip-web --server-only
       - run: go test -race ./core/server ./core/internal/integration_tests ./app/cmd
         working-directory: runtime/hysteria
       - uses: actions/upload-artifact@v4

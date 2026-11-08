@@ -6,7 +6,7 @@
 
 ## 产物和主机前置条件
 
-- 使用已提交源码构建控制程序、两套网页、Windows 客户端、两种架构的 Agent/HY2 以及校验过的 Caddy。执行 `python scripts/build.py --skip-web`、Windows 的 `build_desktop.py`，然后 `python scripts/package_domains.py`。首次打包不传 `--previous-source-sha`。
+- 使用已提交源码构建控制程序、两套网页、Windows 客户端、两种架构的 Agent/HY2 以及校验过的 Caddy。执行 `python scripts/build.py --skip-web --server-only`、Windows 的 `build_desktop.py`，然后 `python scripts/package_domains.py`。服务端模式不构建或下载旧版 Windows CLI，不能与 `--skip-go` 同用；桌面端由独立构建提供。首次打包不传 `--previous-source-sha`。
 - 完整包为 `dist/hqip-full-<SHA前12位>.tar.gz`，摘要见 `dist/domains-release.json`。包内每个文件都有哈希，Agent、节点核心、客户端来源与本次提交对应，不从旧发布目录复用文件。
 - 完整包同时携带 HQIP 日志策略，准备、激活及后续升级均显式安装：`hqip-control` journal 命名空间限制磁盘64MiB、运行时16MiB、最长7天；Nginx只轮转 `/var/log/nginx/hqip-control/access.log`，每日或检查时超过10MiB保留7份并压缩。该路径避开系统的Nginx日志通配规则，轮转仅通过USR1复开日志，不重启共享Nginx。大小阈值在系统logrotate调度时检查，不是写入时硬截断。
 - 新机已安装 Nginx、Docker Engine/Compose、Python 3.11+、PostgreSQL 18 的 `pg_dump`/`pg_restore`；已有三个网站的有效 TLS 证书、受信任的 SSH 主机密钥和足够存储空间。数据库端口不得暴露公网。

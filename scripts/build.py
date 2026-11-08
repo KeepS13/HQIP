@@ -16,7 +16,8 @@ def run(args, **kwargs):
     subprocess.run(args, check=True, cwd=ROOT, **kwargs)
 
 def digest(path):
-    return hashlib.file_digest(path.open("rb"), "sha256").hexdigest()
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 def download(name, url, expected):
     target = OUT / name
@@ -36,7 +37,10 @@ def download(name, url, expected):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-web", action="store_true")
-    parser.add_argument("--skip-go", action="store_true")
+    build_scope = parser.add_mutually_exclusive_group()
+    build_scope.add_argument("--skip-go", action="store_true")
+    build_scope.add_argument("--server-only", action="store_true",
+                             help="Build production Linux assets without legacy Windows CLI downloads; requires fresh Go builds.")
     parser.add_argument("--skip-download", action="store_true")
     args = parser.parse_args()
     OUT.mkdir(exist_ok=True)
@@ -50,14 +54,22 @@ def main():
             env = dict(os.environ, GOOS="linux", GOARCH=arch, CGO_ENABLED="0")
             for command, name in [("hqip", "hqip"), ("hqip-agent", "agent"), ("hqip-migrate-postgres", "hqip-migrate-postgres")]:
                 run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"{name}-linux-{arch}"), f"./cmd/{command}"], env=env)
-            env = dict(os.environ, GOOS="windows", GOARCH=arch, CGO_ENABLED="0")
-            run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"hqip-windows-{arch}.exe"), "./cmd/hqip"], env=env)
+            if not args.server_only:
+                env = dict(os.environ, GOOS="windows", GOARCH=arch, CGO_ENABLED="0")
+                run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"hqip-windows-{arch}.exe"), "./cmd/hqip"], env=env)
         run([sys.executable, str(ROOT / "scripts/build_hy2.py")])
     if not args.skip_download:
         for name, (url, expected) in PINNED.items():
             if name.startswith("hysteria-linux-"):
                 continue  # Linux nodes use the reviewed, pinned-source extension.
+            if args.server_only and name.startswith("hysteria-windows-"):
+                continue  # The desktop job builds the actual sing-box client.
             download(name, url, expected)
+    if args.server_only and args.skip_download:
+        cached = OUT / "caddy-linux-amd64.tar.gz"
+        if not cached.is_file() or digest(cached) != PINNED[cached.name][1]:
+            raise ValueError("Missing or mismatched pinned Caddy cache")
+    if not args.skip_download or args.server_only:
         with tarfile.open(OUT / "caddy-linux-amd64.tar.gz", "r:gz") as archive:
             # Never extract arbitrary archive members onto the filesystem.
             with archive.extractfile("caddy") as source, (OUT / "caddy-linux-amd64").open("wb") as destination:
@@ -68,13 +80,16 @@ def main():
         if not extended.is_file() or provenance["sha256"].get(extended.name) != digest(extended):
             raise ValueError("Missing or mismatched HQIP admission core: " + extended.name)
         shutil.copyfile(extended, OUT / f"hysteria-linux-{arch}")
-    names = [f"{name}-linux-{arch}" for arch in ["amd64", "arm64"] for name in ["hqip", "agent", "hysteria"]]
+    names = [f"{name}-linux-{arch}" for arch in ["amd64", "arm64"] for name in ["hqip", "agent", "hqip-migrate-postgres", "hysteria"]]
     names += ["caddy-linux-amd64"]
-    names += [f"{name}-windows-{arch}.exe" for arch in ["amd64", "arm64"] for name in ["hqip", "hysteria"]]
+    if not args.server_only:
+        names += [f"{name}-windows-{arch}.exe" for arch in ["amd64", "arm64"] for name in ["hqip", "hysteria"]]
     extension = OUT / "hqip-hysteria-manifest.json"
     source_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip())
-    manifest = {"sourceSHA": source_sha, "dirty": dirty, "hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names if (OUT / name).exists()}}
+    # Hash exactly this build's selected targets. Missing output is an error;
+    # stale Windows files or an older manifest never expand production scope.
+    manifest = {"sourceSHA": source_sha, "dirty": dirty, "hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names}}
     if extension.exists():
         manifest["hysteriaSource"] = json.loads(extension.read_text(encoding="utf-8"))
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

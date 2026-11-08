@@ -19,7 +19,7 @@ npm --prefix admin-web run build
 npm --prefix user-web run build
 go test ./...
 python -B -m unittest discover -s scripts -p "test_*.py"
-python scripts/build.py --skip-web
+python scripts/build.py --skip-web --server-only
 # 同一提交在Windows构建客户端后，打包所有产物；首次新站不传基线SHA。
 python scripts/package_domains.py --previous-source-sha <当前正式SHA>
 ```
