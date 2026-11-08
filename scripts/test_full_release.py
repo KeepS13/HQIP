@@ -111,6 +111,31 @@ class FullReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'core provenance'):
             package_release(self.root, self.sha)
 
+    def test_restore_operator_must_ship_in_a_complete_release(self):
+        package_release(self.root, self.sha)
+        output = self.root / 'dist' / ('full-' + self.sha)
+        recovery = output / 'scripts/restore_postgres.py'
+        self.assertEqual(recovery.read_bytes(), (self.root / 'scripts/restore_postgres.py').read_bytes())
+        manifest = json.loads((output / 'release.json').read_text())
+        del manifest['sha256']['scripts/restore_postgres.py']
+        recovery.unlink()
+        with self.assertRaisesRegex(ValueError, 'Incomplete full release'):
+            verify_full_release(output, manifest)
+
+    def test_legacy_recovery_capability_is_only_accepted_for_historical_verification(self):
+        package_release(self.root, self.sha)
+        output = self.root / 'dist' / ('full-' + self.sha)
+        manifest = json.loads((output / 'release.json').read_text())
+        del manifest['postgresRecoveryVersion']
+        del manifest['sha256']['scripts/restore_postgres.py']
+        (output / 'scripts/restore_postgres.py').unlink()
+        with self.assertRaisesRegex(ValueError, 'postgresRecoveryVersion'):
+            verify_full_release(output, manifest)
+        self.assertEqual(verify_full_release(output, manifest, allow_legacy=True)['sourceSHA'], self.sha)
+        manifest['postgresRecoveryVersion'] = 1
+        with self.assertRaisesRegex(ValueError, 'Incomplete full release'):
+            verify_full_release(output, manifest, allow_legacy=True)
+
     def test_wrong_source_and_missing_node_binary_are_rejected(self):
         self.nodes['sourceSHA'] = 'a' * 40
         (self.root / 'dist/manifest.json').write_text(json.dumps(self.nodes))

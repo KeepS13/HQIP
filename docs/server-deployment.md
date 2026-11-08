@@ -20,6 +20,6 @@ PostgreSQL是唯一业务事实来源。Redis不保存唯一余额或最终扣�
 
 初始管理员随机密码写入`bootstrap-admin.json`，0600，首次登录必须修改。支付、注册、人机验证和业务DNS由管理员重配；网站HTTPS证书与Certbot续期独立保留。日志不得记录密码、URI令牌、Cookie或Authorization。
 
-备份必须使用配置过应用角色环境的`hqip backup`，同时包含PostgreSQL数据库与配套master.key；安装匹配主版本的`pg_dump`和`pg_restore`。归档文件另行加密并保存到独立存储，以迁移角色在空数据库验证恢复。代码回退保留当前PG数据；不得启动旧SQLite副本或恢复已退役商户配置。
+备份必须使用配置过应用角色环境的`hqip backup`，同时包含PostgreSQL数据库与配套master.key；安装匹配主版本的`pg_dump`和`pg_restore`。归档文件另行加密并保存到独立存储，使用完整发布包的`restore_postgres.py`在空库恢复、重建应用权限并验证应用账号备份，详见[PostgreSQL灾备恢复](postgresql-recovery.md)。代码回退保留当前PG数据；不得启动旧SQLite副本或恢复已退役商户配置。
 
 旧主机仅清理HQIP专属对象，保留其他项目及共享基础设施。旧域名不提供重定向或兼容桥接。

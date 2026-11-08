@@ -181,7 +181,8 @@ with os.fdopen(lock_fd, 'a') as lock:
             output.flush()
             os.fsync(output.fileno())
             print(line, flush=True)
-        result = retain_releases(base, current_sha, previous_sha, verify_full_release, audit)
+        result = retain_releases(base, current_sha, previous_sha,
+                                 lambda path: verify_retained_release(path, current_sha), audit)
         result['filesystems'] = check_ci_space()
         audit(dict(result, action='complete'))
 ''')

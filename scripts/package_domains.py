@@ -66,7 +66,7 @@ def package_release(root, sha, previous_sha=None):
     node_manifest.write_text(json.dumps(nodes, indent=2) + '\n', encoding='utf-8')
     hashes['artifacts/manifest.json'] = digest(node_manifest)
     manifest = {'sourceSHA': sha, 'releaseKind': 'full', 'upgradeKind': 'full-release',
-                'schemaVersion': 5, 'postgresSchemaVersion': 1, 'paymentsVersion': 1,
+                'schemaVersion': 5, 'postgresSchemaVersion': 1, 'paymentsVersion': 1, 'postgresRecoveryVersion': 1,
                 'clientApiVersion': 3, 'serverBillingVersion': 2, 'agentTelemetryVersion': 1,
                 'desktopVersion': versions[0], 'desktopIconSHA256': digest(root / 'desktop/assets/hqip.ico'),
                 'sha256': hashes}

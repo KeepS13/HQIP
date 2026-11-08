@@ -10,7 +10,7 @@ import zipfile
 NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
                'hysteria-linux-amd64', 'hysteria-linux-arm64', 'caddy-linux-amd64')
 RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py',
-                   'fresh_deploy.py', 'prepare_storage.py', 'install_ci_release.py')
+                   'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py')
 REQUIRED = {'hqip', 'artifacts/manifest.json', 'artifacts/HQIP-Windows-x64.zip',
             'artifacts/desktop-manifest.json', 'admin-web/index.html', 'user-web/index.html',
             'deploy/hqip-control.service', 'deploy/hqip-storage.service', 'deploy/nginx-hqip.conf',
@@ -36,7 +36,7 @@ def safe_name(name):
     return name
 
 
-def validate_manifest(manifest):
+def validate_manifest(manifest, *, allow_legacy=False):
     if (not re.fullmatch('[a-f0-9]{40}', manifest.get('sourceSHA', ''))
             or manifest.get('releaseKind') != 'full' or manifest.get('upgradeKind') != 'full-release'):
         raise ValueError('A complete current-source release is required')
@@ -44,8 +44,12 @@ def validate_manifest(manifest):
                        'serverBillingVersion': 2, 'agentTelemetryVersion': 1}.items():
         if manifest.get(key) != value:
             raise ValueError('Unsupported release capability: ' + key)
+    recovery = manifest.get('postgresRecoveryVersion', 0)
+    if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
+        raise ValueError('New releases require postgresRecoveryVersion 1')
+    required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
     hashes = manifest.get('sha256', {})
-    if not isinstance(hashes, dict) or not REQUIRED <= hashes.keys():
+    if not isinstance(hashes, dict) or not required <= hashes.keys():
         raise ValueError('Incomplete full release manifest')
     for name, checksum in hashes.items():
         safe_name(name)
@@ -164,10 +168,10 @@ def verify_desktop(release, manifest, hashes):
         raise ValueError('Desktop package is not a valid ordinary ZIP') from error
 
 
-def verify_full_release(release, manifest=None):
+def verify_full_release(release, manifest=None, *, allow_legacy=False):
     release = Path(release).resolve(strict=True)
     manifest = manifest or json.loads((release / 'release.json').read_text())
-    hashes = validate_manifest(manifest)
+    hashes = validate_manifest(manifest, allow_legacy=allow_legacy)
     actual = set()
     for path in release.rglob('*'):
         if path.is_symlink():
@@ -193,3 +197,10 @@ def verify_full_release(release, manifest=None):
             raise ValueError('Admission core provenance mismatch')
     verify_desktop(release, manifest, hashes)
     return manifest
+
+
+def verify_retained_release(release, current_sha):
+    # Historical full packages predate the recovery operator. Only the active
+    # newly built release must advertise the new capability; historical hashes,
+    # full node/client provenance and exact payload checks remain mandatory.
+    return verify_full_release(release, allow_legacy=Path(release).name != current_sha)

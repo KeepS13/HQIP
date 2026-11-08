@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 import deploy_ci as ci
 import upgrade_domains as domains
 from package_domains import package_release
-from release_bundle import verify_full_release
+from release_bundle import verify_full_release, verify_retained_release
 import test_full_release as release_fixtures
 
 
@@ -75,6 +75,23 @@ class RetentionTests(unittest.TestCase):
         report = ci.retain_releases(self.base, current.name, None, verify_full_release, self.events.append)
         self.assertEqual(report['deleted'], [old.name])
         self.assertEqual(list((self.base / 'releases').iterdir()), [current])
+
+    def test_previous_full_release_without_recovery_operator_remains_valid_for_rollback(self):
+        previous = self.release('2' * 40)
+        manifest = json.loads((previous / 'release.json').read_text())
+        del manifest['postgresRecoveryVersion']
+        del manifest['sha256']['scripts/restore_postgres.py']
+        (previous / 'scripts/restore_postgres.py').unlink()
+        (previous / 'release.json').write_text(json.dumps(manifest))
+        current = self.release('3' * 40, previous.name)
+        self.current(current)
+        report = ci.retain_releases(self.base, current.name, previous.name,
+            lambda path: verify_retained_release(path, current.name), self.events.append)
+        self.assertEqual(report['previous'], previous.name)
+        self.assertEqual(report['deleted'], [])
+        self.assertTrue(previous.is_dir())
+        with self.assertRaisesRegex(ValueError, 'postgresRecoveryVersion'):
+            verify_retained_release(previous, previous.name)
 
     def test_corrupt_nonfull_links_and_newer_directories_are_audited_not_deleted(self):
         corrupt = self.release('1' * 40)
