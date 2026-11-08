@@ -60,21 +60,8 @@ Cloudflare 模式由控制服务执行 Let's Encrypt DNS-01，并清理本任务
 
 ## 升级、备份与回退
 
-升级前使用 `hqip backup` 导出数据库和配套主密钥，验证归档可读取，并保存当前控制二进制、前端产物、固定节点产物及 systemd 配置。备份放在受限目录，绝不进入 Git。正式站使用 `/var/lib/hqip-control`，部署文件位置见 [服务器部署与恢复](server-deployment.md)。
+正式控制站使用PostgreSQL＋Redis，部署文件位置见[服务器部署与运行](server-deployment.md)。日常发布按[自动部署](automatic-deployment.md)使用完整包和 `upgrade_domains.py`；先备份PG与配套主密钥，再切换兼容代码。回退保留当前业务数据，不恢复旧SQLite、旧授权或旧商户配置，也不重新执行初始化。
 
-本版本数据库迁至 schema 3，为已有节点补服务器/IP 清单、生命周期及独立任务信息。节点 ID、设备授权、订阅、凭据和流量保留。只凭相似地址或可能来自克隆镜像的 SSH key 不自动合并服务器；旧实例在升级 Agent/接管前继续标为旧安装版本。
+灾难恢复先按[PostgreSQL灾备恢复](postgresql-recovery.md)在独立空库演练，验证配套密钥、结构、应用权限和再次备份。节点配置、证书及未结算账本应独立保存；控制端回退不代表节点可以回到不支持当前准入协议的核心。节点升级/退役继续使用自身归属检查和账本保护流程，不为排障删除当前计量数据。
 
-现有 Nginx 主机的后续发布使用 `scripts/upgrade_control.py`，不重新运行初次建站脚本。发布目录必须包含完整提交 SHA 和每个文件摘要的 `release.json`。脚本先校验新旧发布包，再停止控制服务，冷备份数据库、WAL、主密钥和服务配置；两路健康检查失败会自动恢复成对数据和旧二进制。示例（以实际发布目录、独立备份目录替换）：
-
-```sh
-python3 upgrade_control.py verify --release /opt/hqip-control/releases/COMMIT_SHA
-python3 upgrade_control.py upgrade --release /opt/hqip-control/releases/COMMIT_SHA --state /root/backups/hqip-control-RELEASE
-# 必须先恢复升级后已接管的节点，再执行控制面回退：
-python3 upgrade_control.py rollback --state /root/backups/hqip-control-RELEASE
-```
-
-升级备份包含 `data.before`、`config.before.tar.gz` 和 `state.json`。失败后的新数据库会另存为 `failed-data-*`；不要用旧数据库直接覆盖仍运行的新进程。原 Nginx 和其他应用不参与此升级。
-
-**旧控制程序不支持 schema 3，回退必须同时恢复升级前数据库与同一备份的 master.key，不能只换旧二进制。** 停止新控制进程后，在隔离目录验证配套备份，再恢复旧版本，始终只运行一个控制中心。若升级期间已经接管节点或改变凭据，还必须按节点接管备份恢复对应配置；只恢复控制数据库会造成控制状态和节点状态不一致。恢复之后重新确认 Agent 心跳、授权回执、客户端配置和用量补报。
-
-真实多 IP 验收需要厂商已经配置好的两个公网 IP，检查 A/B 的入口和出口、凭据隔离及删除 A 不影响 B。单 IP 测试或使用不同端口不能证明双公网出口能力。
+真实多IP验收需要厂商已经配置好的两个公网IP，检查A/B的入口和出口、凭据隔离及删除A不影响B。单IP测试或使用不同端口不能证明双公网出口能力。
