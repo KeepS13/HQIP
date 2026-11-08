@@ -1,0 +1,11 @@
+.date-picker-input{color-scheme:dark}
+.date-shortcuts{grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:7px;min-width:0}
+.date-shortcuts>span,.date-shortcuts>small{color:var(--muted,#8e9ab2);font-size:11px;line-height:1.7}
+.date-shortcuts>span{margin-right:3px}
+.date-shortcuts>small{font-size:10px;margin-left:3px}
+.date-shortcuts>button{border:1px solid var(--border,#30394b);border-radius:6px;background:transparent;color:var(--muted,#9aa6be);font-size:11px;line-height:1.5;min-height:28px;padding:4px 9px;cursor:pointer}
+.date-shortcuts>button:hover:not(:disabled),.date-shortcuts>button[aria-pressed=true]{border-color:var(--purple,#a49cf8);background:#9890f51a;color:#d8d0ff}
+.date-shortcuts>button:focus-visible{outline:2px solid var(--purple,#a49cf8);outline-offset:2px}
+.date-shortcuts>button:disabled{cursor:not-allowed;opacity:.45}
+.billing-expiry-fields>.date-shortcuts{margin-top:1px}
+@media(max-width:420px){.date-shortcuts{gap:6px}.date-shortcuts>small{flex-basis:100%;margin-left:0}}

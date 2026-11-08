@@ -15,6 +15,7 @@ import (
 func (s *Server) registerNotificationRoutes(m *http.ServeMux) {
 	for path, h := range map[string]http.HandlerFunc{
 		"GET /api/v1/alerts": s.listAlerts, "GET /api/v1/alerts/summary": s.alertSummary, "GET /api/v1/alerts/{id}": s.alertDetail, "PATCH /api/v1/alerts/{id}": s.updateAlert,
+		"GET /api/v1/alerts/unread": s.alertUnreadSummary, "POST /api/v1/alerts/{id}/read": s.markAlertRead,
 	} {
 		m.Handle(path, s.auth(h, false))
 	}

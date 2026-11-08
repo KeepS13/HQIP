@@ -9,5 +9,5 @@ export function nodeLatency(tests:NodeTests|undefined,nodeId:string) {
   return result?{status:result.status==='success'?`${result.delayMs} ms`:statuses[result.status]||'—',statusKind:result.status}:{};
 }
 export function NodeLatencyButton({pending,disabled,onClick}:{pending:boolean;disabled:boolean;onClick:()=>void}) {
-  return <button type="button" className="text-button node-test-button" disabled={disabled&&!pending} onClick={onClick} title="测试本订阅全部节点的 QUIC/TLS 握手延迟，不切换当前连接；不代表代理网页访问延迟。" aria-label={pending?'取消节点延迟测试':'测试全部节点延迟'}>{pending?<X size={12}/>:<Gauge size={12}/>}<span>{pending?'取消测试':'延迟测试'}</span></button>;
+  return <button type="button" className="text-button node-test-button" disabled={disabled&&!pending} onClick={onClick} title="测试所有有效订阅的节点握手延迟，相同节点只测试一次，不切换当前连接。" aria-label={pending?'取消节点延迟测试':'测试全部节点延迟'}>{pending?<X size={12}/>:<Gauge size={12}/>}<span>{pending?'取消测试':'延迟测试'}</span></button>;
 }

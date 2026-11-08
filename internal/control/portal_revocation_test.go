@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,8 +14,8 @@ import (
 )
 
 func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
-	for _, action := range []string{"rotate", "revoke-and-create"} {
-		t.Run(action, func(t *testing.T) {
+	for _, tc := range []struct{ action, suffix string }{{"rotate", ""}, {"revoke-and-create", ""}, {"rotate", "?format=v2ray"}, {"revoke-and-create", "?format=v2ray"}} {
+		t.Run(tc.action+tc.suffix, func(t *testing.T) {
 			s, _ := newServer(t)
 			u, _, _ := portalLoginFixture(t, s, "subscription@example.com")
 			n, err := s.Store.CreateNode(model.Node{Name: "subscription", SSHHost: "node.example.com", Domain: "node.example.com", PublicIP: "203.0.113.8", Port: 443, SSHPort: 22, SSHUser: "root"}, "")
@@ -55,13 +56,13 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 			}
 			public := s.PublicHandler()
 			result := make(chan *httptest.ResponseRecorder, 1)
-			go func() { result <- request(public, "GET", oldURL, nil, "", "") }()
+			go func() { result <- request(public, "GET", oldURL+tc.suffix, nil, "", "") }()
 			select {
 			case <-entered:
 			case <-time.After(5 * time.Second):
 				t.Fatal("subscription request did not reach profile barrier")
 			}
-			if action == "revoke-and-create" {
+			if tc.action == "revoke-and-create" {
 				_, err = s.Store.PortalSubscription(u.ID, sub.ID, "revoke")
 				if err != nil {
 					t.Fatal(err)
@@ -80,8 +81,14 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("subscription request remained blocked")
 			}
-			if w := request(public, "GET", newURL, nil, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "password:") {
-				t.Fatalf("replacement subscription unavailable: %d %s", w.Code, w.Body.String())
+			w := request(public, "GET", newURL+tc.suffix, nil, "", "")
+			valid := strings.Contains(w.Body.String(), "password:")
+			if tc.suffix != "" {
+				decoded, decodeErr := base64.StdEncoding.DecodeString(w.Body.String())
+				valid = decodeErr == nil && strings.HasPrefix(string(decoded), "hysteria2://")
+			}
+			if w.Code != 200 || !valid {
+				t.Fatalf("replacement subscription unavailable: %d", w.Code)
 			}
 		})
 	}

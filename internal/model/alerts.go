@@ -3,18 +3,19 @@ package model
 import "time"
 
 type Alert struct {
-	ID             string                `json:"id"`
-	Key            string                `json:"-"`
-	Condition      NotificationCondition `json:"condition"`
-	Status         string                `json:"status"`
-	Acknowledged   bool                  `json:"acknowledged"`
-	AcknowledgedBy string                `json:"acknowledgedBy"`
-	AcknowledgedAt *time.Time            `json:"acknowledgedAt"`
-	FirstSeen      time.Time             `json:"firstSeen"`
-	LastSeen       time.Time             `json:"lastSeen"`
-	EndedAt        *time.Time            `json:"endedAt"`
-	Revision       int64                 `json:"revision"`
-	Activities     []AlertActivity       `json:"activities,omitempty"`
+	ID                      string                `json:"id"`
+	Key                     string                `json:"-"`
+	Condition               NotificationCondition `json:"condition"`
+	Status                  string                `json:"status"`
+	AcknowledgementRequired bool                  `json:"acknowledgementRequired"`
+	Acknowledged            bool                  `json:"acknowledged"`
+	AcknowledgedBy          string                `json:"acknowledgedBy"`
+	AcknowledgedAt          *time.Time            `json:"acknowledgedAt"`
+	FirstSeen               time.Time             `json:"firstSeen"`
+	LastSeen                time.Time             `json:"lastSeen"`
+	EndedAt                 *time.Time            `json:"endedAt"`
+	Revision                int64                 `json:"revision"`
+	Activities              []AlertActivity       `json:"activities,omitempty"`
 }
 type AlertActivity struct {
 	ID      int64     `json:"id"`

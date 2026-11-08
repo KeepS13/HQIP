@@ -50,7 +50,10 @@ func (d *Desktop) LoginBrowser(server string) error {
 func (d *Desktop) OpenAccount() error {
 	return winclient.OpenBrowser(client.AccountURL(d.controller.View().ServerURL))
 }
-func (d *Desktop) SelectSubscription(id string) error  { return d.controller.SelectSubscription(id) }
+func (d *Desktop) SelectSubscription(id string) error { return d.controller.SelectSubscription(id) }
+func (d *Desktop) SelectSubscriptionNode(subscriptionID, nodeID string) error {
+	return d.controller.SelectSubscriptionNode(subscriptionID, nodeID)
+}
 func (d *Desktop) MeasureDelay() error                 { return d.controller.MeasureDelay() }
 func (d *Desktop) TestNodeDelays() error               { return d.controller.TestNodeDelays() }
 func (d *Desktop) CancelNodeDelays()                   { d.controller.CancelNodeDelays() }

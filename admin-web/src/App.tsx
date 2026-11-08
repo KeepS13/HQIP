@@ -47,6 +47,7 @@ import { Notifications } from "./pages/Notifications";
 import { Payments } from "./pages/Payments";
 import { Orders, OrderDetail } from "./pages/Orders";
 import { HostResources } from "./HostResources";
+import { AlertUnreadBadge } from "./AlertUnread";
 
 function Brand() {
   return (
@@ -413,9 +414,10 @@ export default function App() {
               <span>订阅管理</span>
             </NavLink>
             <NavLink to="/orders"><ReceiptText size={19} /><span>订单管理</span></NavLink>
-            <NavLink to="/notifications">
+            <NavLink to="/notifications" className="notification-nav">
               <BellRing size={19} />
               <span>预警中心</span>
+              <AlertUnreadBadge />
             </NavLink>
           </nav>
           <div className="nav-caption nav-caption-second">系统设置</div>

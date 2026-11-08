@@ -1,0 +1,20 @@
+.connection-card:has(>.connection-controls){display:grid;grid-template-columns:minmax(0,1fr) auto;row-gap:13px}
+.connection-controls{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid #42645860;padding-top:11px;min-width:0}
+.connection-controls-label{font-size:10px;color:#91a6ad;margin-right:2px}
+.connection-mode-buttons{display:flex;gap:3px;padding:3px;border:1px solid #40595d;border-radius:8px;background:#0e1b2170}
+.connection-mode-buttons button{display:flex;align-items:center;justify-content:center;gap:5px;min-height:29px;min-width:64px;padding:5px 10px;border:0;border-radius:5px;background:transparent;color:#9bafb6;font-size:11px}
+.connection-mode-buttons button[aria-pressed=true]{background:#43695d;color:#d4f1e5}
+.connection-mode-buttons button:not(:disabled):hover{background:#36534e;color:#e1f1ea}
+.connection-controls-divider{width:1px;height:21px;background:#40595d}
+.connection-tun{display:flex;align-items:center;gap:9px;min-height:35px;padding:5px 9px;border:1px solid #40595d;border-radius:8px;background:#0e1b2170;color:#a9bdc3;font-size:11px}
+.connection-tun[aria-checked=true]{border-color:#638f7f;color:#c7ebdc}
+.connection-tun:not(:disabled):hover{background:#24453c}
+.connection-tun-track{width:28px;height:16px;padding:2px;border-radius:10px;background:#3b4c58}
+.connection-tun-track>span{display:block;width:12px;height:12px;border-radius:50%;background:#a0b0bb;transition:transform .15s}
+.connection-tun[aria-checked=true] .connection-tun-track{background:#78b89d}
+.connection-tun[aria-checked=true] .connection-tun-track>span{transform:translateX(12px);background:#e1f7ec}
+.connection-controls-pending{display:flex;align-items:center;gap:5px;color:#a9c6bd;font-size:10px}
+.connection-controls-pending svg{animation:connection-controls-spin 1s linear infinite}
+@keyframes connection-controls-spin{to{transform:rotate(360deg)}}
+@media(max-width:850px){.connection-controls{gap:8px}.connection-controls-label{display:none}}
+@media(prefers-reduced-motion:reduce){.connection-controls-pending svg{animation:none}.connection-tun-track>span{transition:none}}

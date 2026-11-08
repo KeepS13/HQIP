@@ -45,7 +45,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, map[string]any{"nodes": nodes, "devices": devices, "traffic": traffic, "usage": usage, "alerts": alerts, "serverTime": s.Store.Now().UTC().Format(time.RFC3339)})
 }
 func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
-	v, e := s.Store.Nodes()
+	v, e := s.Store.NodesWithAudience()
 	result(w, v, e)
 }
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {

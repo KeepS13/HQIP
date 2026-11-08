@@ -7,6 +7,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { api, usePolling } from "../api";
+import { DateInput, ExpiryShortcuts } from "../DatePicker";
 import {
   Badge,
   Button,
@@ -46,34 +47,14 @@ export function ExpiryFields({
   onChange: (value: { day: string; hour: string }) => void;
   required?: boolean;
 }) {
-  function openDatePicker(input: HTMLInputElement) {
-    if (!input.showPicker) return false;
-    try {
-      input.showPicker();
-      return true;
-    } catch {
-      // Keep native date entry available when the browser blocks the picker.
-      return false;
-    }
-  }
   return (
     <div className="billing-expiry-fields">
       <Field label="到期日期（北京时间）">
-        <input
+        <DateInput
           aria-label="到期日期（北京时间）"
-          type="date"
           required={required || !!hour}
           min={beijingHourParts(Date.now()).day}
           value={day}
-          onClick={(event) => openDatePicker(event.currentTarget)}
-          onKeyDown={(event) => {
-            if (
-              (event.key === "Enter" || event.key === " ") &&
-              openDatePicker(event.currentTarget)
-            ) {
-              event.preventDefault();
-            }
-          }}
           onChange={(event) => onChange({ day: event.target.value, hour })}
         />
       </Field>
@@ -94,6 +75,7 @@ export function ExpiryFields({
           ))}
         </select>
       </Field>
+      <ExpiryShortcuts day={day} hour={hour} onChange={onChange} />
       <div style={{ gridColumn: "1 / -1" }}>
         <ExpiryResetPreview expiresAt={day && hour ? `${day}T${hour}:00:00+08:00` : null} />
       </div>

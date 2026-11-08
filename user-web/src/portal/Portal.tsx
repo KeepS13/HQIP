@@ -663,15 +663,6 @@ export default function Portal() {
           >
             <X size={22} />
           </button>
-          <div className="portal-workspace">
-            <span className="portal-account-avatar">
-              {session.user?.email[0]?.toUpperCase() || "U"}
-            </span>
-            <div>
-              <strong>我的账户</strong>
-              <small title={session.user?.email}>{session.user?.email}</small>
-            </div>
-          </div>
           <div className="nav-caption">我的空间</div>
           <nav>
             {links.map((link) => (
@@ -721,10 +712,19 @@ export default function Portal() {
               </strong>
             </div>
             <div className="topbar-right">
-              <span className="portal-secure">
-                <ShieldCheck size={14} /> 安全连接
-              </span>
-              <span className="topbar-divider" />
+              <Link
+                to="/account"
+                className="profile-button portal-header-account"
+                title={session.user?.email || "账户设置"}
+                aria-label={`账户设置：${session.user?.email || "我的账户"}`}
+              >
+                <span className="avatar" aria-hidden="true">
+                  {session.user?.email[0]?.toUpperCase() || "U"}
+                </span>
+                <span className="portal-header-email">
+                  {session.user?.email || "我的账户"}
+                </span>
+              </Link>
               <button
                 className="icon-button"
                 aria-label="退出账户"

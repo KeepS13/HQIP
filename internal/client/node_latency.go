@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,11 +27,21 @@ type nodeTestRun struct {
 	generation, selection uint64
 	subscriptionID        string
 	nodes                 []Node
+	all                   bool
+	mode                  string
+	tun                   bool
+	groups                map[int][]int
+	leaders               []int
 	cancel                context.CancelFunc
 }
 
 func (c *Controller) nodeTestValidLocked(run *nodeTestRun) bool {
 	p := c.saved.Profile
+	if run.all {
+		_, nodes := nodeChoices(p)
+		return !c.closed && c.api == run.api && c.view.LoggedIn && p.Enabled &&
+			c.saved.Mode == run.mode && c.saved.TUN == run.tun && slices.Equal(nodes, run.nodes)
+	}
 	return !c.closed && c.api == run.api && c.view.LoggedIn && !c.view.SelectionPending &&
 		c.generation == run.generation && c.selectionGeneration == run.selection && p.Enabled && usableSubscription(p) &&
 		c.saved.SelectedSubscriptionID == run.subscriptionID && p.SubscriptionID == run.subscriptionID && slices.Equal(p.Nodes, run.nodes)
@@ -48,16 +60,38 @@ func (c *Controller) invalidateNodeTestLocked() {
 func (c *Controller) TestNodeDelays() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.startNodeTestsLocked()
+}
+
+// Each authenticated account is tested once per application lifetime after its
+// first successful sync. Refreshes and reopening the picker do not retrigger it.
+func (c *Controller) startAutomaticNodeTests() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.api == nil || c.autoNodeTestAPI == c.api || c.view.LastSync == nil || c.view.SelectionPending {
+		return
+	}
+	if c.startNodeTestsLocked() == nil {
+		c.autoNodeTestAPI = c.api
+	}
+}
+
+func (c *Controller) startNodeTestsLocked() error {
 	c.invalidateNodeTestLocked()
 	p := c.saved.Profile
 	if c.closed {
 		return context.Canceled
 	}
-	if c.api == nil || !c.view.LoggedIn || c.view.SelectionPending || !p.Enabled || !usableSubscription(p) || c.saved.SelectedSubscriptionID != p.SubscriptionID {
-		return errors.New("请先选择有效订阅，再测试节点延迟")
+	all := p.AvailableNodes != nil
+	nodes := slices.Clone(p.Nodes)
+	if all {
+		_, nodes = nodeChoices(p)
 	}
-	if len(p.Nodes) == 0 {
-		return errors.New("当前订阅暂无可测试节点")
+	if c.api == nil || !c.view.LoggedIn || c.view.SelectionPending || !p.Enabled || (!all && (!usableSubscription(p) || c.saved.SelectedSubscriptionID != p.SubscriptionID)) {
+		return errors.New("请先登录并同步有效订阅，再测试节点延迟")
+	}
+	if len(nodes) == 0 {
+		return errors.New("有效订阅暂无可测试节点")
 	}
 	if c.view.NodeTests.Pending {
 		return nil
@@ -66,13 +100,26 @@ func (c *Controller) TestNodeDelays() error {
 		c.nodeTest.cancel()
 	}
 	ctx, cancel := context.WithTimeout(c.workCtx, 90*time.Second)
-	run := &nodeTestRun{api: c.api, generation: c.generation, selection: c.selectionGeneration, subscriptionID: p.SubscriptionID, nodes: slices.Clone(p.Nodes), cancel: cancel}
+	run := &nodeTestRun{api: c.api, generation: c.generation, selection: c.selectionGeneration, subscriptionID: p.SubscriptionID, nodes: nodes, all: all, mode: c.saved.Mode, tun: c.saved.TUN, groups: map[int][]int{}, cancel: cancel}
 	c.nodeTest = run
 	c.view.NodeTests = NodeTestView{SubscriptionID: p.SubscriptionID, Pending: true}
-	for _, node := range run.nodes {
+	if all {
+		c.view.NodeTests.SubscriptionID = ""
+	}
+	endpoints := map[string]int{}
+	for index, node := range run.nodes {
 		status := "waiting"
 		if !node.Ready {
 			status = "unavailable"
+		} else {
+			key := nodeProbeKey(node)
+			leader, exists := endpoints[key]
+			if !exists {
+				leader = index
+				endpoints[key] = leader
+				run.leaders = append(run.leaders, leader)
+			}
+			run.groups[leader] = append(run.groups[leader], index)
 		}
 		c.view.NodeTests.Results = append(c.view.NodeTests.Results, NodeDelayResult{NodeID: node.ID, Status: status})
 	}
@@ -114,7 +161,9 @@ func (c *Controller) publishNodeDelay(run *nodeTestRun, index int, status string
 	if c.nodeTest != run || !c.view.NodeTests.Pending {
 		return false
 	}
-	c.view.NodeTests.Results[index] = NodeDelayResult{NodeID: run.nodes[index].ID, Status: status, DelayMS: delay}
+	for _, resultIndex := range run.groups[index] {
+		c.view.NodeTests.Results[resultIndex] = NodeDelayResult{NodeID: run.nodes[resultIndex].ID, Status: status, DelayMS: delay}
+	}
 	return true
 }
 
@@ -160,10 +209,7 @@ func (c *Controller) runNodeTests(ctx context.Context, run *nodeTestRun, probe f
 		}()
 	}
 dispatch:
-	for index, node := range run.nodes {
-		if !node.Ready {
-			continue
-		}
+	for _, index := range run.leaders {
 		select {
 		case <-ctx.Done():
 			break dispatch
@@ -178,6 +224,17 @@ dispatch:
 	c.invalidateNodeTestLocked()
 	c.finishNodeTestLocked(run)
 	c.mu.Unlock()
+}
+
+func nodeProbeKey(node Node) string {
+	if node.Server == "" || node.Port == 0 || node.SNI == "" {
+		return "id:" + node.ID
+	}
+	server := strings.ToLower(node.Server)
+	if ip := net.ParseIP(server); ip != nil {
+		server = ip.String()
+	}
+	return server + "\n" + strconv.Itoa(node.Port) + "\n" + strings.TrimSuffix(strings.ToLower(node.SNI), ".")
 }
 
 func nodeProbeStatus(err error) string {

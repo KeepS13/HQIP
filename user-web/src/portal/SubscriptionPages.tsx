@@ -41,6 +41,18 @@ import {
 } from "./types";
 import "./subscriptions.css";
 
+function subscriptionImportURL(value: string, format: "clash" | "v2ray") {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (format === "v2ray") url.searchParams.set("format", format);
+    else url.searchParams.delete("format");
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 function SubscriptionStatus({ status }: { status: string }) {
   return (
     <Badge
@@ -396,6 +408,7 @@ export function UserSubscriptionDetail() {
     5000,
   );
   const [action, setAction] = useState<"rotate" | "revoke" | null>(null),
+    [importFormat, setImportFormat] = useState<"clash" | "v2ray">("clash"),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const toast = useToast();
@@ -406,7 +419,7 @@ export function UserSubscriptionDetail() {
       <ErrorNotice message={detail.error} retry={() => void detail.refresh()} />
     );
   const { subscription: value, nodes } = detail.data,
-    url = detail.data.subscriptionUrl,
+    url = subscriptionImportURL(detail.data.subscriptionUrl, importFormat),
     active = value.status === "active";
   async function changeLink(kind?: "rotate" | "revoke") {
     setBusy(true);
@@ -538,8 +551,12 @@ export function UserSubscriptionDetail() {
       </Panel>
       <Panel
         title="第三方客户端导入"
-        subtitle="Clash / Mihomo 导入链接仅使用这一份订阅的流量和连接名额。"
+        subtitle="选择客户端格式；导入链接仅使用这一份订阅的流量和连接名额。"
       >
+        <div className="user-import-formats" role="group" aria-label="导入客户端">
+          <button type="button" aria-pressed={importFormat === "clash"} onClick={() => setImportFormat("clash")}>Clash / Mihomo</button>
+          <button type="button" aria-pressed={importFormat === "v2ray"} onClick={() => setImportFormat("v2ray")}>v2rayN / v2rayNG</button>
+        </div>
         <ErrorNotice message={error} />
         {url ? (
           <div className="form-stack">
@@ -553,7 +570,7 @@ export function UserSubscriptionDetail() {
             </Field>
             <div className="user-sub-actions">
               <CopyButton value={url} label="复制链接" />
-              {active && (
+              {active && importFormat === "clash" && (
                 <a
                   className="button button-primary"
                   href={`clash://install-config?url=${encodeURIComponent(url)}&name=${encodeURIComponent(`HQIP ${value.templateName} ${value.id.slice(-6)}`)}`}
@@ -577,6 +594,11 @@ export function UserSubscriptionDetail() {
                 撤销导入链接
               </Button>
             </div>
+            {importFormat === "v2ray" && (
+              <p className="user-import-help">
+                复制链接后，在 v2rayN / v2rayNG 的订阅设置中添加并更新，再选择节点连接。请使用支持 Hysteria 2 的版本及内核。
+              </p>
+            )}
             <Notice>
               HQIP
               客户端使用账户登录。撤销此导入链接不会移除订阅，也不会影响其他订阅的导入链接。

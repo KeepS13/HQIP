@@ -56,6 +56,7 @@ import {
 } from "../components";
 import { DeployNode, DeleteNode, RetireNode, DeletedNodeNotice } from "./NodeActions";
 import { NetworkQuality } from "./NetworkQuality";
+import { NodeAudience, type NodeListItem } from "../NodeAudience";
 import type { Node, NodeDetail, TaskEvent, ManagedServer, ServerAddress, CloudflareSettings, CloudflareZone } from "../types";
 
 function AddNode({ onClose }: { onClose: () => void }) {
@@ -94,7 +95,7 @@ function AddNode({ onClose }: { onClose: () => void }) {
 }
 
 export function Nodes() {
-  const { data, error, loading, refresh } = usePolling<Node[]>("/nodes"),
+  const { data, error, loading, refresh } = usePolling<NodeListItem[]>("/nodes"),
     [search, setSearch] = useState(""),
     [params, setParams] = useSearchParams();
   const add = params.get("add") === "1",
@@ -172,6 +173,7 @@ export function Nodes() {
                   </strong>
                 </div>
               </div>
+              <NodeAudience value={n.audience} />
               <div className="node-quota-title">
                 <span>{billingUsageLabel(n)}</span>
                 <span>
@@ -362,8 +364,8 @@ function TaskLog({ node, events }: { node: Node; events: TaskEvent[] }) {
   const all = Array.from(
     new Map([...(events || []), ...liveEvents].map((e) => [e.id, e])).values(),
   )
-    .sort((a, b) => a.id - b.id)
-    .slice(-100);
+    .sort((a, b) => b.id - a.id)
+    .slice(0, 100);
   return (
     <Panel
       title="部署与验证日志"
@@ -385,7 +387,7 @@ function TaskLog({ node, events }: { node: Node; events: TaskEvent[] }) {
               <span className="task-marker">
                 {event.stage === "error" ? (
                   "!"
-                ) : i === all.length - 1 &&
+                ) : i === 0 &&
                   ["pending", "installing", "verifying"].includes(
                     node.status,
                   ) ? (

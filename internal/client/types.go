@@ -28,6 +28,7 @@ type Profile struct {
 	Revision          int64          `json:"revision"`
 	DefaultNodeID     string         `json:"defaultNodeId"`
 	Nodes             []Node         `json:"nodes"`
+	AvailableNodes    []Node         `json:"availableNodes"`
 	Rules             RulesRef       `json:"rules"`
 	SubscriptionID    string         `json:"subscriptionId"`
 	Subscription      *Subscription  `json:"subscription"`
@@ -84,23 +85,24 @@ type NodeView struct {
 	Ready bool   `json:"ready"`
 }
 type View struct {
-	LoggedIn          bool           `json:"loggedIn"`
-	ServerURL         string         `json:"serverUrl"`
-	DeviceName        string         `json:"deviceName"`
-	Nodes             []NodeView     `json:"nodes"`
-	DefaultNodeID     string         `json:"defaultNodeId"`
-	Revision          int64          `json:"revision"`
-	RulesVersion      int64          `json:"rulesVersion"`
-	LastSync          *time.Time     `json:"lastSync"`
-	SyncError         string         `json:"syncError"`
-	Subscription      *Subscription  `json:"subscription"`
-	Subscriptions     []Subscription `json:"subscriptions"`
-	SelectionRevision int64          `json:"selectionRevision"`
-	SelectionPending  bool           `json:"selectionPending"`
-	Metrics           Dashboard      `json:"metrics"`
-	LoginPending      bool           `json:"loginPending"`
-	Connections       Connections    `json:"connections"`
-	NodeTests         NodeTestView   `json:"nodeTests"`
+	LoggedIn          bool             `json:"loggedIn"`
+	ServerURL         string           `json:"serverUrl"`
+	DeviceName        string           `json:"deviceName"`
+	Nodes             []NodeView       `json:"nodes"`
+	NodeChoices       []NodeChoiceView `json:"nodeChoices"`
+	DefaultNodeID     string           `json:"defaultNodeId"`
+	Revision          int64            `json:"revision"`
+	RulesVersion      int64            `json:"rulesVersion"`
+	LastSync          *time.Time       `json:"lastSync"`
+	SyncError         string           `json:"syncError"`
+	Subscription      *Subscription    `json:"subscription"`
+	Subscriptions     []Subscription   `json:"subscriptions"`
+	SelectionRevision int64            `json:"selectionRevision"`
+	SelectionPending  bool             `json:"selectionPending"`
+	Metrics           Dashboard        `json:"metrics"`
+	LoginPending      bool             `json:"loginPending"`
+	Connections       Connections      `json:"connections"`
+	NodeTests         NodeTestView     `json:"nodeTests"`
 	Status
 }
 type persisted struct {

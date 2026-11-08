@@ -44,6 +44,7 @@ type Controller struct {
 	restoreSelection    bool
 	nodeTest            *nodeTestRun
 	nodeProbe           func(context.Context, Node) (int64, error)
+	autoNodeTestAPI     *API
 }
 
 func New(dir string, platform Platform, engine Engine) (*Controller, error) {
@@ -112,6 +113,7 @@ func (c *Controller) View() View {
 	v.Subscriptions = append([]Subscription{}, v.Subscriptions...)
 	v.Metrics.History = append([]MetricPoint{}, v.Metrics.History...)
 	v.NodeTests.Results = append([]NodeDelayResult{}, v.NodeTests.Results...)
+	v.NodeChoices, _ = nodeChoices(c.saved.Profile)
 	return v
 }
 func (c *Controller) persistLocked() error {
@@ -223,6 +225,7 @@ func (c *Controller) Run(ctx context.Context) {
 				}
 			} else {
 				delay = 5 * time.Second
+				c.startAutomaticNodeTests()
 			}
 		}
 		c.mu.Lock()

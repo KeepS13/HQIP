@@ -282,6 +282,23 @@ select option {
   border-radius: 50%;
   margin-left: auto;
 }
+.nav-unread-badge {
+  min-width: 21px;
+  padding: 0 5px;
+  border-radius: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+  background: #d35b77;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar nav a.notification-nav:has(.nav-unread-badge):after {
+  display: none;
+}
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 50px;

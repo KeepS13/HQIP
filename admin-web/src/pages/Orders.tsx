@@ -11,6 +11,7 @@ import {
   Search,
 } from "lucide-react";
 import { api } from "../api";
+import { DateInput, DateRangeShortcuts } from "../DatePicker";
 import {
   Badge,
   Button,
@@ -161,16 +162,14 @@ export function Orders() {
             </select>
           </Field>
           <Field label="开始日期">
-            <input
-              type="date"
+            <DateInput
               value={draft.from}
               onChange={(e) => setDraft({ ...draft, from: e.target.value })}
               max={draft.to || undefined}
             />
           </Field>
           <Field label="结束日期">
-            <input
-              type="date"
+            <DateInput
               value={draft.to}
               onChange={(e) => setDraft({ ...draft, to: e.target.value })}
               min={draft.from || undefined}
@@ -179,6 +178,10 @@ export function Orders() {
           <Button type="submit" icon={Search}>
             筛选
           </Button>
+          <DateRangeShortcuts value={draft} onChange={(range) => {
+            setDraft(current => ({ ...current, ...range }));
+            setFilterError("");
+          }} />
         </form>
         <ErrorNotice message={filterError} />
         {orders.loading ? (

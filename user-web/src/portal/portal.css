@@ -5,31 +5,44 @@
   background: #9d8bff18;
   color: #b7aaff;
 }
-.portal-workspace {
-  display: flex;
-  gap: 11px;
-  align-items: center;
-  margin: 34px 2px 27px;
-  padding: 15px 10px;
-  background: #1b202c;
-  border: 1px solid #2a3040;
-  border-radius: 12px;
+.portal-shell .sidebar > .nav-caption {
+  margin-top: 40px;
+}
+.portal-shell .topbar-title {
   min-width: 0;
 }
-.portal-workspace > div {
-  min-width: 0;
-}
-.portal-workspace strong {
-  font-size: 12px;
-  display: block;
-  margin-bottom: 5px;
-}
-.portal-workspace small {
-  font-size: 10px;
-  display: block;
-  color: var(--muted);
+.portal-shell .topbar-title strong {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.portal-shell .topbar-right {
+  max-width: 50%;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.portal-header-account {
+  min-width: 0;
+  max-width: 260px;
+  min-height: 36px;
+  border-radius: 6px;
+}
+.portal-header-account:hover {
+  color: var(--text);
+}
+.portal-header-account:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 4px;
+}
+.portal-header-account .avatar {
+  flex-shrink: 0;
+}
+.portal-shell .topbar-right > .portal-header-account > .portal-header-email {
+  display: block;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .portal-account-avatar {
   height: 36px;
@@ -59,13 +72,6 @@
 .portal-support p {
   font-size: 11px;
   line-height: 1.9;
-}
-.portal-secure {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--muted);
-  font-size: 11px;
 }
 .portal-content {
   max-width: 1440px;
@@ -1155,7 +1161,7 @@
   .portal-record-icon {
     padding: 8px;
   }
-  .portal-secure {
+  .portal-shell .topbar-title > span {
     display: none;
   }
   .portal-actions .button {

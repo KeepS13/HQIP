@@ -136,6 +136,10 @@ type alertRow struct {
 
 const alertColumns = "id,key,condition,status,acknowledged,ack_by,ack_at,first_seen,last_seen,ended_at,revision,since,missing_since"
 
+// Derive the policy at read time so existing installation failures immediately
+// stop requiring acknowledgement without rewriting their human audit history.
+const alertAcknowledgementRequiredSQL = "COALESCE(json_extract(condition,'$.kind'),'')!='" + model.DeploymentFailureKind + "'"
+
 type alertScanner interface{ Scan(...any) error }
 
 func readAlert(row alertScanner) (alertRow, error) {
@@ -147,6 +151,7 @@ func readAlert(row alertScanner) (alertRow, error) {
 		return a, err
 	}
 	err = json.Unmarshal([]byte(raw), &a.Condition)
+	a.AcknowledgementRequired = a.Condition.RequiresAcknowledgement()
 	a.FirstSeen = time.Unix(first, 0).UTC()
 	a.LastSeen = time.Unix(last, 0).UTC()
 	a.AcknowledgedAt = alertTime(ack)
@@ -409,7 +414,7 @@ func (s *Store) ListAlerts(page, size int, category, level, status, search strin
 		args = append(args, status)
 	}
 	if unack {
-		where += " AND acknowledged=0 AND status IN ('active','unknown')"
+		where += " AND acknowledged=0 AND status IN ('active','unknown') AND " + alertAcknowledgementRequiredSQL
 	}
 	if search != "" {
 		where += " AND (instr(lower(json_extract(condition,'$.title')),lower(?))>0 OR instr(lower(json_extract(condition,'$.message')),lower(?))>0 OR instr(id,?)>0)"
@@ -419,7 +424,7 @@ func (s *Store) ListAlerts(page, size int, category, level, status, search strin
 		return out, err
 	}
 	args = append(args, size, (page-1)*size)
-	rows, err := s.DB.Query("SELECT "+alertColumns+" FROM alerts WHERE "+where+" ORDER BY CASE WHEN status IN ('active','unknown') THEN 0 ELSE 1 END,acknowledged,CASE WHEN json_extract(condition,'$.level')='danger' THEN 0 ELSE 1 END,first_seen DESC,id LIMIT ? OFFSET ?", args...)
+	rows, err := s.DB.Query("SELECT "+alertColumns+" FROM alerts WHERE "+where+" ORDER BY CASE WHEN status IN ('active','unknown') THEN 0 ELSE 1 END,CASE WHEN acknowledged=0 AND "+alertAcknowledgementRequiredSQL+" THEN 0 ELSE 1 END,CASE WHEN json_extract(condition,'$.level')='danger' THEN 0 ELSE 1 END,first_seen DESC,id LIMIT ? OFFSET ?", args...)
 	if err != nil {
 		return out, err
 	}
@@ -435,7 +440,7 @@ func (s *Store) ListAlerts(page, size int, category, level, status, search strin
 }
 func (s *Store) AlertSummary() (model.AlertSummary, error) {
 	var v model.AlertSummary
-	err := s.DB.QueryRow(`SELECT COALESCE(SUM(status='active'),0),COALESCE(SUM(status IN ('active','unknown') AND acknowledged=0),0),COALESCE(SUM(status='unknown'),0),COALESCE(SUM(status='active' AND json_extract(condition,'$.level')='danger'),0) FROM alerts`).Scan(&v.Active, &v.Unacknowledged, &v.Unknown, &v.Critical)
+	err := s.DB.QueryRow(`SELECT COALESCE(SUM(status='active'),0),COALESCE(SUM(status IN ('active','unknown') AND acknowledged=0 AND `+alertAcknowledgementRequiredSQL+`),0),COALESCE(SUM(status='unknown'),0),COALESCE(SUM(status='active' AND json_extract(condition,'$.level')='danger'),0) FROM alerts`).Scan(&v.Active, &v.Unacknowledged, &v.Unknown, &v.Critical)
 	if err != nil {
 		return v, err
 	}
@@ -453,7 +458,7 @@ func (s *Store) Alert(id string) (model.Alert, error) {
 	if err != nil {
 		return a.Alert, notFound(err)
 	}
-	rows, err := s.DB.Query("SELECT id,kind,message,actor,at FROM alert_activity WHERE alert_id=? ORDER BY id DESC LIMIT 200", id)
+	rows, err := s.DB.Query("SELECT id,kind,message,actor,at FROM alert_activity WHERE alert_id=? AND kind!='read' ORDER BY id DESC LIMIT 200", id)
 	if err != nil {
 		return a.Alert, err
 	}
@@ -489,6 +494,9 @@ func (s *Store) UpdateAlert(id, actor string, in model.AlertUpdate) (model.Alert
 	}
 	if a.Revision != in.ExpectedRevision {
 		return model.Alert{}, ErrConflict
+	}
+	if in.Acknowledge && !a.AcknowledgementRequired {
+		return model.Alert{}, errors.New("部署失败通知无需手动确认")
 	}
 	now := s.Now().Unix()
 	if in.Acknowledge && !a.Acknowledged {

@@ -71,6 +71,20 @@ func (c *Controller) restoreRemembered(api *API, p Profile) {
 // SelectSubscription changes only this native session. The worker serializes
 // all core changes, while cancellation and local disconnect remain immediate.
 func (c *Controller) SelectSubscription(id string) error {
+	return c.selectSubscriptionNode(id, "")
+}
+
+// SelectSubscriptionNode publishes one subscription/node intent. The target
+// node is applied only after the old subscription drains and the new profile
+// has been validated, so the default node is never connected in between.
+func (c *Controller) SelectSubscriptionNode(id, nodeID string) error {
+	if nodeID == "" {
+		return errors.New("请选择节点")
+	}
+	return c.selectSubscriptionNode(id, nodeID)
+}
+
+func (c *Controller) selectSubscriptionNode(id, nodeID string) error {
 	if !c.beginWork() {
 		return context.Canceled
 	}
@@ -90,7 +104,20 @@ func (c *Controller) SelectSubscription(id string) error {
 		c.mu.Unlock()
 		return errors.New("该订阅不可用，请选择有效的订阅")
 	}
-	if !c.view.SelectionPending && c.saved.SelectedSubscriptionID == id && c.view.DesiredSubscriptionID == id && c.view.RunState != "failed" {
+	if nodeID != "" {
+		choices, _ := nodeChoices(c.saved.Profile)
+		found := false
+		for _, choice := range choices {
+			if choice.SubscriptionID == id && choice.NodeID == nodeID && choice.Ready {
+				found = true
+			}
+		}
+		if !found {
+			c.mu.Unlock()
+			return errors.New("该节点不属于有效订阅，或暂时不可用")
+		}
+	}
+	if !c.view.SelectionPending && c.saved.SelectedSubscriptionID == id && c.view.DesiredSubscriptionID == id && c.view.RunState != "failed" && (nodeID == "" || c.saved.SelectedNodeID == nodeID) {
 		c.mu.Unlock()
 		return nil
 	}
@@ -107,6 +134,9 @@ func (c *Controller) SelectSubscription(id string) error {
 	c.cancelSelection = cancel
 	c.view.SelectionPending = true
 	c.view.DesiredSubscriptionID = id
+	if nodeID != "" {
+		c.view.DesiredNodeID = nodeID
+	}
 	c.view.LastError = ""
 	c.restoreSelection = false
 	if c.view.ConnectionIntent {
@@ -114,13 +144,13 @@ func (c *Controller) SelectSubscription(id string) error {
 	}
 	api := c.api
 	c.mu.Unlock()
-	if !c.launch(func() { c.changeSubscription(ctx, cancel, api, id, g) }) {
+	if !c.launch(func() { c.changeSubscription(ctx, cancel, api, id, nodeID, g) }) {
 		cancel()
 	}
 	return nil
 }
 
-func (c *Controller) changeSubscription(ctx context.Context, cancel context.CancelFunc, api *API, id string, selection uint64) {
+func (c *Controller) changeSubscription(ctx context.Context, cancel context.CancelFunc, api *API, id, nodeID string, selection uint64) {
 	defer cancel()
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
@@ -191,7 +221,20 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 		if !p.Enabled || !usableSubscription(p) || p.SubscriptionID != id {
 			err = errors.New("订阅已失效，VPN 已关闭，请重新选择")
 		} else {
-			data, err = api.Rules(ctx, p.Rules.URL)
+			if nodeID != "" {
+				found := false
+				for _, node := range p.Nodes {
+					if node.ID == nodeID && node.Ready {
+						found = true
+					}
+				}
+				if !found {
+					err = errors.New("所选节点已不可用，VPN 已关闭，请重新选择")
+				}
+			}
+			if err == nil {
+				data, err = api.Rules(ctx, p.Rules.URL)
+			}
 			if err == nil {
 				digest := sha256.Sum256(data)
 				if hex.EncodeToString(digest[:]) != p.Rules.Hash {
@@ -234,6 +277,9 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 		return
 	}
 	c.saved.SelectedNodeID = c.rememberedNodeLocked(p)
+	if nodeID != "" {
+		c.saved.SelectedNodeID = nodeID
+	}
 	c.saved.SelectedSubscriptionID = id
 	c.saved.Profile = p
 	c.bundle = bundle

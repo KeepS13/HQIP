@@ -483,6 +483,11 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 	}
 	p.SubscriptionID = id
 	p.SelectionRevision = selectionRevision
+	availableNodes, err := s.Store.ClientNodeCatalog(u.Subscriptions)
+	if err != nil {
+		portalResult(w, nil, err)
+		return
+	}
 	latestID, latestSelection, err := s.Store.SelectedSubscription(user, session)
 	if err != nil {
 		portalResult(w, nil, err)
@@ -494,10 +499,11 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 	}
 	v := struct {
 		model.ClientProfile
-		User          model.PortalUser         `json:"user"`
-		Subscription  *model.UserSubscription  `json:"subscription"`
-		Subscriptions []model.UserSubscription `json:"subscriptions"`
-	}{p, u, e, u.Subscriptions}
+		User           model.PortalUser           `json:"user"`
+		Subscription   *model.UserSubscription    `json:"subscription"`
+		Subscriptions  []model.UserSubscription   `json:"subscriptions"`
+		AvailableNodes []model.ClientNodeEndpoint `json:"availableNodes"`
+	}{p, u, e, u.Subscriptions, availableNodes}
 	raw, _ := json.Marshal(v)
 	sum := sha256.Sum256(raw)
 	etag := "\"" + hex.EncodeToString(sum[:]) + "\""
@@ -541,6 +547,11 @@ func (s *Server) nativeDrain(w http.ResponseWriter, r *http.Request, user, sessi
 	portalResult(w, map[string]bool{"ok": true}, s.Store.DrainSubscriptionSession(user, session, b.SubscriptionID, b.ExpectedRevision))
 }
 func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
+	format, err := portalExportFormat(r.URL.RawQuery)
+	if err != nil {
+		fail(w, 400, "不支持的订阅格式")
+		return
+	}
 	if !s.Store.PortalEnabled() {
 		fail(w, 404, "订阅不可用")
 		return
@@ -586,24 +597,31 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "此订阅尚无可用节点")
 		return
 	}
-	v, err := s.Store.Rules()
-	if err != nil {
-		portalResult(w, nil, err)
-		return
+	var body []byte
+	contentType := "text/yaml; charset=utf-8"
+	if format == "v2ray" {
+		body, err = portalV2RaySubscription(p)
+		contentType = "text/plain; charset=utf-8"
+	} else {
+		v, rulesErr := s.Store.Rules()
+		if rulesErr != nil {
+			portalResult(w, nil, rulesErr)
+			return
+		}
+		rules, rulesErr := v.Bundle.ClashRules("节点选择", "DIRECT")
+		if rulesErr != nil {
+			portalResult(w, nil, rulesErr)
+			return
+		}
+		groups := []map[string]any{}
+		if !defaultReady {
+			const unavailable = "默认节点不可用，请手动选择"
+			names = append([]string{unavailable}, names...)
+			groups = append(groups, map[string]any{"name": unavailable, "type": "select", "proxies": []string{"REJECT"}})
+		}
+		groups = append([]map[string]any{{"name": "节点选择", "type": "select", "proxies": names}}, groups...)
+		body, err = yaml.Marshal(map[string]any{"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": groups, "rules": rules})
 	}
-	rules, err := v.Bundle.ClashRules("节点选择", "DIRECT")
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	groups := []map[string]any{}
-	if !defaultReady {
-		const unavailable = "默认节点不可用，请手动选择"
-		names = append([]string{unavailable}, names...)
-		groups = append(groups, map[string]any{"name": unavailable, "type": "select", "proxies": []string{"REJECT"}})
-	}
-	groups = append([]map[string]any{{"name": "节点选择", "type": "select", "proxies": names}}, groups...)
-	body, err := yaml.Marshal(map[string]any{"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": groups, "rules": rules})
 	if err != nil {
 		portalResult(w, nil, err)
 		return
@@ -615,7 +633,8 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "订阅不存在或已撤销")
 		return
 	}
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Profile-Update-Interval", "1")
 	_, _ = w.Write(body)
 }
