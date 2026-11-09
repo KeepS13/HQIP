@@ -11,12 +11,18 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 )
 
 var connectionIdentifier = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var leaseIdentifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// Keep enough time after the four-second control request to persist and flush
+// its result. The runtime's local HTTP client allows eight seconds.
+const admissionControlTimeout = 4 * time.Second
+const admissionWriteTimeout = 6 * time.Second
 
 func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -118,10 +124,21 @@ func (a *Agent) renewConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Agent) forwardAdmission(w http.ResponseWriter, r *http.Request, path string, body any) {
+	// Queueing and the control request share one budget. Once dispatched, learn
+	// the outcome even if the caller disconnects, so an unused grant can be closed.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), admissionControlTimeout)
+	defer cancel()
 	// Reserve durable tracking capacity before admitting a real connection. This
 	// serializes only admission, never the one-second traffic sampling loop.
 	a.admissionMu.Lock()
 	defer a.admissionMu.Unlock()
+	if r.Context().Err() != nil {
+		return
+	}
+	if ctx.Err() != nil {
+		http.Error(w, "admission queue timed out", http.StatusServiceUnavailable)
+		return
+	}
 	a.cacheMu.RLock()
 	retired := a.cache.Retirement != nil
 	a.cacheMu.RUnlock()
@@ -133,7 +150,8 @@ func (a *Agent) forwardAdmission(w http.ResponseWriter, r *http.Request, path st
 		http.Error(w, "durable usage capacity unavailable", 503)
 		return
 	}
-	status, data, err := a.requestAdmission(r.Context(), path, body)
+	status, data, err := a.requestAdmission(ctx, path, body)
+	grantID := ""
 	if err == nil && status == 200 {
 		var grant struct {
 			LeaseID string `json:"leaseId"`
@@ -144,11 +162,26 @@ func (a *Agent) forwardAdmission(w http.ResponseWriter, r *http.Request, path st
 			var pending pendingLeaseUsage
 			pending, err = a.ledger.saveLeaseUsage(grant.LeaseID, model.LeaseUsage{}, a.now())
 			if err == nil {
+				// Never close a previously tracked grant because a duplicate
+				// admission failed to deliver its response.
+				if pending.Version == 1 {
+					grantID = grant.LeaseID
+				}
 				err = a.ledger.ackLeaseUsage(pending)
 			}
 		}
 	}
-	writeAdmissionResponse(w, status, data, err)
+	deliveryErr := r.Context().Err()
+	if deliveryErr == nil {
+		deliveryErr = writeAdmissionResponse(w, status, data, err)
+	}
+	if grantID != "" && (deliveryErr != nil || err != nil) {
+		// No usable grant reached the caller. Persist the zero-usage final;
+		// the existing retry queue delivers it even across Agent restarts.
+		if _, closeErr := a.ledger.saveLeaseUsage(grantID, model.LeaseUsage{Closed: true}, a.now()); closeErr != nil {
+			a.log.Error("unable to persist undelivered admission final", "error", closeErr)
+		}
+	}
 }
 
 func (a *Agent) requestAdmission(ctx context.Context, path string, body any) (int, []byte, error) {
@@ -181,18 +214,25 @@ func (a *Agent) requestAdmission(ctx context.Context, path string, body any) (in
 	return 200, b, nil
 }
 
-func writeAdmissionResponse(w http.ResponseWriter, status int, data []byte, err error) {
+func writeAdmissionResponse(w http.ResponseWriter, status int, data []byte, err error) error {
 	if err != nil {
 		http.Error(w, "control unavailable or usage persistence failed", 503)
-		return
+		return err
 	}
 	if status != 200 {
 		http.Error(w, "admission denied or unavailable", status)
-		return
+		return nil
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
-	_, _ = w.Write(data)
+	if _, err = w.Write(data); err != nil {
+		return err
+	}
+	err = http.NewResponseController(w).Flush()
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
 }
 
 func confirmedLeaseUsage(id string, usage model.LeaseUsage, data []byte) bool {

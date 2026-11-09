@@ -2,6 +2,8 @@ package control
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"mime"
 	"net/url"
 	"strings"
 	"testing"
@@ -54,7 +56,7 @@ func TestPortalV2RaySubscriptionURIEncoding(t *testing.T) {
 }
 
 func TestPortalExportFormatWhitelist(t *testing.T) {
-	for _, tc := range []struct{ query, want string }{{"", "clash"}, {"format=clash", "clash"}, {"format=v2ray", "v2ray"}, {"format=", ""}, {"format=json", ""}, {"format=V2Ray", ""}, {"format=v2ray&format=clash", ""}, {"format=%zz", ""}} {
+	for _, tc := range []struct{ query, want string }{{"", "clash"}, {"format=clash", "clash"}, {"format=v2ray", "v2ray"}, {"format=singbox", "singbox"}, {"format=singbox&download=1", "singbox"}, {"format=", ""}, {"format=json", ""}, {"format=V2Ray", ""}, {"format=v2ray&format=clash", ""}, {"format=singbox&format=singbox", ""}, {"format=%zz", ""}} {
 		t.Run(tc.query, func(t *testing.T) {
 			got, err := portalExportFormat(tc.query)
 			if got != tc.want || (err != nil) != (tc.want == "") {
@@ -112,10 +114,11 @@ func TestPortalSubscriptionFormatsUseSameScopedCredentials(t *testing.T) {
 	}
 	clash := request(h, "GET", link, nil, "", "")
 	v2ray := request(h, "GET", link+"?format=v2ray", nil, "", "")
-	if clash.Code != 200 || v2ray.Code != 200 {
-		t.Fatal("format export failed", clash.Code, v2ray.Code)
+	singbox := request(h, "GET", link+"?format=singbox", nil, "", "")
+	if clash.Code != 200 || v2ray.Code != 200 || singbox.Code != 200 {
+		t.Fatal("format export failed", clash.Code, v2ray.Code, singbox.Code)
 	}
-	if !strings.HasPrefix(clash.Header().Get("Content-Type"), "text/yaml") || !strings.HasPrefix(v2ray.Header().Get("Content-Type"), "text/plain") || v2ray.Header().Get("Cache-Control") != "no-store" {
+	if !strings.HasPrefix(clash.Header().Get("Content-Type"), "text/yaml") || !strings.HasPrefix(v2ray.Header().Get("Content-Type"), "text/plain") || !strings.HasPrefix(singbox.Header().Get("Content-Type"), "application/json") || v2ray.Header().Get("Cache-Control") != "no-store" || singbox.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("incorrect content type or secret caching")
 	}
 	var config struct {
@@ -135,6 +138,13 @@ func TestPortalSubscriptionFormatsUseSameScopedCredentials(t *testing.T) {
 	uri, err := url.Parse(string(decoded))
 	if err != nil || uri.User.Username() != config.Proxies[0].Password || uri.Hostname() != config.Proxies[0].Server || uri.Query().Get("sni") != config.Proxies[0].SNI || config.Proxies[0].SkipVerify {
 		t.Fatal("export formats changed credentials, endpoint or TLS verification")
+	}
+	var singConfig portalSingBoxTestConfig
+	if err = json.Unmarshal(singbox.Body.Bytes(), &singConfig); err != nil {
+		t.Fatal("invalid Sing Box JSON", err)
+	}
+	if len(singConfig.Outbounds) != 3 || singConfig.Outbounds[1].Password != config.Proxies[0].Password || singConfig.Outbounds[1].Server != config.Proxies[0].Server || singConfig.Outbounds[1].ServerPort != config.Proxies[0].Port || singConfig.Outbounds[1].TLS.ServerName != config.Proxies[0].SNI || !singConfig.Outbounds[1].TLS.Enabled || singConfig.Outbounds[1].TLS.Insecure {
+		t.Fatal("Sing Box changed credentials, endpoint or TLS verification")
 	}
 	if err = s.Store.DB.QueryRow("SELECT COUNT(*) FROM portal_credentials WHERE subscription_id=? AND scope='subscription'", sub.ID).Scan(&credentials); err != nil || credentials != 1 {
 		t.Fatal("formats created different credential scopes", err)
@@ -168,14 +178,34 @@ func TestPortalSubscriptionFormatsRejectUnavailableAccess(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, suffix := range []string{"", "?format=clash", "?format=v2ray"} {
+			for _, suffix := range []string{"", "?format=clash", "?format=v2ray", "?format=singbox", "?format=singbox&download=1", "?format=clash&download=1", "?format=v2ray&download=1"} {
 				w := request(s.PublicHandler(), "GET", link+suffix, nil, "", "")
 				if w.Code != want {
 					t.Fatal("inactive export response", suffix, w.Code, "want", want)
 				}
-				if strings.Contains(w.Body.String(), "hysteria2://") || strings.Contains(w.Body.String(), "password:") {
+				if strings.Contains(w.Body.String(), "hysteria2://") || strings.Contains(w.Body.String(), "password:") || strings.Contains(w.Body.String(), `"password"`) || w.Header().Get("Content-Disposition") != "" {
 					t.Fatal("inactive subscription exposed credentials")
 				}
+			}
+		})
+	}
+}
+
+func TestPortalSubscriptionDownloadHeaders(t *testing.T) {
+	s, _, _, _, link := portalExportFixture(t)
+	for _, tc := range []struct{ format, extension string }{{"clash", "yaml"}, {"v2ray", "txt"}, {"singbox", "json"}} {
+		t.Run(tc.format, func(t *testing.T) {
+			plain := request(s.PublicHandler(), "GET", link+"?format="+tc.format, nil, "", "")
+			download := request(s.PublicHandler(), "GET", link+"?format="+tc.format+"&download=1", nil, "", "")
+			if plain.Code != 200 || download.Code != 200 || plain.Body.String() != download.Body.String() {
+				t.Fatal("download changed the subscription contents or failed")
+			}
+			media, params, err := mime.ParseMediaType(download.Header().Get("Content-Disposition"))
+			if err != nil || media != "attachment" || params["filename"] != "hqip-"+tc.format+"."+tc.extension {
+				t.Fatal("incorrect attachment filename", err)
+			}
+			if plain.Header().Get("Content-Disposition") != "" || download.Header().Get("Content-Type") != plain.Header().Get("Content-Type") || download.Header().Get("Cache-Control") != "no-store" || download.Header().Get("Profile-Update-Interval") != "1" {
+				t.Fatal("download changed subscription headers")
 			}
 		})
 	}

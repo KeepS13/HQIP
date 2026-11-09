@@ -144,24 +144,24 @@ func (s *Store) Admin() (username, hash string, must bool, err error) {
 	return
 }
 func (s *Store) ChangePassword(password string) error {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec("UPDATE admin SET password=?,must_change=0 WHERE id=1", secure.HashPassword(password)); err != nil {
-		return err
-	}
-	if _, err = tx.Exec("DELETE FROM sessions"); err != nil {
-		return err
-	}
-	return tx.Commit()
+	hash := secure.HashPassword(password)
+	return retryDatabaseError(func() error {
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("UPDATE admin SET password=?,must_change=0 WHERE id=1", hash); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("DELETE FROM sessions"); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
-func (s *Store) CreateSession() (token, csrf string, err error) {
-	token = secure.Token()
-	csrf = secure.Token()
-	_, err = s.DB.Exec("INSERT INTO sessions(hash,csrf,expires) VALUES(?,?,?)", secure.Hash(token), csrf, s.Now().Add(12*time.Hour).Unix())
-	return
+func (s *Store) CreateSession(expectedPasswordHash string) (token, csrf string, err error) {
+	return s.adminSession(expectedPasswordHash, "")
 }
 func (s *Store) Session(token string) (csrf string, err error) {
 	err = s.DB.QueryRow("SELECT csrf FROM sessions WHERE hash=? AND expires>?", secure.Hash(token), s.Now().Unix()).Scan(&csrf)

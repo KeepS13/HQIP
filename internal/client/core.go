@@ -39,6 +39,8 @@ type Engine interface {
 	Apply(context.Context, Profile, rules.Bundle, string, string, bool, string) error
 	Stop() error
 	Alive() bool
+	VerifyCurrent(context.Context, string) error
+	SetSuspended(context.Context, bool) error
 }
 type Core struct {
 	mu                       sync.Mutex
@@ -52,6 +54,7 @@ type Core struct {
 	port, apiPort, probePort int
 	secret                   string
 	lastProfile              Profile
+	controlURL               string
 }
 
 func portString(p int) string { return strconv.Itoa(p) }
@@ -166,6 +169,7 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 			return e
 		}
 		c.lastProfile = p
+		c.controlURL = server
 		return nil
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -205,6 +209,7 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 		return e
 	}
 	c.lastProfile = p
+	c.controlURL = server
 	return nil
 }
 func (c *Core) Stop() error { c.mu.Lock(); defer c.mu.Unlock(); return c.stopLocked() }

@@ -26,7 +26,7 @@ func portalExportFormat(rawQuery string) (string, error) {
 		return "", errors.New("ambiguous subscription format")
 	}
 	switch values[0] {
-	case "clash", "v2ray":
+	case "clash", "v2ray", "singbox":
 		return values[0], nil
 	default:
 		return "", errors.New("unsupported subscription format")

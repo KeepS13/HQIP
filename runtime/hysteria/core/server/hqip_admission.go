@@ -60,7 +60,9 @@ func NewAdmission(config AdmissionConfig) (*Admission, error) {
 		return nil, errors.New("invalid local admission endpoint or secret")
 	}
 	config.URL = strings.TrimRight(config.URL, "/")
-	return &Admission{config: config, client: &http.Client{Timeout: 4 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	// Agent control requests allow four seconds and its response write deadline
+	// is six seconds. Do not abandon a successful grant before it can be flushed.
+	return &Admission{config: config, client: &http.Client{Timeout: 8 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 type admissionError struct{ denied bool }
@@ -87,7 +89,10 @@ func (a *Admission) request(ctx context.Context, path string, body any) (LeaseGr
 	if resp.StatusCode != http.StatusOK {
 		return grant, admissionError{denied: resp.StatusCode >= 400 && resp.StatusCode < 500}
 	}
-	if err = json.NewDecoder(io.LimitReader(resp.Body, 16<<10)).Decode(&grant); err != nil {
+	// A complete JSON object can precede a truncated HTTP chunk/body. Wait for
+	// transport completion before using a grant the Agent may have failed to send.
+	response, err := io.ReadAll(io.LimitReader(resp.Body, (16<<10)+1))
+	if err != nil || len(response) > 16<<10 || json.Unmarshal(response, &grant) != nil {
 		return grant, admissionError{denied: true}
 	}
 	return grant, nil

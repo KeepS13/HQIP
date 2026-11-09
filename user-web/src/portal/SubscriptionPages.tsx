@@ -6,31 +6,24 @@ import {
   ArrowUpRight,
   ClipboardList,
   Globe2,
-  Link2,
   Package,
   Plus,
-  RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 import {
   Badge,
-  Button,
-  CopyButton,
   Empty,
   ErrorNotice,
-  Field,
   Loading,
   Meter,
-  Modal,
   Notice,
   PageHeader,
   Panel,
   RefreshButton,
   bytes,
   date,
-  useToast,
 } from "../components";
-import { userAPI, useUserData } from "./api";
+import { useUserData } from "./api";
 import {
   requestLabels,
   subscriptionLabels,
@@ -40,18 +33,6 @@ import {
   type UserSubscription,
 } from "./types";
 import "./subscriptions.css";
-
-function subscriptionImportURL(value: string, format: "clash" | "v2ray") {
-  if (!value) return "";
-  try {
-    const url = new URL(value);
-    if (format === "v2ray") url.searchParams.set("format", format);
-    else url.searchParams.delete("format");
-    return url.toString();
-  } catch {
-    return "";
-  }
-}
 
 function SubscriptionStatus({ status }: { status: string }) {
   return (
@@ -407,11 +388,6 @@ export function UserSubscriptionDetail() {
     `/subscriptions/${encodeURIComponent(id || "")}`,
     5000,
   );
-  const [action, setAction] = useState<"rotate" | "revoke" | null>(null),
-    [importFormat, setImportFormat] = useState<"clash" | "v2ray">("clash"),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const toast = useToast();
   if (!detail.data)
     return detail.loading ? (
       <Loading />
@@ -419,30 +395,7 @@ export function UserSubscriptionDetail() {
       <ErrorNotice message={detail.error} retry={() => void detail.refresh()} />
     );
   const { subscription: value, nodes } = detail.data,
-    url = subscriptionImportURL(detail.data.subscriptionUrl, importFormat),
     active = value.status === "active";
-  async function changeLink(kind?: "rotate" | "revoke") {
-    setBusy(true);
-    setError("");
-    try {
-      await userAPI<{ url: string }>(
-        `/subscriptions/${id}/import-link${kind ? `/${kind}` : ""}`,
-        "POST",
-        {},
-      );
-      setAction(null);
-      await detail.refresh();
-      toast(
-        kind === "revoke"
-          ? "导入链接已撤销，流量包仍然保留"
-          : "导入链接已准备好",
-      );
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
     <>
       <Link className="back-link" to="/subscriptions">
@@ -549,108 +502,13 @@ export function UserSubscriptionDetail() {
           />
         )}
       </Panel>
-      <Panel
-        title="第三方客户端导入"
-        subtitle="选择客户端格式；导入链接仅使用这一份订阅的流量和连接名额。"
-      >
-        <div className="user-import-formats" role="group" aria-label="导入客户端">
-          <button type="button" aria-pressed={importFormat === "clash"} onClick={() => setImportFormat("clash")}>Clash / Mihomo</button>
-          <button type="button" aria-pressed={importFormat === "v2ray"} onClick={() => setImportFormat("v2ray")}>v2rayN / v2rayNG</button>
+      <Panel title="第三方客户端" subtitle="在独立页面为这份订阅导入客户端或导出配置。">
+        <div className="client-import-body">
+          <Link className="button button-primary" to={`/imports?subscription=${encodeURIComponent(value.id)}`}>
+            订阅导入导出 <ArrowUpRight size={16} />
+          </Link>
         </div>
-        <ErrorNotice message={error} />
-        {url ? (
-          <div className="form-stack">
-            <Field label="导入链接">
-              <input
-                type="password"
-                readOnly
-                value={url}
-                aria-label="此订阅的导入链接"
-              />
-            </Field>
-            <div className="user-sub-actions">
-              <CopyButton value={url} label="复制链接" />
-              {active && importFormat === "clash" && (
-                <a
-                  className="button button-primary"
-                  href={`clash://install-config?url=${encodeURIComponent(url)}&name=${encodeURIComponent(`HQIP ${value.templateName} ${value.id.slice(-6)}`)}`}
-                >
-                  一键导入 <ArrowUpRight size={16} />
-                </a>
-              )}
-              <Button
-                variant="secondary"
-                icon={RefreshCw}
-                disabled={busy || !active}
-                onClick={() => setAction("rotate")}
-              >
-                轮换链接
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={busy}
-                onClick={() => setAction("revoke")}
-              >
-                撤销导入链接
-              </Button>
-            </div>
-            {importFormat === "v2ray" && (
-              <p className="user-import-help">
-                复制链接后，在 v2rayN / v2rayNG 的订阅设置中添加并更新，再选择节点连接。请使用支持 Hysteria 2 的版本及内核。
-              </p>
-            )}
-            <Notice>
-              HQIP
-              客户端使用账户登录。撤销此导入链接不会移除订阅，也不会影响其他订阅的导入链接。
-            </Notice>
-          </div>
-        ) : (
-          <Empty
-            icon={Link2}
-            title="需要使用第三方客户端？"
-            description="为这份订阅创建独立导入链接。请妥善保管链接，不要公开分享。"
-            action={
-              <Button
-                icon={Link2}
-                busy={busy}
-                disabled={!active}
-                onClick={() => void changeLink()}
-              >
-                创建导入链接
-              </Button>
-            }
-          />
-        )}
       </Panel>
-      {action && (
-        <Modal
-          title={action === "rotate" ? "轮换导入链接" : "撤销导入链接"}
-          description="此操作只影响这份订阅的第三方导入入口，流量包继续保留。"
-          onClose={() => {
-            if (!busy) setAction(null);
-          }}
-        >
-          <p>
-            旧链接及关联连接凭据将失效。
-            {action === "rotate"
-              ? "完成后请在第三方客户端重新导入新链接。"
-              : "以后仍可为这份有效订阅创建新的链接。"}
-          </p>
-          <ErrorNotice message={error} />
-          <div className="modal-actions">
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() => setAction(null)}
-            >
-              取消
-            </Button>
-            <Button busy={busy} onClick={() => void changeLink(action)}>
-              {action === "rotate" ? "确认轮换" : "确认撤销"}
-            </Button>
-          </div>
-        </Modal>
-      )}
     </>
   );
 }

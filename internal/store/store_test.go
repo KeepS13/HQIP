@@ -304,7 +304,14 @@ func TestRestoreAdvancesEpochAndInvalidatesStaleSessions(t *testing.T) {
 	n := newNode(t, s, "node")
 	d := newDevice(t, s, "电脑")
 	report(t, s, n, d, *now, 10, 20)
-	token, _, err := s.CreateSession()
+	if err := s.InitAdmin("admin", "restore-test-password"); err != nil {
+		t.Fatal(err)
+	}
+	_, hash, _, err := s.Admin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := s.CreateSession(hash)
 	if err != nil {
 		t.Fatal(err)
 	}

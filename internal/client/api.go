@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -64,12 +65,19 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	}
 	resp, e := a.http.Do(req)
 	if e != nil {
-		return nil, "", 0, errors.New("无法连接账户服务，请检查网络或稍后重试")
+		if ctx.Err() != nil {
+			return nil, "", 0, ctx.Err()
+		}
+		var cert *tls.CertificateVerificationError
+		if errors.As(e, &cert) {
+			return nil, "", 0, errors.New("账户服务 HTTPS 证书校验失败")
+		}
+		return nil, "", 0, temporary(errors.New("无法连接账户服务，请检查网络或稍后重试"))
 	}
 	defer resp.Body.Close()
 	b, e := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if e != nil {
-		return nil, "", resp.StatusCode, e
+		return nil, "", resp.StatusCode, temporary(errors.New("账户服务响应中断"))
 	}
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return nil, "", resp.StatusCode, ErrUnauthorized
@@ -85,7 +93,11 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 		if msg.Error == "" {
 			msg.Error = fmt.Sprintf("服务返回 %d", resp.StatusCode)
 		}
-		return nil, "", resp.StatusCode, errors.New(msg.Error)
+		err := errors.New(msg.Error)
+		if resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			err = temporary(err)
+		}
+		return nil, "", resp.StatusCode, err
 	}
 	return b, resp.Header.Get("ETag"), resp.StatusCode, nil
 }

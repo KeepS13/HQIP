@@ -133,8 +133,11 @@ export function usePaymentData<T>(path: string) {
   const [refreshing, setRefreshing] = useState(false);
   const active = useRef(false),
     sequence = useRef(0);
-  const refresh = useCallback(async () => {
+  const inFlight = useRef<number | null>(null);
+  const refresh = useCallback(async (force = true) => {
+    if (!active.current || (!force && inFlight.current !== null)) return;
     const request = ++sequence.current;
+    inFlight.current = request;
     setRefreshing(true);
     try {
       const result = await userAPI<T>(path);
@@ -147,6 +150,7 @@ export function usePaymentData<T>(path: string) {
       if (active.current && request === sequence.current)
         setError((e as Error).message);
     } finally {
+      if (inFlight.current === request) inFlight.current = null;
       if (active.current && request === sequence.current) {
         setLoading(false);
         setRefreshing(false);
@@ -159,17 +163,18 @@ export function usePaymentData<T>(path: string) {
     setUpdatedAt(null);
     setError("");
     setLoading(true);
-    void refresh();
+    void refresh(false);
     const timer = window.setInterval(() => {
-      if (!document.hidden) void refresh();
+      if (!document.hidden) void refresh(false);
     }, 5000);
     const visible = () => {
-      if (!document.hidden) void refresh();
+      if (!document.hidden) void refresh(false);
     };
     document.addEventListener("visibilitychange", visible);
     return () => {
       active.current = false;
       sequence.current++;
+      inFlight.current = null;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };

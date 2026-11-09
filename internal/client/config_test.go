@@ -44,7 +44,7 @@ func TestProcessBypassRulesOnlyAppearWithTUNInbound(t *testing.T) {
 					t.Fatalf("TUN process bypass is not scoped to the TUN inbound: %#v", rule["inbound"])
 				}
 			}
-			if want := map[bool]int{false: 0, true: 2}[tun]; processRules != want {
+			if want := map[bool]int{false: 0, true: 3}[tun]; processRules != want {
 				t.Fatalf("process rules = %d, want %d", processRules, want)
 			}
 		})

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -602,6 +603,18 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 	if format == "v2ray" {
 		body, err = portalV2RaySubscription(p)
 		contentType = "text/plain; charset=utf-8"
+	} else if format == "singbox" {
+		if !defaultReady {
+			fail(w, 503, errPortalDefaultNodeUnavailable.Error())
+			return
+		}
+		v, rulesErr := s.Store.Rules()
+		if rulesErr != nil {
+			portalResult(w, nil, rulesErr)
+			return
+		}
+		body, err = portalSingBoxSubscription(p, v.Bundle, s.opts.PublicURL, s.opts.UserOrigin)
+		contentType = "application/json; charset=utf-8"
 	} else {
 		v, rulesErr := s.Store.Rules()
 		if rulesErr != nil {
@@ -636,5 +649,9 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Profile-Update-Interval", "1")
+	if r.URL.Query().Get("download") == "1" {
+		extension := map[string]string{"clash": "yaml", "v2ray": "txt", "singbox": "json"}[format]
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "hqip-" + format + "." + extension}))
+	}
 	_, _ = w.Write(body)
 }

@@ -31,6 +31,7 @@ func probeExit(ctx context.Context, h *http.Client, expected string, targets []e
 		return errors.New("目标节点公网 IP 无效")
 	}
 	var failures []string
+	transient := true
 	for _, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -46,9 +47,18 @@ func probeExit(ctx context.Context, h *http.Client, expected string, targets []e
 			}
 			return nil
 		}
+		var cert *tls.CertificateVerificationError
+		if errors.As(err, &cert) {
+			return errors.New("节点 HTTPS 证书校验失败，已停止代理")
+		}
+		transient = transient && retryable(err)
 		failures = append(failures, target.name+"："+probeFailureReason(err))
 	}
-	return fmt.Errorf("节点 HTTPS 出口验证失败（%s），已停止代理；不会回退旧节点", strings.Join(failures, "；"))
+	err := fmt.Errorf("节点 HTTPS 出口验证失败（%s），已停止代理；不会回退旧节点", strings.Join(failures, "；"))
+	if transient {
+		return temporary(err)
+	}
+	return err
 }
 
 func readExitIP(ctx context.Context, h *http.Client, target exitProbeTarget) (net.IP, error) {
@@ -58,16 +68,20 @@ func readExitIP(ctx context.Context, h *http.Client, target exitProbeTarget) (ne
 	}
 	resp, err := h.Do(req)
 	if err != nil {
-		return nil, err
+		var cert *tls.CertificateVerificationError
+		if errors.As(err, &cert) || errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+		return nil, temporary(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("验证服务返回 HTTP %d", resp.StatusCode)
+		return nil, temporary(fmt.Errorf("验证服务返回 HTTP %d", resp.StatusCode))
 	}
 	const limit = 32 << 10
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, err
+		return nil, temporary(err)
 	}
 	if len(data) > limit {
 		return nil, errors.New("验证响应过大")

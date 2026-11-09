@@ -24,6 +24,7 @@ jobs:
             user-web/package-lock.json
       - run: npm --prefix admin-web ci
       - run: npm --prefix user-web ci
+      - run: npm --prefix user-web test
       - run: npm --prefix admin-web run build
       - run: npm --prefix user-web run build
       - run: go vet ./...
@@ -132,6 +133,7 @@ jobs:
           python-version: '3.12'
       - run: npm --prefix admin-web ci
       - run: npm --prefix user-web ci
+      - run: npm --prefix user-web test
       - run: npm --prefix admin-web run build
       - run: npm --prefix user-web run build
       - run: npm --prefix desktop/frontend ci

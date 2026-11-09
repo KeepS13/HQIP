@@ -89,6 +89,8 @@ func (c *Controller) selectSubscriptionNode(id, nodeID string) error {
 		return context.Canceled
 	}
 	defer c.workers.Done()
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
 	c.mu.Lock()
 	if c.api == nil || c.closed {
 		c.mu.Unlock()
@@ -124,6 +126,7 @@ func (c *Controller) selectSubscriptionNode(id, nodeID string) error {
 	c.selectionGeneration++
 	g := c.selectionGeneration
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}

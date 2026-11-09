@@ -170,7 +170,7 @@ func (c *Controller) sampleMetrics(ctx context.Context) {
 	}
 	c.mu.Lock()
 	g := c.generation
-	connected := c.view.RunState == "connected" && !c.view.SelectionPending
+	connected := connectionRunning(c.view.RunState) && !c.view.SelectionPending
 	if !connected {
 		c.view.Metrics.Available = false
 		c.view.Metrics.UploadRate = 0
@@ -183,11 +183,13 @@ func (c *Controller) sampleMetrics(ctx context.Context) {
 	sample, err := engine.Sample(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if g != c.generation || c.view.RunState != "connected" || c.view.SelectionPending {
+	if g != c.generation || !connectionRunning(c.view.RunState) || c.view.SelectionPending {
 		return
 	}
 	if err != nil {
 		c.view.Metrics.Stale = true
+		c.view.Metrics.UploadRate, c.view.Metrics.DownloadRate = 0, 0
+		c.view.Metrics.ApplicationConnections = 0
 		return
 	}
 	m := &c.view.Metrics

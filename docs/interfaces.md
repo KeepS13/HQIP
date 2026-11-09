@@ -29,7 +29,8 @@
 | `GET /api/v1/user/subscriptions/{id}` | 查看单份详情与允许节点 |
 | `POST /api/v1/user/subscriptions/{id}/import-link[/rotate\|/revoke]` | 管理该实例的第三方导入入口 |
 | `/api/v3/client/*` | Windows 客户端授权、同步、订阅选择、状态和连接收尾 |
-| `GET /usub/{token}` | 无浏览器会话的 Mihomo/Clash 配置 |
+| `GET /usub/{token}` | 无浏览器会话的第三方订阅；默认或 `format=clash` 返回 Clash YAML，`format=v2ray` 返回 Base64 节点列表，`format=singbox` 返回完整 sing-box JSON |
+| `GET /usub/{token}?format=…&download=1` | 相同授权及响应内容，成功时附加 `Content-Disposition: attachment`，按格式下载 `.yaml`、`.txt` 或 `.json` |
 
 管理和用户写请求均执行各自会话授权、CSRF、修订版本冲突检查和审计。用户实例查询始终从认证会话解析 userId；不得使用请求体中的用户 ID 决定访问权限。同一个下单请求 ID 的重试返回原订单，不重复向支付平台下单；用户明确再次购买使用新 ID。收款状态与开通状态独立，按唯一 `payment:{orderId}` 原子发放，浏览器回跳参数不构成付款证明。完整配置、异常处理与迁移说明见 [支付 FM](payments.md)。
 
@@ -62,3 +63,7 @@
 Agent `hourly-usage-v1` 能力增加累计 `hours`、覆盖起点 `hourlySince`、已完整传送至的采样水位 `hourlyThrough`。小时桶与旧分钟派生小时分开保存，重传采用最大累计值，不能再次增加日累计或用户订阅消耗。不确定采样时段显式标记，周期统计不会将其视为可确定的当前周期用量。
 
 `GET /api/v1/nodes/{id}/delete-preview` 的 `subscriptionTemplates` 数组列出引用该节点的模板，字段为 `id,name,defaultNode,enabled,listed`。存在任意引用时，`DELETE /api/v1/nodes/{id}` 返回 HTTP 409、`code: NODE_REFERENCED_BY_SUBSCRIPTIONS` 和相同数组；不会取消任务、改变授权或停止节点。须先修改模板解除全部引用，再提交节点删除。
+
+### 客户端静默恢复状态
+
+现有客户端状态上报中的 `runState` 增加 `recovering`，数据库及 HTTP 路径不变。该状态表示当前成功连接会话正在后台恢复，`connectionIntent=true`，`desiredNodeId/desiredSubscriptionId` 保留用户选择，`actualNodeId/actualSubscriptionId` 清空，临时网络异常不写入 `lastError`。桌面仍呈现“已连接”，管理端显示“恢复中”；心跳过期仍按原规则显示过期。账户失联超过 120 秒暂停业务转发，必须重新核验授权、HTTPS 出口及匹配租约后恢复。

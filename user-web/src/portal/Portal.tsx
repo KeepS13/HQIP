@@ -12,6 +12,7 @@ import {
   ArrowUpRight,
   CircleHelp,
   Download,
+  FileDown,
   Globe2,
   Info,
   LayoutDashboard,
@@ -56,6 +57,7 @@ import {
 } from "./SubscriptionPages";
 import { SubscriptionCatalog } from "./Commerce";
 import { UserOrderDetail, UserOrders } from "./Orders";
+import { ClientImports } from "./ClientImports";
 import "./portal.css";
 
 export function PortalBrand() {
@@ -513,6 +515,7 @@ function PortalHome({ onLogout }: { onLogout: () => void }) {
         <Route path="/orders/:id" element={<UserOrderDetail />} />
         <Route path="/subscriptions" element={<OwnedSubscriptions />} />
         <Route path="/subscriptions/:id" element={<UserSubscriptionDetail />} />
+        <Route path="/imports" element={<ClientImports subscriptions={data.subscriptions} />} />
         <Route path="/downloads" element={<Downloads />} />
         <Route
           path="/account"
@@ -624,6 +627,7 @@ export default function Portal() {
                   "/",
                   "/catalog",
                   "/subscriptions",
+                  "/imports",
                   "/orders",
                   "/downloads",
                   "/account",
@@ -646,6 +650,7 @@ export default function Portal() {
     { to: "/", name: "账户概览", icon: <LayoutDashboard size={19} /> },
     { to: "/catalog", name: "订阅商城", icon: <Globe2 size={19} /> },
     { to: "/subscriptions", name: "我的订阅", icon: <Link2 size={19} /> },
+    { to: "/imports", name: "订阅导入导出", icon: <FileDown size={19} /> },
     { to: "/orders", name: "我的订单", icon: <ReceiptText size={19} /> },
     { to: "/downloads", name: "客户端下载", icon: <Download size={19} /> },
     { to: "/account", name: "账户设置", icon: <UserRound size={19} /> },

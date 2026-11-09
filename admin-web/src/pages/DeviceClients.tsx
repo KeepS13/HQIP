@@ -332,6 +332,7 @@ function sessionStatus(session: ClientSession) {
     return { label: "心跳过期", tone: "warning" };
   const states: Record<string, { label: string; tone: string }> = {
     connected: { label: "已连接", tone: "success" },
+    recovering: { label: "恢复中", tone: "info" },
     connecting: { label: "连接中", tone: "info" },
     disconnected: { label: "已断开", tone: "muted" },
     failed: { label: "连接失败", tone: "danger" },

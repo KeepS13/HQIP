@@ -136,7 +136,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer cancel()
 	server := &http.Server{
 		Handler: a.Handler(), ReadHeaderTimeout: 2 * time.Second,
-		ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second,
+		ReadTimeout: 3 * time.Second, WriteTimeout: admissionWriteTimeout,
 		IdleTimeout: 15 * time.Second, MaxHeaderBytes: 8 * 1024,
 	}
 	serverErr := make(chan error, 1)

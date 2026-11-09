@@ -72,16 +72,26 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 	out = append(out, map[string]any{"type": "selector", "tag": "proxy", "outbounds": tags, "default": "node-" + o.Selected, "interrupt_exist_connections": true})
 	routeRules := []map[string]any{
 		{"inbound": []string{"probe-in"}, "action": "route", "outbound": "proxy"},
-		{"action": "sniff"},
-		{"protocol": "dns", "action": "hijack-dns"},
 		{"domain": domains, "action": "route", "outbound": "direct"},
-		{"ip_is_private": true, "action": "route", "outbound": "direct"},
-	}
-	if o.TUN {
-		routeRules = append(routeRules, map[string]any{"inbound": []string{"tun-in"}, "process_name": []string{"HQIP.exe", "hqip-windows-amd64.exe", "ssh.exe", "sing-box.exe", "hqip-helper.exe"}, "action": "route", "outbound": "direct"})
 	}
 	if len(cidrs) > 0 {
 		routeRules = append(routeRules, map[string]any{"ip_cidr": cidrs, "action": "route", "outbound": "direct"})
+	}
+	business := []string{"mixed-in"}
+	if o.TUN {
+		business = append(business, "tun-in")
+		routeRules = append(routeRules, map[string]any{"inbound": []string{"tun-in"}, "process_name": []string{"HQIP.exe", "hqip-windows-amd64.exe", "sing-box.exe", "hqip-helper.exe"}, "action": "route", "outbound": "direct"})
+	}
+	// Pause precedes DNS, private-address and user rules. Proxy traffic never
+	// falls through to a direct outbound while authorization is stale.
+	routeRules = append(routeRules,
+		map[string]any{"clash_mode": suspendedClashMode, "inbound": business, "action": "reject"},
+		map[string]any{"action": "sniff"},
+		map[string]any{"protocol": "dns", "action": "hijack-dns"},
+		map[string]any{"ip_is_private": true, "action": "route", "outbound": "direct"},
+	)
+	if o.TUN {
+		routeRules = append(routeRules, map[string]any{"inbound": []string{"tun-in"}, "process_name": []string{"ssh.exe"}, "action": "route", "outbound": "direct"})
 	}
 	if o.Mode == "rule" {
 		rr, e := o.Bundle.RouteRules("proxy", "direct", "geoip-cn")

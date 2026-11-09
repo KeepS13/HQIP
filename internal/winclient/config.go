@@ -220,8 +220,14 @@ func validateTUN(config []byte, geoPath string) ([]byte, error) {
 		if e != nil {
 			return nil, e
 		}
-		if e = keys(m, "action", "protocol", "process_name", "domain", "domain_suffix", "domain_keyword", "ip_is_private", "ip_cidr", "rule_set", "outbound", "inbound"); e != nil {
+		if e = keys(m, "action", "protocol", "process_name", "domain", "domain_suffix", "domain_keyword", "ip_is_private", "ip_cidr", "rule_set", "outbound", "inbound", "clash_mode"); e != nil {
 			return nil, e
+		}
+		if mode, exists := m["clash_mode"]; exists {
+			tags, _ := json.Marshal(m["inbound"])
+			if len(m) != 3 || mode != "hqip-paused" || m["action"] != "reject" || string(tags) != `["mixed-in","tun-in"]` {
+				return nil, errors.New("转发暂停规则无效")
+			}
 		}
 		switch text(m["action"]) {
 		case "sniff", "hijack-dns", "resolve", "reject", "route":
@@ -249,7 +255,7 @@ func validateTUN(config []byte, geoPath string) ([]byte, error) {
 		}
 		for k, v := range m {
 			switch k {
-			case "action", "outbound", "protocol":
+			case "action", "outbound", "protocol", "clash_mode":
 				if _, ok := v.(string); !ok {
 					return nil, errors.New("路由字符串无效")
 				}

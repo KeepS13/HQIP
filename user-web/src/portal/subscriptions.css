@@ -275,37 +275,6 @@
 .portal-node-card small {
   overflow-wrap: anywhere;
 }
-.user-import-formats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: 0 22px 18px;
-}
-.user-import-formats button {
-  border: 1px solid #354056;
-  border-radius: 7px;
-  padding: 9px 13px;
-  background: #151b28;
-  color: #9ba8c0;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-.user-import-formats button[aria-pressed="true"] {
-  border-color: #8c83cc;
-  background: #393451;
-  color: #e1d9ff;
-}
-.user-import-formats button:focus-visible {
-  outline: 2px solid #aaa0ff;
-  outline-offset: 3px;
-}
-.user-import-help {
-  margin: 0;
-  color: #9aa8c1;
-  font-size: 12px;
-  line-height: 1.8;
-}
 @media (max-width: 1180px) {
   .user-sub-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -65,17 +65,20 @@ elif a['action']=='rollback':
     for unit in ownunits:
         command('systemctl','stop',unit);command('systemctl','disable',unit)
     if manifest['ownExisted']:
-        # Paths are exact validated node directories, never shared parent paths.
-        for path in (config,state):
-            if path.is_symlink(): path.unlink()
-            elif path.exists(): shutil.rmtree(path)
-        for unit in ownunits:
-            (pathlib.Path('/etc/systemd/system')/unit).unlink(missing_ok=True)
         with tarfile.open(backup/'own.tar.gz','r:gz') as tar:
             allowed={str(config).lstrip('/'),str(state).lstrip('/')}|{'etc/systemd/system/'+u for u in ownunits}
-            for member in tar.getmembers():
+            members=tar.getmembers()
+            for member in members:
                 if not any(member.name==p or member.name.startswith(p+'/') for p in allowed) or '..' in pathlib.PurePosixPath(member.name).parts: raise SystemExit('invalid-archive')
-            tar.extractall('/',filter='fully_trusted') if sys.version_info >= (3,12) else tar.extractall('/')
+            # A code/configuration rollback must never rewind the live ledger,
+            # its WAL, pending final usage or certificates written after backup.
+            state_prefix=str(state).lstrip('/')
+            members=[m for m in members if m.name!=state_prefix and not m.name.startswith(state_prefix+'/')]
+            if config.is_symlink(): config.unlink()
+            elif config.exists(): shutil.rmtree(config)
+            for unit in ownunits:
+                (pathlib.Path('/etc/systemd/system')/unit).unlink(missing_ok=True)
+            tar.extractall('/',members=members,filter='fully_trusted') if sys.version_info >= (3,12) else tar.extractall('/',members=members)
     command('systemctl','daemon-reload')
     restore_states(manifest['ownStates'] if manifest['ownExisted'] else [])
     restore_states(manifest['legacyStates'])

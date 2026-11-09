@@ -172,29 +172,18 @@ func (a *Adapter) startTUN(ctx context.Context, config []byte) (func() error, er
 	if _, err = validateTUN(config, "geoip-cn.srs"); err != nil {
 		return nil, err
 	}
-	pipe, err := pipeClient(sid)
-	if err != nil {
-		helper := filepath.Join(filepath.Dir(a.corePath), "hqip-helper.exe")
+	helper := filepath.Join(filepath.Dir(a.corePath), "hqip-helper.exe")
+	pipe, err := connectVersionedHelper(ctx, func() (*os.File, error) { return matchingHelperPipe(sid, helper) }, func() error {
 		verb, _ := windows.UTF16PtrFromString("runas")
 		file, _ := windows.UTF16PtrFromString(helper)
 		args, _ := windows.UTF16PtrFromString("--install --sid " + syscall.EscapeArg(sid) + " --core " + syscall.EscapeArg(a.corePath))
-		if err = windows.ShellExecute(0, verb, file, args, nil, windows.SW_HIDE); err != nil {
-			return nil, errors.New("首次 TUN 服务安装未完成，请允许 Windows 管理员授权")
+		if err := windows.ShellExecute(0, verb, file, args, nil, windows.SW_HIDE); err != nil {
+			return errors.New("TUN 服务安装或升级未完成，请允许 Windows 管理员授权")
 		}
-		deadline := time.NewTimer(90 * time.Second)
-		defer deadline.Stop()
-		tick := time.NewTicker(300 * time.Millisecond)
-		defer tick.Stop()
-		for pipe == nil {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-deadline.C:
-				return nil, errors.New("等待 TUN 服务安装超时")
-			case <-tick.C:
-				pipe, _ = pipeClient(sid)
-			}
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	failed := true
 	defer func() {

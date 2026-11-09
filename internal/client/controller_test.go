@@ -152,12 +152,12 @@ func TestFailedDefaultStopsWithoutFallback(t *testing.T) {
 	}
 	waitState(t, c, "failed")
 	v := c.View()
-	if v.ConnectionIntent || v.ActualNodeID != "" || v.DesiredNodeID != "B" || v.ProcessedConfigRevision != 2 {
+	if v.ConnectionIntent || v.ActualNodeID != "" || v.DesiredNodeID != "A" || v.LastError == "" {
 		t.Fatalf("bad failed state %+v", v)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.alive || len(e.calls) != 2 || e.calls[1] != "B" {
+	if e.alive || len(e.calls) != 1 || e.calls[0] != "A" {
 		t.Fatalf("rollback or unexpected retry: %+v", e.calls)
 	}
 }
@@ -182,7 +182,7 @@ func TestUserDisconnectWinsConfigUpdateApply(t *testing.T) {
 	e.mu.Lock()
 	e.blocked = make(chan struct{})
 	e.mu.Unlock()
-	set(Profile{Revision: 2, DefaultNodeID: "B", Nodes: []Node{{ID: "B", Ready: true}}})
+	set(Profile{Revision: 2, DefaultNodeID: "A", Nodes: []Node{{ID: "A", Ready: true, Password: "rotated"}, {ID: "B", Ready: true}}})
 	if err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}

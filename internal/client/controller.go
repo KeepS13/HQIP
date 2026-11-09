@@ -20,6 +20,12 @@ type Controller struct {
 	applyMu             sync.Mutex
 	routeMu             sync.Mutex
 	reportMu            sync.Mutex
+	logMu               sync.Mutex
+	recoveryProbeMu     sync.Mutex
+	recovery            *recoveryRun
+	recoveryReady       bool
+	suspended           bool
+	now                 func() time.Time
 	workers             sync.WaitGroup
 	closeOnce           sync.Once
 	workCtx             context.Context
@@ -169,6 +175,7 @@ func (c *Controller) logoutFor(expected *API) error {
 		return nil
 	}
 	c.generation++
+	c.cancelRecoveryLocked()
 	c.selectionGeneration++
 	if c.cancelSelection != nil {
 		c.cancelSelection()
@@ -229,10 +236,11 @@ func (c *Controller) Run(ctx context.Context) {
 			}
 		}
 		c.mu.Lock()
-		aliveExpected := c.view.RunState == "connected"
+		aliveExpected := connectionRunning(c.view.RunState)
+		generation := c.generation
 		c.mu.Unlock()
 		if aliveExpected && !c.engine.Alive() {
-			c.fail("代理内核已停止，请手动重新连接")
+			c.failGeneration(generation, "代理内核已停止，请手动重新连接")
 			c.report()
 		}
 		c.checkAccountConnection(ctx)
@@ -257,6 +265,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 	api := c.api
 	etag := c.etag
 	selection := c.selectionGeneration
+	generation := c.generation
 	pending := c.view.SelectionPending
 	c.mu.Unlock()
 	if api == nil || pending {
@@ -264,24 +273,31 @@ func (c *Controller) Sync(ctx context.Context) error {
 	}
 	p, newTag, unchanged, e := api.Profile(ctx, etag)
 	if e != nil {
+		if errors.Is(e, context.Canceled) {
+			return e
+		}
 		c.mu.Lock()
-		current := c.api == api && c.selectionGeneration == selection
+		current := c.api == api && c.selectionGeneration == selection && c.generation == generation
 		if current {
-			c.view.SyncError = e.Error()
+			if retryable(e) && c.recoveryReady {
+				c.startRecoveryLocked("account_unavailable")
+			} else {
+				c.view.SyncError = e.Error()
+			}
 		}
 		c.mu.Unlock()
-		if current && errors.Is(e, ErrUnauthorized) {
-			_ = c.logoutFor(api)
+		if current && !retryable(e) && !errors.Is(e, context.Canceled) {
+			c.failGeneration(generation, e.Error())
 		}
 		return e
 	}
 	if unchanged {
 		c.mu.Lock()
-		if c.api != api || selection != c.selectionGeneration {
+		if c.api != api || selection != c.selectionGeneration || generation != c.generation {
 			c.mu.Unlock()
 			return nil
 		}
-		now := time.Now()
+		now := c.clockNow()
 		c.view.LastSync = &now
 		c.view.SyncError = ""
 		_ = c.persistLocked()
@@ -290,16 +306,17 @@ func (c *Controller) Sync(ctx context.Context) error {
 		return nil
 	}
 	c.mu.Lock()
-	currentSelection := c.api == api && c.selectionGeneration == selection && !c.view.SelectionPending
+	currentSelection := c.api == api && c.selectionGeneration == selection && generation == c.generation && !c.view.SelectionPending
 	c.mu.Unlock()
 	if !currentSelection {
 		return nil
 	}
 	if !p.Enabled {
-		return c.logoutFor(api)
+		c.failGeneration(generation, "账号授权已撤销，请重新登录")
+		return ErrUnauthorized
 	}
-	if !usableSubscription(p) {
-		err := c.cacheUnavailable(api, p)
+	if subscriptionFailure(p, c.clockNow()) != nil {
+		err := c.cacheUnavailable(api, p, generation)
 		c.restoreRemembered(api, p)
 		return err
 	}
@@ -315,23 +332,31 @@ func (c *Controller) Sync(ctx context.Context) error {
 	if old.Rules.Hash != p.Rules.Hash || len(b.Rules) == 0 {
 		data, e := api.Rules(ctx, p.Rules.URL)
 		if e != nil {
-			return c.rejectProfile(api, p, e)
+			if retryable(e) {
+				c.mu.Lock()
+				if c.api == api && c.generation == generation {
+					c.startRecoveryLocked("rules_unavailable")
+				}
+				c.mu.Unlock()
+				return e
+			}
+			return c.rejectProfile(api, p, generation, e)
 		}
 		h := sha256.Sum256(data)
 		if hex.EncodeToString(h[:]) != p.Rules.Hash {
-			return c.rejectProfile(api, p, errors.New("规则校验失败，已停止代理；未覆盖本地规则缓存"))
+			return c.rejectProfile(api, p, generation, errors.New("规则校验失败，已停止代理；未覆盖本地规则缓存"))
 		}
 		if e = json.Unmarshal(data, &b); e != nil {
-			return c.rejectProfile(api, p, errors.New("规则格式错误"))
+			return c.rejectProfile(api, p, generation, errors.New("规则格式错误"))
 		}
 		if e = rules.Validate(b); e != nil {
-			return c.rejectProfile(api, p, e)
+			return c.rejectProfile(api, p, generation, e)
 		}
 		// Serialize cache publication with logout/login so an older in-flight
 		// profile response cannot restore rules after the active session changed.
 		c.routeMu.Lock()
 		c.mu.Lock()
-		current := c.api == api && c.selectionGeneration == selection && !c.view.SelectionPending
+		current := c.api == api && c.selectionGeneration == selection && generation == c.generation && !c.view.SelectionPending
 		c.mu.Unlock()
 		if !current {
 			c.routeMu.Unlock()
@@ -343,17 +368,31 @@ func (c *Controller) Sync(ctx context.Context) error {
 		}
 		c.routeMu.Unlock()
 		if e != nil {
-			return c.rejectProfile(api, p, e)
+			return c.rejectProfile(api, p, generation, e)
 		}
 	}
 	c.mu.Lock()
-	if c.api != api || c.selectionGeneration != selection || c.view.SelectionPending {
+	if c.api != api || c.selectionGeneration != selection || generation != c.generation || c.view.SelectionPending {
 		c.mu.Unlock()
 		return nil
 	}
 	if p.SelectionRevision < c.saved.Profile.SelectionRevision || (p.SubscriptionID == c.saved.Profile.SubscriptionID && p.Revision < c.saved.Profile.Revision) {
 		c.mu.Unlock()
 		return nil
+	}
+	if c.recoveryReady {
+		authorized := p.SubscriptionID == c.saved.SelectedSubscriptionID
+		found := false
+		for _, n := range p.Nodes {
+			if n.ID == c.saved.SelectedNodeID {
+				found = true
+			}
+		}
+		if !authorized || !found {
+			c.mu.Unlock()
+			c.failGeneration(generation, "当前订阅或所选节点授权已移除，VPN 已关闭")
+			return nil
+		}
 	}
 	if p.SubscriptionID != c.saved.SelectedSubscriptionID {
 		c.saved.SelectedNodeID = c.rememberedNodeLocked(p)
@@ -376,7 +415,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 	c.etag = newTag
 	c.populateLocked(p)
 	c.view.DesiredNodeID = c.saved.SelectedNodeID
-	now := time.Now()
+	now := c.clockNow()
 	c.view.LastSync = &now
 	c.view.SyncError = ""
 	intent := c.view.ConnectionIntent
@@ -385,6 +424,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 	apply := intent && configurationChanged
 	if apply {
 		c.generation++
+		c.cancelRecoveryLocked()
 		if c.cancelApply != nil {
 			c.cancelApply()
 		}
@@ -395,7 +435,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 		if c.view.RunState != "failed" {
 			c.view.RunState = "cached"
 		}
-	} else if !apply && c.view.RunState == "connected" {
+	} else if !apply && connectionRunning(c.view.RunState) {
 		c.view.AppliedConfigRevision = p.Revision
 		c.view.ProcessedConfigRevision = p.Revision
 	}
@@ -414,15 +454,16 @@ func (c *Controller) Sync(ctx context.Context) error {
 
 // A rejected new profile must not leave the previous route running, even when
 // that previous node remains an allowed member of the newly assigned set.
-func (c *Controller) rejectProfile(api *API, p Profile, err error) error {
+func (c *Controller) rejectProfile(api *API, p Profile, generation uint64, err error) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
-	if c.api != api || c.view.SelectionPending || p.SelectionRevision < c.saved.Profile.SelectionRevision {
+	if c.api != api || c.generation != generation || c.view.SelectionPending || p.SelectionRevision < c.saved.Profile.SelectionRevision {
 		c.mu.Unlock()
 		return err
 	}
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -460,6 +501,8 @@ func (c *Controller) Connect() error {
 		return context.Canceled
 	}
 	defer c.workers.Done()
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
 	c.mu.Lock()
 	if c.api == nil {
 		c.mu.Unlock()
@@ -484,6 +527,7 @@ func (c *Controller) Connect() error {
 	c.view.ConnectionIntent = true
 	c.view.LastError = ""
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -496,11 +540,20 @@ func (c *Controller) Disconnect() error {
 		return context.Canceled
 	}
 	defer c.workers.Done()
+	c.mu.Lock()
+	if c.recovery != nil {
+		c.recovery.cancel()
+	}
+	if c.cancelApply != nil {
+		c.cancelApply()
+	}
+	c.mu.Unlock()
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
 	c.view.ConnectionIntent = false
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -520,6 +573,8 @@ func (c *Controller) Select(id string) error {
 		return context.Canceled
 	}
 	defer c.workers.Done()
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
 	c.mu.Lock()
 	if c.view.SelectionPending {
 		c.mu.Unlock()
@@ -540,6 +595,7 @@ func (c *Controller) Select(id string) error {
 	c.selectionGeneration++
 	c.view.DesiredNodeID = id
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -559,12 +615,15 @@ func (c *Controller) SetMode(mode string, tun bool) error {
 	if mode != "rule" && mode != "global" {
 		return errors.New("模式无效")
 	}
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
 	c.mu.Lock()
 	c.saved.Mode = mode
 	c.saved.TUN = tun
 	c.view.Mode = mode
 	c.view.TUNEnabled = tun
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -646,22 +705,14 @@ func (c *Controller) applyLatest() {
 		c.view.ActualNodeID = id
 		c.view.ActualSubscriptionID = p.SubscriptionID
 		c.view.RunState = "connected"
+		c.recoveryReady = true
+		c.suspended = false
 		c.appliedGeneration = g
 		c.view.LastError = ""
 		c.beginMetricsLocked()
 	}
 	c.mu.Unlock()
 	c.report()
-}
-func (c *Controller) fail(message string) {
-	_ = c.engine.Stop()
-	c.mu.Lock()
-	c.view.RunState = "failed"
-	c.view.ConnectionIntent = false
-	c.view.ActualNodeID = ""
-	c.view.ActualSubscriptionID = ""
-	c.view.LastError = message
-	c.mu.Unlock()
 }
 func (c *Controller) report() {
 	if !c.beginWork() {
@@ -693,6 +744,7 @@ func (c *Controller) Close() {
 		c.closed = true
 		c.cancelWork()
 		c.generation++
+		c.cancelRecoveryLocked()
 		c.selectionGeneration++
 		if c.cancelSelection != nil {
 			c.cancelSelection()

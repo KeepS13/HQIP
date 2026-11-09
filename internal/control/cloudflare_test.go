@@ -34,7 +34,11 @@ func TestCloudflareSettingsRequireAdminAndNeverReturnToken(t *testing.T) {
 	if err := s.Store.ChangePassword("changed-password-123"); err != nil {
 		t.Fatal(err)
 	}
-	token, csrf, err := s.Store.CreateSession()
+	_, hash, _, err := s.Store.Admin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, csrf, err := s.Store.CreateSession(hash)
 	if err != nil {
 		t.Fatal(err)
 	}

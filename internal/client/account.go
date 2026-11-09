@@ -49,6 +49,8 @@ func connectionConfigurationChanged(old, next Profile, selected string) bool {
 			after = n
 		}
 	}
+	// Readiness is health telemetry, not a new transport configuration.
+	before.Ready, after.Ready = false, false
 	return after.ID == "" || before != after
 }
 
@@ -231,15 +233,16 @@ func (c *Controller) CancelLogin() {
 	}
 	c.view.LoginPending = false
 }
-func (c *Controller) cacheUnavailable(api *API, p Profile) error {
+func (c *Controller) cacheUnavailable(api *API, p Profile, expected ...uint64) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
-	if c.api != api || c.view.SelectionPending || p.SelectionRevision < c.saved.Profile.SelectionRevision || (p.SubscriptionID == c.saved.Profile.SubscriptionID && p.Revision < c.saved.Profile.Revision) {
+	if (len(expected) > 0 && expected[0] != c.generation) || c.api != api || c.view.SelectionPending || p.SelectionRevision < c.saved.Profile.SelectionRevision || (p.SubscriptionID == c.saved.Profile.SubscriptionID && p.Revision < c.saved.Profile.Revision) {
 		c.mu.Unlock()
 		return nil
 	}
 	c.generation++
+	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
@@ -262,7 +265,9 @@ func (c *Controller) cacheUnavailable(api *API, p Profile) error {
 	c.view.ProcessedConfigRevision = p.Revision
 	if wasOn {
 		c.view.RunState = "failed"
-		c.view.LastError = "当前订阅已到期、耗尽或被移除，VPN 已关闭；请手动选择其他订阅"
+		if failure := subscriptionFailure(p, c.clockNow()); failure != nil {
+			c.view.LastError = failure.Error()
+		}
 	}
 	err := c.persistLocked()
 	c.mu.Unlock()
@@ -271,8 +276,7 @@ func (c *Controller) cacheUnavailable(api *API, p Profile) error {
 }
 func (c *Controller) checkAccountConnection(ctx context.Context) {
 	c.mu.Lock()
-	api := c.api
-	selection := c.selectionGeneration
+	api, selection, generation := c.api, c.selectionGeneration, c.generation
 	c.mu.Unlock()
 	if api == nil {
 		return
@@ -280,44 +284,34 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 	timeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	state, err := api.Connections(timeout)
-	if err != nil {
+	c.mu.Lock()
+	current := c.api == api && c.selectionGeneration == selection && c.generation == generation && !c.view.SelectionPending && !c.closed
+	if !current {
+		c.mu.Unlock()
 		return
 	}
-	c.routeMu.Lock()
-	c.mu.Lock()
-	stop := false
-	if c.api == api && selection == c.selectionGeneration && !c.view.SelectionPending && state.SubscriptionID == c.saved.SelectedSubscriptionID {
-		c.view.Connections = state
-		if c.view.RunState == "connected" {
-			active := false
-			for _, lease := range state.Connections {
-				if lease.State == "active" && lease.SubscriptionID == c.view.ActualSubscriptionID && lease.NodeID == c.view.ActualNodeID && lease.ExpiresAt.After(time.Now()) {
-					active = true
-				}
-			}
-			if !active {
-				c.generation++
-				if c.cancelApply != nil {
-					c.cancelApply()
-				}
-				c.view.ConnectionIntent = false
-				c.view.ActualNodeID = ""
-				c.view.ActualSubscriptionID = ""
-				c.view.RunState = "failed"
-				c.view.LastError = "服务器连接授权已结束，VPN 已关闭，请检查订阅后手动重连"
-				stop = true
-			}
+	if err != nil {
+		if retryable(err) {
+			c.startRecoveryLocked("lease_query_unavailable")
 		}
+		c.mu.Unlock()
+		if !retryable(err) && !errors.Is(err, context.Canceled) {
+			c.failGeneration(generation, err.Error())
+		}
+		return
+	}
+	if state.SubscriptionID == c.saved.SelectedSubscriptionID && state.SelectionRevision == c.saved.Profile.SelectionRevision {
+		c.view.Connections = state
+		if connectionRunning(c.view.RunState) && !matchingLease(state, c.saved.SelectedSubscriptionID, c.saved.SelectedNodeID, c.clockNow()) {
+			c.startRecoveryLocked("lease_missing")
+		}
+	} else if connectionRunning(c.view.RunState) {
+		c.startRecoveryLocked("lease_selection_changed")
 	}
 	c.mu.Unlock()
-	if stop {
-		_ = c.engine.Stop()
-	}
-	c.routeMu.Unlock()
 }
 
-// Polling/backoff may be slow, so the local stop deadline has an independent
-// clock. The server core also enforces its own shorter-or-equal lease deadline.
+// Independent of account polling/backoff, enforce authorization freshness locally.
 func (c *Controller) accountWatchdog(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -326,44 +320,67 @@ func (c *Controller) accountWatchdog(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			c.accountWatchdogTick(ctx)
 		}
-		c.routeMu.Lock()
-		c.mu.Lock()
-		message := ""
-		if c.view.ConnectionIntent {
-			if c.view.LastSync == nil || time.Since(*c.view.LastSync) >= 120*time.Second {
-				message = "账户服务失联超过 120 秒，VPN 已关闭，请恢复后手动重连"
-			}
-			selected := c.view.Subscription
-			if c.view.SelectionPending {
-				selected = nil
-				for _, item := range c.view.Subscriptions {
-					if item.ID == c.view.DesiredSubscriptionID {
-						selected = &item
-						break
-					}
-				}
-			}
-			if selected != nil && !selected.ExpiresAt.After(time.Now()) {
-				message = "当前订阅已到期，VPN 已关闭，请手动选择其他订阅"
-			}
-		}
-		if message != "" {
-			c.generation++
-			if c.cancelApply != nil {
-				c.cancelApply()
-			}
-			c.view.ConnectionIntent = false
-			c.view.ActualNodeID = ""
-			c.view.ActualSubscriptionID = ""
-			c.view.RunState = "failed"
-			c.view.LastError = message
-		}
+	}
+}
+
+func (c *Controller) accountWatchdogTick(ctx context.Context) {
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
+	c.mu.Lock()
+	if !c.view.ConnectionIntent || c.closed {
 		c.mu.Unlock()
-		if message != "" {
-			_ = c.engine.Stop()
+		return
+	}
+	now := c.clockNow()
+	selected := c.view.Subscription
+	if c.view.SelectionPending {
+		selected = nil
+		for _, item := range c.view.Subscriptions {
+			if item.ID == c.view.DesiredSubscriptionID {
+				selected = &item
+				break
+			}
 		}
-		c.routeMu.Unlock()
+	}
+	message := ""
+	if selected != nil && !selected.ExpiresAt.After(now) {
+		message = "当前订阅已到期，VPN 已关闭，请手动选择其他订阅"
+	}
+	stale := c.view.LastSync == nil || now.Sub(*c.view.LastSync) >= 120*time.Second
+	if stale && !c.recoveryReady && message == "" {
+		message = "账户服务失联超过 120 秒，VPN 已关闭，请恢复后手动重连"
+	}
+	if message != "" {
+		c.stopStateLocked(message)
+		c.mu.Unlock()
+		_ = c.engine.Stop()
+		return
+	}
+	if !stale || c.suspended {
+		c.mu.Unlock()
+		return
+	}
+	c.startRecoveryLocked("authorization_stale")
+	r := c.recovery
+	c.mu.Unlock()
+	if r == nil {
+		return
+	}
+	err := c.engine.SetSuspended(r.ctx, true)
+	c.mu.Lock()
+	current := c.recoveryCurrentLocked(r)
+	if current {
+		if err == nil {
+			c.suspended = true
+		} else {
+			c.stopStateLocked("暂停代理转发失败，VPN 已关闭，请手动重新连接")
+		}
+	}
+	c.mu.Unlock()
+	if current && err != nil {
+		_ = c.engine.Stop()
 	}
 }
 

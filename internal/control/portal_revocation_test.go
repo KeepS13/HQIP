@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
-	for _, tc := range []struct{ action, suffix string }{{"rotate", ""}, {"revoke-and-create", ""}, {"rotate", "?format=v2ray"}, {"revoke-and-create", "?format=v2ray"}} {
+	for _, tc := range []struct{ action, suffix string }{{"rotate", ""}, {"revoke-and-create", ""}, {"rotate", "?format=v2ray"}, {"revoke-and-create", "?format=v2ray"}, {"rotate", "?format=singbox"}, {"revoke-and-create", "?format=singbox"}, {"rotate", "?format=singbox&download=1"}, {"revoke-and-create", "?format=singbox&download=1"}} {
 		t.Run(tc.action+tc.suffix, func(t *testing.T) {
 			s, _ := newServer(t)
 			u, _, _ := portalLoginFixture(t, s, "subscription@example.com")
@@ -75,7 +76,7 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 			released.Do(func() { close(release) })
 			select {
 			case w := <-result:
-				if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "password:") {
+				if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "password:") || strings.Contains(w.Body.String(), `"password"`) || w.Header().Get("Content-Disposition") != "" {
 					t.Fatalf("old URL obtained replacement credentials: %d", w.Code)
 				}
 			case <-time.After(5 * time.Second):
@@ -83,7 +84,10 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 			}
 			w := request(public, "GET", newURL+tc.suffix, nil, "", "")
 			valid := strings.Contains(w.Body.String(), "password:")
-			if tc.suffix != "" {
+			if strings.Contains(tc.suffix, "format=singbox") {
+				var config portalSingBoxTestConfig
+				valid = json.Unmarshal(w.Body.Bytes(), &config) == nil && len(config.Outbounds) == 3 && config.Outbounds[1].Password != ""
+			} else if tc.suffix != "" {
 				decoded, decodeErr := base64.StdEncoding.DecodeString(w.Body.String())
 				valid = decodeErr == nil && strings.HasPrefix(string(decoded), "hysteria2://")
 			}

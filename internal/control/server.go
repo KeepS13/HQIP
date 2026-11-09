@@ -417,7 +417,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "账号或密码错误")
 		return
 	}
-	token, csrf, err := s.Store.CreateSession()
+	token, csrf, err := s.Store.CreateSession(hash)
+	if errors.Is(err, store.ErrUnauthorized) {
+		fail(w, 401, "密码已变更，请重新登录")
+		return
+	}
 	if err != nil {
 		fail(w, 500, "无法创建登录会话")
 		return
@@ -459,13 +463,13 @@ func (s *Server) password(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "当前密码不正确")
 		return
 	}
-	if err = s.Store.ChangePassword(b.New); err != nil {
-		fail(w, 500, "修改密码失败")
+	token, _, err := s.Store.ChangePasswordAndCreateSession(hash, b.New)
+	if errors.Is(err, store.ErrUnauthorized) {
+		fail(w, 401, "密码已变更，请重新登录")
 		return
 	}
-	token, _, err := s.Store.CreateSession()
 	if err != nil {
-		fail(w, 500, "密码已修改，请重新登录")
+		fail(w, 500, "修改密码失败")
 		return
 	}
 	s.setCookie(w, token, 43200)
