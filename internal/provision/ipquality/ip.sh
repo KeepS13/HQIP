@@ -1,7 +1,7 @@
 #!/bin/bash
-# HQIP adaptation, 2026-11-04. Original: xykt/IPQuality (AGPL-3.0).
+# HQIP adaptation, 2026-11-11. Original: xykt/IPQuality (AGPL-3.0).
 # Source revision, changes, license and hashes: UPSTREAM.json / NOTICE.md.
-script_version="v2026-09-16-hqip1"
+script_version="v2026-09-16-hqip2"
 check_bash(){
 current_bash_version=$(bash --version|head -n 1|awk -F ' ' '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+/) {print $i; exit}}'|cut -d . -f 1)
 if [ "$current_bash_version" = "0" ]||[ "$current_bash_version" = "1" ]||[ "$current_bash_version" = "2" ]||[ "$current_bash_version" = "3" ];then
@@ -2290,6 +2290,11 @@ show_tail)
 fi
 local report_link=""
 [[ mode_json -eq 1 || mode_output -eq 1 || mode_privacy -eq 0 ]]&&save_json
+# HQIP retains the original terminal report privately for the report image.
+# The path is supplied only by the fixed runner; no upload or public link.
+if [[ -n "${HQIP_REPORT_ANSI:-}" ]];then
+printf '%b\n' "$ip_report" >"$HQIP_REPORT_ANSI"
+fi
 
 [[ mode_json -eq 0 ]]&&echo -ne "\r$ip_report\n"
 [[ mode_json -eq 0 && mode_privacy -eq 0 && $report_link == *"https://Report.Check.Place/"* ]]&&echo -ne "\r${stail[link]}$report_link$Font_Suffix\n"

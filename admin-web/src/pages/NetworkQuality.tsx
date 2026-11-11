@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
-import { Clock3, ExternalLink, Globe2, Network, RefreshCw, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Clock3, Download, ExternalLink, Globe2, Image, Network, RefreshCw, ShieldCheck, ZoomIn, ZoomOut } from "lucide-react";
 import { api, usePolling } from "../api";
+import { API_URL } from "../config";
 import { Badge, Button, Empty, ErrorNotice, Field, Loading, Modal, Notice, Panel, date, useToast } from "../components";
 import type { Node } from "../types";
 import "./network-quality.css";
@@ -17,6 +18,8 @@ type Quality = {
   finishedAt: string | null;
   reportAt: string | null;
   report: Report | null;
+  reportImageAvailable: boolean;
+  reportImageVersion: string;
 };
 const statusNames: Record<Quality["status"], string> = {
   "not-run": "尚未检测", queued: "等待检测", running: "检测中", complete: "报告已生成", failed: "本次检测失败", cancelled: "检测已取消",
@@ -45,7 +48,7 @@ function mediaStatus(value: unknown) {
   return ({ Yes: "可访问", Block: "受限", Failed: "检测失败", Pending: "待确认", "解锁": "可访问", "屏蔽": "受限", "失败": "检测失败" } as Record<string, string>)[text] || text;
 }
 
-function ReportBody({ report, reportAt, sourceIp }: { report: Report; reportAt: string | null; sourceIp: string }) {
+function ReportBody({ report, reportAt, sourceIp, imageAvailable, onViewImage }: { report: Report; reportAt: string | null; sourceIp: string; imageAvailable: boolean; onViewImage: () => void }) {
   const head = object(report.Head), info = object(report.Info), region = object(info.Region), city = object(info.City);
   const media = object(report.Media), scores = object(report.Score), usage = object(object(report.Type).Usage);
   const factors = object(report.Factor), mail = object(report.Mail), dnsbl = object(mail.DNSBlacklist);
@@ -86,8 +89,66 @@ function ReportBody({ report, reportAt, sourceIp }: { report: Report; reportAt: 
       </div>
     </details>
     <details className="nq-details"><summary>查看完整 JSON 报告</summary><pre tabIndex={0} aria-label="完整 IP 质量报告">{JSON.stringify(report, null, 2)}</pre></details>
-    <div className="nq-source"><span>检测来源 · xykt/IPQuality {scalar(head.Version, "")}</span><a href="https://github.com/xykt/IPQuality" target="_blank" rel="noreferrer">上游项目 <ExternalLink size={12}/></a><a href="https://github.com/KeepS13/HQIP/tree/main/internal/provision/ipquality" target="_blank" rel="noreferrer">适配源码 · AGPL-3.0 <ExternalLink size={12}/></a></div>
+    <div className="nq-source"><span>检测来源 · xykt/IPQuality {scalar(head.Version, "")}</span><a href="https://github.com/xykt/IPQuality" target="_blank" rel="noreferrer">上游项目 <ExternalLink size={12}/></a><a href="https://github.com/KeepS13/HQIP/tree/main/internal/provision/ipquality" target="_blank" rel="noreferrer">适配源码 · AGPL-3.0 <ExternalLink size={12}/></a><button type="button" className="nq-image-link" disabled={!imageAvailable} onClick={onViewImage} title={imageAvailable ? undefined : "图片尚未生成"}><Image size={13}/>查看图片</button></div>
   </div>;
+}
+
+function ReportImage({ nodeId, nodeName, version, reportAt, onClose, onStale }: { nodeId: string; nodeName: string; version: string; reportAt: string | null; onClose: () => void; onStale: () => Promise<void> }) {
+  const [url, setURL] = useState(""), [preview, setPreview] = useState(""), [error, setError] = useState(""), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0), [originalSize, setOriginalSize] = useState(false);
+  const staleHandler = useRef(onStale);
+  staleHandler.current = onStale;
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectURL = "";
+    let reader: FileReader | undefined;
+    setLoading(true);setError("");setURL("");setPreview("");
+    async function load() {
+      try {
+        const response = await fetch(`${API_URL}/api/v1/nodes/${encodeURIComponent(nodeId)}/network-quality/image?version=${encodeURIComponent(version)}`, { credentials: "include", cache: "no-store", signal: controller.signal });
+        if (response.status === 401) {
+          window.dispatchEvent(new Event("hqip:unauthorized"));
+          throw new Error("登录已过期，请重新登录后查看图片。");
+        }
+        if (response.status === 409) {
+          void staleHandler.current();
+          throw new Error("检测报告已更新，正在刷新，请稍后重新查看。");
+        }
+        if (!response.ok) throw new Error(response.status === 404 ? "暂未找到报告图片，请刷新报告后重试。" : "图片加载失败，请稍后重试。");
+        if (response.headers.get("Content-Type")?.split(";")[0].trim() !== "image/svg+xml") throw new Error("报告图片格式异常，请稍后重试。");
+        const blob = await response.blob();
+        if (!blob.size || blob.size > 8 * 1024 * 1024) throw new Error("报告图片大小异常，请稍后重试。");
+        if (controller.signal.aborted) return;
+        // The admin CSP permits data images, while blob URLs remain download-only.
+        const dataURL = await new Promise<string>((resolve, reject) => {
+          reader = new FileReader();
+          reader.onload = () => typeof reader?.result === "string" ? resolve(reader.result) : reject(new Error("图片读取失败，请重试。"));
+          reader.onerror = () => reject(new Error("图片读取失败，请重试。"));
+          reader.onabort = () => reject(new DOMException("Aborted", "AbortError"));
+          reader.readAsDataURL(blob);
+        });
+        if (controller.signal.aborted) return;
+        objectURL = URL.createObjectURL(blob);
+        setURL(objectURL);
+        setPreview(dataURL);
+      } catch (e) {
+        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "图片加载失败，请稍后重试。");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void load();
+    return () => { controller.abort();reader?.abort();if (objectURL) URL.revokeObjectURL(objectURL); };
+  }, [nodeId, version, attempt]);
+  return <Modal title="IP 质量报告图片" description={`${nodeName} · 报告生成于 ${date(reportAt)}`} wide onClose={onClose}>
+    <div className="nq-image-viewer">
+      {loading && <div role="status" aria-live="polite"><Loading/></div>}
+      <ErrorNotice message={error} retry={() => setAttempt(value => value + 1)}/>
+      {url && !error && <>
+        <div className={`nq-image-canvas ${originalSize ? "nq-image-original" : ""}`} tabIndex={0} aria-label="报告图片，可滚动查看"><img src={preview} alt={`${nodeName} 的 IP 质量报告，生成于 ${date(reportAt)}`} onError={() => setError("图片无法显示，请重试或重新检测。")}/></div>
+        <div className="nq-image-actions"><Button variant="secondary" type="button" icon={originalSize ? ZoomOut : ZoomIn} onClick={() => setOriginalSize(value => !value)}>{originalSize ? "适应宽度" : "原始大小"}</Button><a className="button button-primary" href={url} download={`HQIP-IP-质量报告-${nodeId}-${version.slice(0,12)}.svg`}><Download size={15}/>保存图片</a></div>
+      </>}
+    </div>
+  </Modal>;
 }
 
 function StartQuality({ node, onClose, onQueued }: { node: Node; onClose: () => void; onQueued: (value: Quality) => void }) {
@@ -112,7 +173,7 @@ function StartQuality({ node, onClose, onQueued }: { node: Node; onClose: () => 
 
 export function NetworkQuality({ node }: { node: Node }) {
   const { data, error, loading, refresh, setData } = usePolling<Quality>(`/nodes/${node.id}/network-quality`);
-  const [open, setOpen] = useState(false);const toast = useToast();
+  const [open, setOpen] = useState(false), [imageOpen, setImageOpen] = useState(false);const toast = useToast();
   const status = data?.status || "not-run", running = status === "queued" || status === "running";
   const report = data?.report && Object.keys(object(data.report)).length ? data.report : null;
   const cooldown = data?.requestedAt ? Math.max(0, Math.ceil((Date.parse(data.requestedAt) + 600000 - Date.now()) / 60000)) : 0;
@@ -124,8 +185,9 @@ export function NetworkQuality({ node }: { node: Node }) {
     {data?.error && <ErrorNotice message={data.error}/>}
     {running && <Notice><Clock3 size={15}/> {status === "queued" ? "任务已排队，等待同服务器的其他操作完成。" : "正在检测此节点的公网 IP，完成后报告会自动更新。"}{report && " 下方仍显示上次成功报告。"}</Notice>}
     {!running && report && ["failed", "cancelled"].includes(status) && <Notice tone="warning">本次检测没有产生新报告，下方保留上次成功结果。</Notice>}
-    {loading ? <Loading/> : report ? <ReportBody report={report} reportAt={data?.reportAt || null} sourceIp={data?.reportSourceIp || ""}/> : !error && <Empty icon={Network} title={running ? "等待检测报告" : "尚无 IP 质量报告"} description={available ? "部署成功后自动生成报告，已有节点也可使用上方按钮开始检测。" : "节点完成部署后会自动检测；尚未部署或已删除的节点不能发起检测。"}/>}
+    {loading ? <Loading/> : report ? <ReportBody report={report} reportAt={data?.reportAt || null} sourceIp={data?.reportSourceIp || ""} imageAvailable={!!data?.reportImageAvailable && !!data.reportImageVersion} onViewImage={() => setImageOpen(true)}/> : !error && <Empty icon={Network} title={running ? "等待检测报告" : "尚无 IP 质量报告"} description={available ? "部署成功后自动生成报告，已有节点也可使用上方按钮开始检测。" : "节点完成部署后会自动检测；尚未部署或已删除的节点不能发起检测。"}/>}
     <p className="nq-footnote">检测请求直接从服务器发出，不计入代理用量；云厂商可能计入服务器流量账单。数据源无法响应的项目显示未知。</p>
     {open && <StartQuality node={node} onClose={() => setOpen(false)} onQueued={value => {setData(value);toast("已加入 IP 质量检测队列");}}/>}
+    {imageOpen && data?.reportImageAvailable && data.reportImageVersion && <ReportImage key={`${node.id}:${data.reportImageVersion}`} nodeId={node.id} nodeName={node.name} version={data.reportImageVersion} reportAt={data.reportAt} onClose={() => setImageOpen(false)} onStale={refresh}/>}
   </Panel>;
 }

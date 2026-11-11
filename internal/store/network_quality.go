@@ -35,7 +35,15 @@ func (s *Store) NetworkQuality(id string) (model.NetworkQualityStatus, error) {
 		return v, err
 	}
 	v.RequestedAt, v.StartedAt, v.FinishedAt, v.ReportAt = alertTime(requested), alertTime(started), alertTime(finished), alertTime(reportAt)
-	v.Report = json.RawMessage(raw)
+	var imageAvailable bool
+	v.Report, _, imageAvailable, err = splitQualityImage(json.RawMessage(raw))
+	if err != nil {
+		return v, err
+	}
+	v.ReportImageAvailable = reportAt > 0 && imageAvailable
+	if v.ReportImageAvailable {
+		v.ReportImageVersion = qualityImageVersion(v.Report, reportAt, v.ReportSourceIP)
+	}
 	return v, nil
 }
 
@@ -122,8 +130,17 @@ func (s *Store) FinishNetworkQuality(id string, jobID int64, status, message str
 	if status != "complete" && status != "failed" && status != "cancelled" {
 		return errors.New("检测状态无效")
 	}
-	if status == "complete" && (len(report) == 0 || len(report) > 512<<10 || !json.Valid(report) || report[0] != '{') {
+	// Escaped ANSI text can take six JSON bytes per input byte. The original
+	// factual-report cap is checked separately before the image is rendered.
+	if status == "complete" && (len(report) == 0 || len(report) > 768<<10 || !json.Valid(report) || report[0] != '{') {
 		return errors.New("检测报告无效")
+	}
+	if status == "complete" {
+		var err error
+		report, err = prepareQualityImage(report)
+		if err != nil {
+			return err
+		}
 	}
 	_, err := s.DB.Exec(`UPDATE node_network_quality SET
  status=CASE WHEN EXISTS(SELECT 1 FROM nodes WHERE id=? AND lifecycle!='active') THEN 'cancelled' ELSE ? END,

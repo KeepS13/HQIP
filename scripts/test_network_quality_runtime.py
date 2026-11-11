@@ -31,7 +31,7 @@ class QualityRuntimeTests(unittest.TestCase):
         return {'ip': '203.0.113.8', 'runId': 'a' * 24,
                 'files': {'ip.sh': base64.b64encode(b'# fake diagnostic, never executed').decode()}}
 
-    def execute(self, report_ip='203.0.113.8', result='success', expire=False, source_present=True):
+    def execute(self, report_ip='203.0.113.8', result='success', expire=False, source_present=True, ansi=b'\x1b[32mIP quality\x1b[0m\n'):
         with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
             root = Path(folder) / 'quality'
             original_path = Path
@@ -52,6 +52,9 @@ class QualityRuntimeTests(unittest.TestCase):
                 if command[0] == 'systemd-run':
                     output = original_path(command[-1])
                     output.write_text(json.dumps({'Head': {'IP': report_ip}, 'Info': {}, 'Score': {}}))
+                    if ansi is not None:
+                        ansi_path = next(value.split('=', 1)[1] for value in command if value.startswith('HQIP_REPORT_ANSI='))
+                        original_path(ansi_path).write_bytes(ansi)
                     return SimpleNamespace(returncode=0, stdout=b'')
                 if command[:2] == ['systemctl', 'show']:
                     return SimpleNamespace(returncode=0, stdout=('inactive' if '--property=ActiveState' in command else result))
@@ -63,6 +66,14 @@ class QualityRuntimeTests(unittest.TestCase):
             answer = runtime.run(self.payload())
             self.assertFalse(root.exists() and list(root.iterdir()), 'Transient source or report left behind')
             return answer, calls
+
+    def test_private_original_report_is_preserved_and_optional(self):
+        answer, _ = self.execute(ansi='\x1b[32m原始报告\x1b[0m\n'.encode())
+        self.assertEqual(answer['ansi'], '\x1b[32m原始报告\x1b[0m\n')
+        for ansi in [None, b'\xff', b'x' * (64 * 1024 + 1)]:
+            answer, _ = self.execute(ansi=ansi)
+            self.assertIn('report', answer)
+            self.assertNotIn('ansi', answer)
 
     def test_fixed_unprivileged_command_bound_ip_limits_and_cleanup(self):
         answer, calls = self.execute()

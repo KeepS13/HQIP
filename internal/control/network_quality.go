@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,7 +18,27 @@ type networkQualityRunner interface {
 
 func (s *Server) registerNetworkQualityRoutes(m *http.ServeMux) {
 	m.Handle("GET /api/v1/nodes/{id}/network-quality", s.auth(http.HandlerFunc(s.getNetworkQuality), false))
+	m.Handle("GET /api/v1/nodes/{id}/network-quality/image", s.auth(http.HandlerFunc(s.getNetworkQualityImage), false))
 	m.Handle("POST /api/v1/nodes/{id}/network-quality", s.auth(http.HandlerFunc(s.queueNetworkQuality), false))
+}
+func (s *Server) getNetworkQualityImage(w http.ResponseWriter, r *http.Request) {
+	version := r.URL.Query().Get("version")
+	if _, err := hex.DecodeString(version); err != nil || len(version) != 64 {
+		fail(w, http.StatusBadRequest, "请选择当前报告图片")
+		return
+	}
+	image, err := s.Store.NetworkQualityImage(r.PathValue("id"), version)
+	if err != nil {
+		managementError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'none'; sandbox")
+	w.Header().Set("Content-Disposition", `inline; filename="hqip-ip-quality.svg"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(image)
 }
 func (s *Server) getNetworkQuality(w http.ResponseWriter, r *http.Request) {
 	v, err := s.Store.NetworkQuality(r.PathValue("id"))

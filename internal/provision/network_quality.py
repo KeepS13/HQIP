@@ -33,10 +33,11 @@ def run(payload):
             destination=work/name;destination.parent.mkdir(mode=0o755,parents=True,exist_ok=True)
             destination.write_bytes(base64.b64decode(encoded,validate=True));destination.chmod(0o444)
         report=output/'report.json'
+        report_ansi=output/'report.ansi'
         properties=['User='+str(user.pw_uid),'Group='+str(user.pw_gid),'NoNewPrivileges=yes','ProtectSystem=strict','ProtectHome=yes','PrivateTmp=yes','PrivateDevices=yes','ProtectKernelTunables=yes','ProtectControlGroups=yes','RestrictSUIDSGID=yes','CapabilityBoundingSet=','ReadWritePaths='+str(output),'MemoryMax=192M','TasksMax=80','CPUQuota=50%','LimitFSIZE=1048576','LimitNOFILE=256','RuntimeMaxSec=300','TimeoutStopSec=5','KillMode=control-group','Nice=10','UMask=0077','StandardOutput=null','StandardError=null']
         command=['systemd-run','--quiet','--unit='+unit,'--service-type=exec']
         for prop in properties:command+=['--property='+prop]
-        command+=['/usr/bin/env','-i','PATH=/usr/bin:/bin','HOME='+str(output),'LANG=C.UTF-8','TERM=dumb','bash',str(work/'ip.sh'),'-i',target,'-4','-n','-p','-f','-j','-o',str(report)]
+        command+=['/usr/bin/env','-i','PATH=/usr/bin:/bin','HOME='+str(output),'LANG=C.UTF-8','TERM=dumb','HQIP_REPORT_ANSI='+str(report_ansi),'bash',str(work/'ip.sh'),'-i',target,'-4','-n','-p','-f','-j','-o',str(report)]
         launched=subprocess.run(command,capture_output=True,timeout=20)
         if launched.returncode:return {'error':'sandbox'}
         deadline=time.monotonic()+315
@@ -52,7 +53,13 @@ def run(payload):
         try:doc=json.loads(report.read_text())
         except (ValueError,UnicodeError):return {'error':'invalid'}
         if not isinstance(doc,dict) or not isinstance(doc.get('Head'),dict) or doc['Head'].get('IP')!=target:return {'error':'invalid'}
-        return {'report':doc}
+        answer={'report':doc}
+        # Image output is optional; a missing/invalid image cannot discard valid
+        # measurement data. The controller can render the factual JSON instead.
+        if report_ansi.is_file() and not report_ansi.is_symlink() and report_ansi.stat().st_size<=64*1024:
+            try:answer['ansi']=report_ansi.read_text(encoding='utf-8')
+            except (OSError,UnicodeError):pass
+        return answer
     finally:
         try:
             subprocess.run(['systemctl','stop',unit],capture_output=True,timeout=15)

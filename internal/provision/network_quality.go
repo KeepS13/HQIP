@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 //go:embed ipquality/* ipquality/ref/*
@@ -69,12 +70,13 @@ func (r *Runner) NetworkQuality(ctx context.Context, in Input, pin PinFunc) (jso
 	if err != nil {
 		return nil, errors.New("远端检测启动或执行失败，请检查 SSH、Python 3 和 systemd")
 	}
-	if len(out) > 256*1024 {
+	if len(out) > 768*1024 {
 		return nil, errors.New("检测报告超过大小限制")
 	}
 	var result struct {
 		Error  string          `json:"error"`
 		Report json.RawMessage `json:"report"`
+		ANSI   string          `json:"ansi"`
 	}
 	if json.Unmarshal([]byte(out), &result) != nil {
 		return nil, errors.New("检测返回了无效报告")
@@ -86,7 +88,25 @@ func (r *Runner) NetworkQuality(ctx context.Context, in Input, pin PinFunc) (jso
 		}
 		return nil, errors.New("网络质量检测失败")
 	}
-	return validateQualityReport(result.Report, ip.String())
+	report, err := validateQualityReport(result.Report, ip.String())
+	if err != nil {
+		return nil, err
+	}
+	return qualityReportWithANSI(report, result.ANSI)
+}
+
+// Preserve the pinned script's private display output separately from factual
+// JSON. Storage renders it as escaped text, never as trusted markup or code.
+func qualityReportWithANSI(report json.RawMessage, ansi string) (json.RawMessage, error) {
+	if ansi == "" || len(ansi) > 64*1024 || !utf8.ValidString(ansi) {
+		return report, nil
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(report, &document); err != nil {
+		return nil, err
+	}
+	document["HQIPReportANSI"], _ = json.Marshal(ansi)
+	return json.Marshal(document)
 }
 
 func validateQualityReport(raw json.RawMessage, ip string) (json.RawMessage, error) {
