@@ -5,5 +5,6 @@ package model
 const DeploymentFailureKind = "job.install"
 
 func (c NotificationCondition) RequiresAcknowledgement() bool {
-	return c.Kind != DeploymentFailureKind
+	// Retired node-capacity incidents remain available as history only.
+	return c.Kind != DeploymentFailureKind && c.Kind != "node.month" && c.Kind != "node.cycle"
 }

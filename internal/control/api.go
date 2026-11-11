@@ -117,9 +117,6 @@ func (f *nodeForm) validate() error {
 	if len(f.Password) < 1 || len(f.Password) > 1024 {
 		return errors.New("请填写 SSH 密码（最多 1024 字符）")
 	}
-	if !validQuota(f.BandwidthMbps, f.MonthlyQuotaBytes) {
-		return errors.New("带宽和流量额度必须为正数；无限请填写 null")
-	}
 	return nil
 }
 func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +159,9 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 	if f.DNSMode == "cloudflare" {
 		certificateMode = "cloudflare"
 	}
-	n, err := s.Store.CreateNode(model.Node{ServerID: f.ServerID, AddressID: f.AddressID, DNSMode: f.DNSMode, ZoneID: f.ZoneID, CertificateMode: certificateMode, HostKey: server.HostKey, MachineID: server.MachineID, Name: f.Name, SSHHost: f.SSHHost, SSHPort: f.SSHPort, SSHUser: f.SSHUser, PublicIP: f.PublicIP, Domain: f.Domain, Port: f.Port, BandwidthMbps: f.BandwidthMbps, MonthlyQuotaBytes: f.MonthlyQuotaBytes}, f.Password)
+	// Older admin builds may still send node capacities. They are ignored: only
+	// server capacity and subscription entitlements have quota semantics.
+	n, err := s.Store.CreateNode(model.Node{ServerID: f.ServerID, AddressID: f.AddressID, DNSMode: f.DNSMode, ZoneID: f.ZoneID, CertificateMode: certificateMode, HostKey: server.HostKey, MachineID: server.MachineID, Name: f.Name, SSHHost: f.SSHHost, SSHPort: f.SSHPort, SSHUser: f.SSHUser, PublicIP: f.PublicIP, Domain: f.Domain, Port: f.Port}, f.Password)
 	if err != nil {
 		fail(w, 409, "创建节点失败，域名或服务器端口可能已存在")
 		return
@@ -268,24 +267,12 @@ func (s *Server) updateNode(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			n.Name = strings.TrimSpace(n.Name)
-		case "bandwidthMbps":
-			if json.Unmarshal(value, &n.BandwidthMbps) != nil {
-				fail(w, 400, "带宽格式无效")
-				return
-			}
-		case "monthlyQuotaBytes":
-			if json.Unmarshal(value, &n.MonthlyQuotaBytes) != nil {
-				fail(w, 400, "流量额度格式无效")
-				return
-			}
+		case "bandwidthMbps", "monthlyQuotaBytes":
+			// Accept obsolete fields from cached admin pages without restoring limits.
 		default:
-			fail(w, 400, "只能修改名称、带宽和流量额度")
+			fail(w, 400, "只能修改节点名称")
 			return
 		}
-	}
-	if !validQuota(n.BandwidthMbps, n.MonthlyQuotaBytes) {
-		fail(w, 400, "带宽和流量额度必须为正数；无限请填写 null")
-		return
 	}
 	if err = s.Store.SaveNode(n); err != nil {
 		result(w, nil, err)

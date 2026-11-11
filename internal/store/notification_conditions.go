@@ -79,20 +79,8 @@ func (s *Store) CollectNotificationConditions() ([]model.NotificationCondition, 
 		} else {
 			out = append(out, notificationRemoved("node.health", n.node.ID, "system"))
 		}
-		var billing model.ServerBilling
-		if n.node.ServerID != "" {
-			billing, err = BillingInSnapshot(tx, n.node.ServerID, n.node.ID, now)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if billing.Status != "" && billing.Status != "unconfigured" {
-			if c, ok := notificationBillingQuota("node", n.node.ID, name, path, billing, n.node.MonthlyQuotaBytes); ok {
-				out = append(out, c)
-			}
-		} else if c, ok := notificationQuota("node.month", n.node.ID, name, path, month, n.monthUsed, n.node.MonthlyQuotaBytes, []int{80, 100}); ok {
-			out = append(out, c)
-		}
+		// Node quota conditions are retired. Their absence ends existing incidents
+		// through the evaluator while preserving their history and actual usage.
 	}
 	serverConditions, err := notificationServers(tx, nodes, now, month)
 	if err != nil {

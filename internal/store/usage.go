@@ -219,20 +219,6 @@ type Alert struct {
 func (s *Store) Alerts(nodes []model.Node) []Alert {
 	alerts := []Alert{}
 	for _, n := range nodes {
-		if n.MonthlyQuotaBytes != nil && *n.MonthlyQuotaBytes > 0 {
-			used := n.MonthUpload + n.MonthDownload
-			period := "本月"
-			if n.Billing.Status != "" && n.Billing.Status != "unconfigured" {
-				used = n.Billing.CycleUpload + n.Billing.CycleDownload
-				period = "本周期"
-			}
-			ratio := float64(used) / float64(*n.MonthlyQuotaBytes)
-			if ratio >= 1 {
-				alerts = append(alerts, Alert{Level: "danger", Message: n.Name + " " + period + "代理流量已达到额度，连接保持正常", NodeID: n.ID})
-			} else if ratio >= .8 {
-				alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " " + period + "代理流量已达到额度的 80%", NodeID: n.ID})
-			}
-		}
 		if n.LastSeen != nil && s.Now().Sub(*n.LastSeen) > 30*time.Second {
 			alerts = append(alerts, Alert{Level: "warning", Message: n.Name + " 心跳超过 30 秒未更新，在线情况未知", NodeID: n.ID})
 		}

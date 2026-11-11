@@ -76,12 +76,6 @@ func Validate(n model.Node) error {
 	if !userRE.MatchString(n.SSHUser) || n.SSHPort < 1 || n.SSHPort > 65535 || n.Port < 1 || n.Port > 65535 {
 		return errors.New("SSH 用户或端口无效")
 	}
-	if n.BandwidthMbps != nil && (*n.BandwidthMbps <= 0 || *n.BandwidthMbps > 1e9) {
-		return errors.New("带宽须为正数或无限")
-	}
-	if n.MonthlyQuotaBytes != nil && *n.MonthlyQuotaBytes <= 0 {
-		return errors.New("流量额度须为正数或无限")
-	}
 	authPort, statsPort := localPorts(n)
 	if authPort < 1024 || statsPort < 1024 || authPort > 65535 || statsPort > 65535 || authPort == statsPort {
 		return errors.New("节点本地鉴权和统计端口无效")

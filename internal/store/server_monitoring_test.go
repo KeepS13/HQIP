@@ -385,7 +385,7 @@ func TestServerAlertsPreserveIndependentQuotasAndDeduplicateDisk(t *testing.T) {
 			nodeQuota++
 		}
 	}
-	if disk != 1 || nodeQuota != 2 || serverQuota != 1 {
+	if disk != 1 || nodeQuota != 0 || serverQuota != 1 {
 		t.Fatalf("unexpected alerts: %+v", alerts)
 	}
 	v.MonthDownload = 60

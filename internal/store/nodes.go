@@ -12,6 +12,8 @@ import (
 )
 
 func (s *Store) CreateNode(n model.Node, password string) (model.Node, error) {
+	// Node capacity fields are deprecated; traffic remains in the usage ledger.
+	n.BandwidthMbps, n.MonthlyQuotaBytes = nil, nil
 	n.ID = NewID()
 	n.CreatedAt = s.Now().UTC()
 	n.Status = "pending"
@@ -97,6 +99,8 @@ func (s *Store) Node(id string) (model.Node, error) {
 	if err = json.Unmarshal([]byte(raw), &n); err != nil {
 		return n, err
 	}
+	// Old records may contain advisory limits. Never expose or apply them again.
+	n.BandwidthMbps, n.MonthlyQuotaBytes = nil, nil
 	_ = json.Unmarshal([]byte(metrics), &n.Metrics)
 	n.Lifecycle = lifecycle
 	n.Revision = revision
@@ -186,9 +190,10 @@ func (s *Store) Nodes() ([]model.Node, error) {
 }
 
 func (s *Store) SaveNode(n model.Node) error {
-	// Administrator edits own only these three fields. Never replace a stale
-	// snapshot over a worker's host-key pin or deployment state transition.
-	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.name',?,'$.bandwidthMbps',?,'$.monthlyQuotaBytes',?),revision=revision+1 WHERE id=? AND lifecycle='active' AND revision=?", n.Name, n.BandwidthMbps, n.MonthlyQuotaBytes, n.ID, n.Revision)
+	// Administrator edits own only the name and discard obsolete node capacities.
+	// Never replace a stale snapshot over a worker's host-key pin or deployment
+	// state transition.
+	result, err := s.DB.Exec("UPDATE nodes SET config=json_set(config,'$.name',?,'$.bandwidthMbps',NULL,'$.monthlyQuotaBytes',NULL),revision=revision+1 WHERE id=? AND lifecycle='active' AND revision=?", n.Name, n.ID, n.Revision)
 	if err != nil {
 		return err
 	}

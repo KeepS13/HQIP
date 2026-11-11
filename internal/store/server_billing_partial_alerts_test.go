@@ -55,7 +55,12 @@ func TestIncompleteCycleUsageStillAlertsAtKnownThresholds(t *testing.T) {
 		if err = s.EvaluateAlerts(conditions); err != nil {
 			t.Fatal(err)
 		}
-		for _, kind := range []string{"server.cycle", "node.cycle"} {
+		for _, item := range alertList(t, s) {
+			if item.Condition.Kind == "node.cycle" {
+				t.Fatal("obsolete node quota still generated a cycle warning", item)
+			}
+		}
+		for _, kind := range []string{"server.cycle"} {
 			var found []model.Alert
 			for _, item := range alertList(t, s) {
 				if item.Condition.Kind == kind {

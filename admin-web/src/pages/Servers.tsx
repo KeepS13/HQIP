@@ -45,7 +45,7 @@ function ServerForm({ server, onClose, onSaved }: { server?: ManagedServer; onCl
       <div className="form-grid"><Field label="SSH 用户"><input required value={form.sshUser} onChange={e => change("sshUser", e.target.value)} /></Field><Field label="SSH 端口"><input type="number" min={1} max={65535} required value={form.sshPort} onChange={e => change("sshPort", e.target.value)} /></Field></div>
       <Field label="SSH 密码" hint="仅用于验证本次连接；部署节点时重新输入。"><input type="password" autoComplete="new-password" required value={form.password} onChange={e => change("password", e.target.value)} /></Field>
       </section>
-      {!server && <section className="server-form-section" aria-label="服务器额度与有效期"><h3><CalendarClock size={17} />额度与有效期</h3><QuotaFields {...quota} quotaLabel="每周期流量额度" /><ExpiryFields {...expiry} onChange={setExpiry} /><p className="billing-help">默认到期时间为当前时间向上取整小时后加 30 天，请按厂商实际有效期核对。</p><Notice>整台服务器与各节点额度独立，仅作提醒。到期不停止代理；未经续期确认，不会自动清零用量。</Notice></section>}
+      {!server && <section className="server-form-section" aria-label="服务器额度与有效期"><h3><CalendarClock size={17} />额度与有效期</h3><QuotaFields {...quota} quotaLabel="每周期流量额度" /><ExpiryFields {...expiry} onChange={setExpiry} /><p className="billing-help">默认到期时间为当前时间向上取整小时后加 30 天，请按厂商实际有效期核对。</p><Notice>服务器容量仅作提醒，所属节点分别统计实际用量。到期不停止代理；未经续期确认，不会自动清零用量。</Notice></section>}
       </div>
       <p className="billing-help">HQIP 会固定 SSH 主机指纹。新增公网 IP 请先在 VPS 厂商和系统中配置，再加入此服务器的 IP 清单。</p>
       <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy}>检查并保存</Button></div>
@@ -175,12 +175,12 @@ export function ServerPage() {
       </Panel>
     </div>
     <TrafficChart points={traffic.data || []} title="服务器代理流量" subtitle="所有节点合计 · 包含已删除节点历史 · 不含探测 · 北京时间" period={period} onPeriodChange={setPeriod} loading={traffic.loading} error={traffic.error} />
-    <Panel title="节点流量贡献" subtitle="节点使用独立额度；实时速率含探测，代理用量不含探测">
-      {activeUsage.length ? <div className="table-scroll"><table><thead><tr><th>节点 / 公网 IP / 域名</th><th>状态</th><th>实时速率</th><th>节点独立额度</th><th>本月上传 / 下载</th><th>累计代理流量</th></tr></thead><tbody>{activeUsage.map(node => <tr key={node.id}>
+    <Panel title="节点流量贡献" subtitle="各节点实际上传与下载；实时速率含探测，代理用量不含探测">
+      {activeUsage.length ? <div className="table-scroll"><table><thead><tr><th>节点 / 公网 IP / 域名</th><th>状态</th><th>实时速率</th><th>代理用量</th><th>本月上传 / 下载</th><th>累计代理流量</th></tr></thead><tbody>{activeUsage.map(node => <tr key={node.id}>
         <td><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small mono">{node.publicIp}</div><div className="table-small mono">{node.domain}</div></td>
         <td><NodeBadge node={node} /></td>
         <td>{!error && hasNodeReport(node) ? <div className="server-node-rates"><span>↑ {(node.metrics.uploadRate * 8 / 1e6).toFixed(2)} Mbps</span><span>↓ {(node.metrics.downloadRate * 8 / 1e6).toFixed(2)} Mbps</span></div> : <span className="muted">未知</span>}</td>
-        <td className="quota-cell"><div className="table-small">带宽 {node.bandwidthMbps == null ? "不限量" : `${node.bandwidthMbps} Mbps`} · {billingFor(node).status === "unconfigured" ? "自然月" : "本周期"}</div><Meter value={billingTotal(node)} max={node.monthlyQuotaBytes} label />{!billingFor(node).cycleComplete && <span className="table-small">数据不完整，按已知用量计算</span>}</td>
+        <td className="quota-cell"><div className="table-small">{billingFor(node).status === "unconfigured" ? "自然月" : "本周期"}</div><strong>{bytes(billingTotal(node))}</strong>{!billingFor(node).cycleComplete && <div className="table-small">数据不完整，按已知用量计算</div>}</td>
         <td>{bytes(node.monthUpload)} / {bytes(node.monthDownload)}</td><td>{bytes(node.totalUpload + node.totalDownload)}</td>
       </tr>)}</tbody></table></div> : <Empty icon={Server} title="暂无活动节点" description="部署节点后，这里会展示每个 IP 节点对服务器用量的贡献。" />}
     </Panel>

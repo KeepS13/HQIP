@@ -25,7 +25,6 @@ import {
   Empty,
   ErrorNotice,
   Loading,
-  Meter,
   NodeBadge,
   Notice,
   PageHeader,
@@ -199,7 +198,7 @@ export function Dashboard() {
       </div>
       <Panel
         title="节点概览"
-        subtitle="查看健康状态、实时速率与周期额度"
+        subtitle="查看健康状态、实时速率与实际代理用量"
         action={
           <Link className="text-link" to="/nodes">
             全部节点 <ChevronRight size={15} />
@@ -214,7 +213,7 @@ export function Dashboard() {
                   <th>节点</th>
                   <th>运行状态</th>
                   <th>实时速率</th>
-                  <th>周期额度</th>
+                  <th>代理用量</th>
                   <th>在线设备</th>
                   <th />
                 </tr>
@@ -248,12 +247,8 @@ export function Dashboard() {
                     </td>
                     <td className="quota-cell">
                       <div className="table-small">{billingFor(n).status === "unconfigured" ? "本月 · 待设置到期" : "本周期"}</div>
-                      <Meter
-                        value={billingTotal(n)}
-                        max={n.monthlyQuotaBytes}
-                        label
-                      />
-                      {!billingFor(n).cycleComplete && <span className="table-small">数据不完整，按已知用量计算</span>}
+                      <strong>{bytes(billingTotal(n))}</strong>
+                      {!billingFor(n).cycleComplete && <div className="table-small">数据不完整，按已知用量计算</div>}
                     </td>
                     <td>
                       {!error && onlineKnown(n) ? (
@@ -294,7 +289,7 @@ export function Dashboard() {
         )}
       </Panel>
       {(data.alerts || []).length > 0 && (
-        <Panel title="需要关注" subtitle="服务器与节点容量提醒；用户订阅额度分别执行">
+        <Panel title="需要关注" subtitle="服务器容量与节点运行提醒；用户订阅额度分别执行">
           <div className="alerts-list">
             {data.alerts.map((alert, i) => (
               <div
@@ -427,7 +422,7 @@ export function Guide() {
               <strong>额度与带宽</strong>
               <p>
                 每份订阅的带宽在使用该订阅的连接间共享，一次性流量不按月重置。
-                订阅到期或额度耗尽时停止使用该订阅的连接；服务器容量提醒保持独立。
+                订阅到期或额度耗尽时停止使用该订阅的连接；服务器容量提醒保持独立。节点只统计实际代理用量。
               </p>
             </div>
           </div>

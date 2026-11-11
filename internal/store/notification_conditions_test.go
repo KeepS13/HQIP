@@ -63,11 +63,11 @@ func TestNotificationCapacityLedgerMonthTombstonesAndQuotaChanges(t *testing.T) 
 	}
 	all := notificationCollect(t, s)
 	serverKey := "server.month:" + v.ID + ":2026-10"
-	if all[serverKey].Stage != 100 || all["node.month:"+a.ID+":2026-10"].Stage != 80 {
+	if all[serverKey].Stage != 100 {
 		t.Fatalf("wrong highest thresholds: %+v", all)
 	}
-	if len(notificationKinds(all, "node.month")) != 1 {
-		t.Fatal("unexpected node contributions")
+	if len(notificationKinds(all, "node.month")) != 0 {
+		t.Fatal("obsolete node quota still generated a notification")
 	}
 	if !strings.Contains(all[serverKey].Message, "仅提醒，不限速、不断网") {
 		t.Fatal("capacity semantics missing")

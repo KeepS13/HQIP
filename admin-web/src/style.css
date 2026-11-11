@@ -1286,18 +1286,22 @@ tbody tr:hover {
   color: #7e8ca6;
   margin-left: 3px;
 }
-.node-quota-title {
+.node-traffic-summary {
   display: flex;
-  justify-content: space-between;
-  font-size: 9px;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 10px;
   color: #9ca9bf;
   margin: 24px 0 11px;
 }
-.node-quota-title > span:last-child {
-  color: #9b9ede;
+.node-traffic-summary strong {
+  color: #e6eafa;
+  font-size: 22px;
+  font-weight: 600;
 }
-.node-card .meter-label {
+.node-traffic-summary small {
   font-size: 10px;
+  line-height: 1.6;
 }
 .node-card-bottom {
   display: flex;

@@ -27,8 +27,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { api, usePolling } from "../api";
-import QuotaFields from "../QuotaFields";
-import { billingFor, billingQuotaLabel, billingTotal, billingUsageLabel } from "../billing";
+import { billingFor, billingTotal, billingUsageLabel } from "../billing";
 import { BillingSummary } from "./ServerBilling";
 import {
   Badge,
@@ -38,7 +37,6 @@ import {
   ErrorNotice,
   Field,
   Loading,
-  Meter,
   Modal,
   NodeBadge,
   Notice,
@@ -65,7 +63,7 @@ function AddNode({ onClose }: { onClose: () => void }) {
   const [serverId, setServerId] = useState(params.get("server") || "");
   const [addresses, setAddresses] = useState<ServerAddress[]>([]), [zones, setZones] = useState<CloudflareZone[]>([]);
   const [form, setForm] = useState({ name: "", addressId: params.get("address") || "", domain: "", port: "443", password: "", zoneId: "", dnsMode: "" });
-  const [bandwidth, setBandwidth] = useState(""), [quota, setQuota] = useState(""), [unit, setUnit] = useState("GB"), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const change = (key: keyof typeof form, value: string) => setForm(p => ({ ...p, [key]: value }));
   useEffect(() => { if (!serverId) { setAddresses([]); return; } let alive = true; setAddresses([]); api<ServerAddress[]>(`/servers/${serverId}/addresses`).then(a => { if (alive) setAddresses(a); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [serverId]);
   useEffect(() => { if (settings.data && !form.dnsMode) setForm(p => ({ ...p, dnsMode: settings.data!.configured ? "cloudflare" : "manual", zoneId: settings.data!.defaultZoneId })); }, [settings.data, form.dnsMode]);
@@ -73,7 +71,7 @@ function AddNode({ onClose }: { onClose: () => void }) {
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError("");
     try {
-      const node = await api<Node>("/nodes", "POST", { name: form.name.trim(), serverId, addressId: form.addressId, domain: form.dnsMode === "manual" ? form.domain.trim().toLowerCase() : "", dnsMode: form.dnsMode, zoneId: form.zoneId, port: Number(form.port), password: form.password, bandwidthMbps: bandwidth === "" ? null : Number(bandwidth), monthlyQuotaBytes: quota === "" ? null : Math.round(Number(quota) * (unit === "GB" ? 1e9 : 1e12)) });
+      const node = await api<Node>("/nodes", "POST", { name: form.name.trim(), serverId, addressId: form.addressId, domain: form.dnsMode === "manual" ? form.domain.trim().toLowerCase() : "", dnsMode: form.dnsMode, zoneId: form.zoneId, port: Number(form.port), password: form.password });
       setForm(p => ({ ...p, password: "" })); onClose(); navigate(`/nodes/${node.id}`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
@@ -87,8 +85,7 @@ function AddNode({ onClose }: { onClose: () => void }) {
       {form.dnsMode === "cloudflare" ? <Field label="Cloudflare 域名" hint="自动创建独立子域名和仅 DNS 的 A 记录"><select required value={form.zoneId} onChange={e => change("zoneId", e.target.value)}><option value="">选择域名</option>{settings.data?.defaultZoneId && !zones.some(z => z.id === settings.data!.defaultZoneId) && <option value={settings.data.defaultZoneId}>{settings.data.defaultZoneName}</option>}{zones.map(z => <option value={z.id} key={z.id} disabled={z.status !== "active"}>{z.name}</option>)}</select></Field> : <Field label="已有节点域名" hint="A 记录需指向所选 IP；HTTP 证书验证需要此 IP 的 TCP 80 可用"><input required value={form.domain} pattern="[^/ :]+[.][^/ :]+" onChange={e => change("domain", e.target.value)} placeholder="node.example.com" autoCapitalize="none" /></Field>}
       {!settings.data?.configured && <p className="muted"><Link to="/domains">配置 Cloudflare Token</Link> 后可自动分配域名。</p>}
       <div className="form-grid"><Field label="本次部署的 SSH 密码"><input type="password" required autoComplete="new-password" value={form.password} onChange={e => change("password", e.target.value)} /></Field><Field label="Hysteria UDP 端口"><input type="number" required min={1} max={65535} value={form.port} onChange={e => change("port", e.target.value)} /></Field></div>
-      <QuotaFields {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }} quotaLabel={servers.data?.find(server => server.id === serverId)?.billing?.status === "unconfigured" ? "月流量额度" : "每周期流量额度"} />
-      <Notice>每个 IP 的额度独立设置，统计周期与有效期随所属服务器。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。带宽和流量额度只作提醒。</Notice>
+      <Notice>节点记录实际上传与下载流量，统计周期随所属服务器。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。</Notice>
       <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy} icon={Plus}>添加并部署</Button></div>
     </form>
   </Modal>;
@@ -174,19 +171,11 @@ export function Nodes() {
                 </div>
               </div>
               <NodeAudience value={n.audience} />
-              <div className="node-quota-title">
+              <div className="node-traffic-summary">
                 <span>{billingUsageLabel(n)}</span>
-                <span>
-                  {n.monthlyQuotaBytes
-                    ? `${Math.round((billingTotal(n) / n.monthlyQuotaBytes) * 100)}%`
-                    : "不限量"}
-                </span>
+                <strong>{bytes(billingTotal(n))}</strong>
+                <small>上传 {bytes(billingFor(n).cycleUpload)} · 下载 {bytes(billingFor(n).cycleDownload)}</small>
               </div>
-              <Meter
-                value={billingTotal(n)}
-                max={n.monthlyQuotaBytes}
-                label
-              />
               {!billingFor(n).cycleComplete && <p className="billing-help">数据不完整，按已知用量计算</p>}
               <BillingSummary resource={n} compact followsServer />
               <div className="node-card-bottom">
@@ -229,7 +218,7 @@ export function Nodes() {
       )}
       <div className="footnote">
         <ShieldCheck size={14} />
-        网站仅显示通过真实代理测试的可用节点；带宽与流量额度仅作提醒。
+        网站仅显示通过真实代理测试的可用节点；流量统计为实际代理用量，不含探测。
       </div>
       {add && <AddNode onClose={close} />}
     </>
@@ -246,26 +235,12 @@ function EditNode({
   refresh: () => Promise<void>;
 }) {
   const [name, setName] = useState(node.name),
-    [bandwidth, setBandwidth] = useState(
-      node.bandwidthMbps === null ? "" : String(node.bandwidthMbps),
-    ),
-    [unit, setUnit] = useState(
-      node.monthlyQuotaBytes && node.monthlyQuotaBytes >= 1e12 ? "TB" : "GB",
-    ),
-    [quota, setQuota] = useState(
-      node.monthlyQuotaBytes === null
-        ? ""
-        : String(
-            node.monthlyQuotaBytes /
-              (node.monthlyQuotaBytes >= 1e12 ? 1e12 : 1e9),
-          ),
-    ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
     <Modal
       title="编辑节点设置"
-      description="调整名称和容量记录，变更不会中断现有连接。"
+      description="调整节点名称，变更不会中断现有连接。"
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -279,11 +254,6 @@ function EditNode({
           try {
             await api(`/nodes/${node.id}`, "PATCH", {
               name: name.trim(),
-              bandwidthMbps: bandwidth === "" ? null : Number(bandwidth),
-              monthlyQuotaBytes:
-                quota === ""
-                  ? null
-                  : Math.round(Number(quota) * (unit === "GB" ? 1e9 : 1e12)),
             });
             await refresh();
             onClose();
@@ -302,11 +272,6 @@ function EditNode({
             onChange={(e) => setName(e.target.value)}
           />
         </Field>
-        <QuotaFields
-          {...{ bandwidth, setBandwidth, quota, setQuota, unit, setUnit }}
-          quotaLabel={billingQuotaLabel(node)}
-        />
-        <Notice>额度仅提醒，不限速、不断网；修改额度不清除用量。节点周期跟随服务器，到期与续期请在服务器详情中管理。</Notice>
         <ErrorNotice message={error} />
         <div className="modal-actions">
           <Button variant="secondary" type="button" onClick={onClose}>
@@ -521,7 +486,7 @@ export function NodePage() {
           unit={bytes(cycleTotal).split(" ")[1]}
           icon={Activity}
           hint={
-            (node.monthlyQuotaBytes ? `额度 ${bytes(node.monthlyQuotaBytes)} · 仅提醒` : "额度无限制") + (!billing.cycleComplete ? " · 按已知用量计算" : "")
+            "上传 + 下载 · 不含探测" + (!billing.cycleComplete ? " · 按已知用量计算" : "")
           }
         />
         <StatCard
@@ -589,15 +554,6 @@ export function NodePage() {
               </dd>
             </div>
             <div>
-              <dt>带宽容量</dt>
-              <dd>
-                {node.bandwidthMbps === null
-                  ? "无限制"
-                  : `${node.bandwidthMbps} Mbps`}{" "}
-                <span className="muted">· 参考值</span>
-              </dd>
-            </div>
-            <div>
               <dt>配置同步</dt>
               <dd>
                 <Badge
@@ -632,16 +588,8 @@ export function NodePage() {
         <Panel title={billing.status === "unconfigured" ? "本月用量（待设置到期）" : "本周期用量"} subtitle={billing.status === "unconfigured" ? "暂按北京时间自然月 · 上传 + 下载" : "跟随所属服务器周期 · 上传 + 下载"}>
           <div className="usage-hero">
             <strong>{!billing.cycleComplete ? "已知 " : ""}{bytes(cycleTotal)}</strong>
-            <span>
-              {node.monthlyQuotaBytes
-                ? `/ ${bytes(node.monthlyQuotaBytes)}`
-                : "无限额度"}
-            </span>
           </div>
-          <div className="usage-meter">
-            <Meter value={cycleTotal} max={node.monthlyQuotaBytes} />
-            {!billing.cycleComplete && <p className="billing-help">数据不完整，按已知用量计算</p>}
-          </div>
+          {!billing.cycleComplete && <p className="billing-help">数据不完整，按已知用量计算</p>}
           <div className="usage-breakdown">
             <div>
               <span>
@@ -659,8 +607,7 @@ export function NodePage() {
             </div>
           </div>
           <div className="usage-note">
-            代理流量不等同服务商账单。额度到达 80% / 100%
-            时提醒，连接继续正常工作。<br />自然月流量 {bytes(month)} · 累计 {bytes(node.totalUpload + node.totalDownload)}，续期后保留。
+            统计实际代理上传与下载，不含探测流量，不等同服务商账单。<br />自然月流量 {bytes(month)} · 累计 {bytes(node.totalUpload + node.totalDownload)}，续期后保留。
           </div>
         </Panel>
       </div>

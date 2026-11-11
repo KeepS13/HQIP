@@ -136,9 +136,9 @@ type alertRow struct {
 
 const alertColumns = "id,key,condition,status,acknowledged,ack_by,ack_at,first_seen,last_seen,ended_at,revision,since,missing_since"
 
-// Derive the policy at read time so existing installation failures immediately
-// stop requiring acknowledgement without rewriting their human audit history.
-const alertAcknowledgementRequiredSQL = "COALESCE(json_extract(condition,'$.kind'),'')!='" + model.DeploymentFailureKind + "'"
+// Derive the policy at read time without rewriting human audit history.
+// Keep in sync with model.NotificationCondition.RequiresAcknowledgement.
+const alertAcknowledgementRequiredSQL = "COALESCE(json_extract(condition,'$.kind'),'') NOT IN ('" + model.DeploymentFailureKind + "','node.month','node.cycle')"
 
 type alertScanner interface{ Scan(...any) error }
 

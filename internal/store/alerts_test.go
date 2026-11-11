@@ -96,7 +96,7 @@ func TestAlertLifecycleUnknownAcknowledgementEscalationAndRetention(t *testing.T
 }
 func TestAlertQuotaCycleAndReopenPersistAcrossRestart(t *testing.T) {
 	s, now := fixture(t)
-	c := model.NotificationCondition{Key: "node.month:x:2026-10", Kind: "node.month", Category: "capacity", Title: "月容量", Message: "80%", Stage: 80}
+	c := model.NotificationCondition{Key: "server.month:x:2026-10", Kind: "server.month", Category: "capacity", Title: "月容量", Message: "80%", Stage: 80}
 	alertEval(t, s, c)
 	a := alertList(t, s)[0]
 	_, err := s.UpdateAlert(a.ID, "admin", model.AlertUpdate{ExpectedRevision: a.Revision, Acknowledge: true})
@@ -119,7 +119,7 @@ func TestAlertQuotaCycleAndReopenPersistAcrossRestart(t *testing.T) {
 	if alertList(t, s)[0].Status != "ended" {
 		t.Fatal("quota removal must end not recover")
 	}
-	c.Key = "node.month:x:2026-11"
+	c.Key = "server.month:x:2026-11"
 	alertEval(t, s, c)
 	if len(alertList(t, s)) != 2 {
 		t.Fatal("month not isolated")

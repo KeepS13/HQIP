@@ -15,9 +15,9 @@ func TestDeploymentFailuresDoNotRequireAcknowledgement(t *testing.T) {
 	}
 	s.FinishJob(job, false)
 
-	// Every other kind, including verification/cleanup jobs and a title that
+	// Other current kinds, including verification/cleanup jobs and a title that
 	// mentions deployment, must retain the existing confirmation requirement.
-	kinds := []string{"job.verify", "job.retire", "node.health", "certificate.issuance", "certificate.application", "node.month", "server.expiry", "legacy", ""}
+	kinds := []string{"job.verify", "job.retire", "node.health", "certificate.issuance", "certificate.application", "server.month", "server.cycle", "server.expiry", "legacy", ""}
 	conditions := make([]model.NotificationCondition, 0, len(kinds))
 	for _, kind := range kinds {
 		conditions = append(conditions, model.NotificationCondition{Key: "policy:" + kind, Kind: kind, Category: "system", Title: "部署失败相关提醒", Message: "Check condition", Level: "danger", Stage: 1})
