@@ -75,7 +75,7 @@ func TestNativeProfileCatalogBeforeSelectionIsCredentialFreeAndUserScoped(t *tes
 	if err := json.Unmarshal(w.Body.Bytes(), &profile); err != nil {
 		t.Fatal(err)
 	}
-	if profile.SubscriptionID != "" || len(profile.Nodes) != 0 || len(profile.Available) != 1 || profile.Available[0]["id"] != own.DefaultNodeID {
+	if profile.SubscriptionID != "" || len(profile.Nodes) != 0 || len(profile.Available) != 1 || profile.Available[0]["id"] != own.NodeIDs[0] {
 		t.Fatal("catalog changed selection or included inaccessible nodes", w.Body.String())
 	}
 	for _, key := range []string{"password", "sshPassword", "sshHost"} {
@@ -83,7 +83,7 @@ func TestNativeProfileCatalogBeforeSelectionIsCredentialFreeAndUserScoped(t *tes
 			t.Fatal("catalog exposed a secret field", key)
 		}
 	}
-	if strings.Contains(w.Body.String(), foreign.DefaultNodeID) {
+	if strings.Contains(w.Body.String(), foreign.NodeIDs[0]) {
 		t.Fatal("another user's node leaked in profile")
 	}
 	var credentials int

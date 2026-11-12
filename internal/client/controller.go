@@ -382,15 +382,9 @@ func (c *Controller) Sync(ctx context.Context) error {
 	}
 	if c.recoveryReady {
 		authorized := p.SubscriptionID == c.saved.SelectedSubscriptionID
-		found := false
-		for _, n := range p.Nodes {
-			if n.ID == c.saved.SelectedNodeID {
-				found = true
-			}
-		}
-		if !authorized || !found {
+		if !authorized {
 			c.mu.Unlock()
-			c.failGeneration(generation, "当前订阅或所选节点授权已移除，VPN 已关闭")
+			c.failGeneration(generation, "当前订阅授权已移除，VPN 已关闭")
 			return nil
 		}
 	}
@@ -404,7 +398,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 		}
 	}
 	if !allowed {
-		c.saved.SelectedNodeID = p.DefaultNodeID
+		c.saved.SelectedNodeID = automaticNode(p)
 	}
 	c.saved.Profile = p
 	c.saved.SelectedSubscriptionID = p.SubscriptionID
@@ -415,6 +409,11 @@ func (c *Controller) Sync(ctx context.Context) error {
 	c.etag = newTag
 	c.populateLocked(p)
 	c.view.DesiredNodeID = c.saved.SelectedNodeID
+	if c.saved.SelectedNodeID == "" {
+		c.view.LastError = "暂无可用节点，请稍后刷新或手动选择节点"
+	} else if c.view.LastError == "暂无可用节点，请稍后刷新或手动选择节点" {
+		c.view.LastError = ""
+	}
 	now := c.clockNow()
 	c.view.LastSync = &now
 	c.view.SyncError = ""
@@ -594,6 +593,9 @@ func (c *Controller) Select(id string) error {
 	c.rememberLocked()
 	c.selectionGeneration++
 	c.view.DesiredNodeID = id
+	if c.view.LastError == "暂无可用节点，请稍后刷新或手动选择节点" {
+		c.view.LastError = ""
+	}
 	c.generation++
 	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
@@ -666,6 +668,9 @@ func (c *Controller) applyLatest() {
 	c.mu.Unlock()
 	// Release the old transport before any candidate consumes another slot.
 	e := c.engine.Stop()
+	if e == nil && id == "" {
+		e = errors.New("暂无可用节点，请稍后刷新或手动选择节点")
+	}
 	if e == nil {
 		e = api.Drain(ctx, p.SubscriptionID, p.SelectionRevision)
 	}

@@ -100,7 +100,6 @@ function TemplateEditor({
     String(template?.maxConnections || 1),
   );
   const [selected, setSelected] = useState(template?.nodeIds || []);
-  const [defaultNodeId, setDefault] = useState(template?.defaultNodeId || "");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [preview, setPreview] = useState<SubscriptionImpact | null>(null);
@@ -114,7 +113,6 @@ function TemplateEditor({
     quotaBytes: quota === "" ? null : Math.round(Number(quota) * 1e9),
     maxConnections: Number(maxConnections),
     nodeIds: selected,
-    defaultNodeId,
     ...(template ? { expectedRevision: template.revision } : {}),
   };
   const eligible = nodes.filter(
@@ -123,16 +121,12 @@ function TemplateEditor({
   const invalidSelected = selected.filter(
     (id) => !eligible.some((node) => node.id === id),
   );
-  const validDefaultNodes = eligible.filter((n) => selected.includes(n.id));
-  const invalidDefault =
-    !!defaultNodeId && !validDefaultNodes.some((n) => n.id === defaultNodeId);
   const available = nodes.filter(
     (n) => n.lifecycle === "active" && !invalidSelected.includes(n.id),
   );
   const groups = Array.from(new Set(available.map((n) => n.serverId || "")));
   function removeSelection(id: string) {
     setSelected((value) => value.filter((selectedId) => selectedId !== id));
-    if (defaultNodeId === id) setDefault("");
     setPreview(null);
     setError("");
   }
@@ -146,10 +140,6 @@ function TemplateEditor({
         throw new Error("有效期至少为 1 天，请填写整数");
       if (invalidSelected.length)
         throw new Error("请先移除下方不可用节点的引用，再保存订阅模板");
-      if (selected.length && (!defaultNodeId || invalidDefault))
-        throw new Error("请从已选活动节点中明确选择一个默认节点");
-      if (!selected.length && defaultNodeId)
-        throw new Error("未选择节点时，请清空默认节点");
       if (template && !preview) {
         setPreview(
           await api<SubscriptionImpact>(
@@ -279,7 +269,7 @@ function TemplateEditor({
             <div className="subscription-invalid-nodes">
               <h4>不可用节点引用 · {invalidSelected.length} 个</h4>
               <p>
-                这些节点已不在可选列表中或尚不支持订阅准入。请明确移除引用；系统不会替换默认节点。
+                这些节点已不在可选列表中或尚不支持订阅准入。请移除引用后再保存。
               </p>
               {invalidSelected.map((id) => {
                 const node = nodes.find((n) => n.id === id);
@@ -294,7 +284,6 @@ function TemplateEditor({
                           : node.lifecycle !== "active"
                             ? "节点已停止或退役"
                             : "节点内核需升级"}
-                        {defaultNodeId === id ? " · 当前默认节点" : ""}
                       </span>
                     </div>
                     <Button
@@ -369,14 +358,13 @@ function TemplateEditor({
               当前没有可选活动节点，可添加并升级节点后再分配。
             </p>
           )}
-          {!!(selected.length || defaultNodeId) && (
+          {!!selected.length && (
             <div className="subscription-picker-actions">
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => {
                   setSelected([]);
-                  setDefault("");
                   setPreview(null);
                   setError("");
                 }}
@@ -391,54 +379,9 @@ function TemplateEditor({
             当前未选择节点。保存后，该模板下的订阅将没有可连接节点，现有连接会停止；流量和有效期保留。
           </Notice>
         )}
-        <Field
-          label="默认节点"
-          hint="首次选择订阅或当前节点被移除时使用；默认节点不可用则停止连接。"
-        >
-          <select
-            required={selected.length > 0}
-            value={defaultNodeId}
-            onChange={(e) => setDefault(e.target.value)}
-          >
-            <option value="">
-              {selected.length ? "选择默认节点" : "无默认节点"}
-            </option>
-            {invalidDefault && (
-              <option value={defaultNodeId} disabled>
-                原默认节点不可用 ·{" "}
-                {nodes.find((n) => n.id === defaultNodeId)?.name ||
-                  defaultNodeId}
-              </option>
-            )}
-            {validDefaultNodes.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name} · {n.publicIp}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {invalidDefault && (
-          <Notice tone="warning">
-            {selected.includes(defaultNodeId)
-              ? "原默认节点已失效。请移除它的引用并选择有效默认节点，或明确清空全部节点。"
-              : "原默认节点不在已选节点中，请明确选择有效默认节点或清空默认设置。"}
-            {!selected.includes(defaultNodeId) && (
-              <div className="subscription-picker-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    setDefault("");
-                    setPreview(null);
-                    setError("");
-                  }}
-                >
-                  清空默认节点
-                </Button>
-              </div>
-            )}
-          </Notice>
-        )}
+        <Notice>
+          首次选择订阅或当前节点被移除时，系统优先选择在线人数最少的可用节点；人数相同时，依次比较服务器剩余流量和到期时间。当前节点仍在订阅内时保持原选择。
+        </Notice>
         <label className="account-checkbox">
           <input
             type="checkbox"

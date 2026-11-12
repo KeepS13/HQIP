@@ -180,7 +180,7 @@ func TestPortalSingBoxDefaultUnavailableDoesNotFallBack(t *testing.T) {
 	if err = s.Store.SetStatus(backup.ID, "ready", "test", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Store.DB.Exec(`UPDATE nodes SET capabilities='["admission-v1"]' WHERE id=?`, backup.ID); err != nil {
+	if _, err = s.Store.DB.Exec(`UPDATE nodes SET capabilities='["admission-v1"]',last_seen=?,core_healthy=1 WHERE id=?`, s.Store.Now().Unix(), backup.ID); err != nil {
 		t.Fatal(err)
 	}
 	template, err := s.Store.SubscriptionTemplate(sub.TemplateID)
@@ -196,8 +196,8 @@ func TestPortalSingBoxDefaultUnavailableDoesNotFallBack(t *testing.T) {
 	}
 	for _, suffix := range []string{"?format=singbox", "?format=singbox&download=1"} {
 		w := request(s.PublicHandler(), "GET", link+suffix, nil, "", "")
-		if w.Code != 503 || !strings.Contains(w.Body.String(), "默认节点尚未就绪") || strings.Contains(w.Body.String(), `"password"`) || w.Header().Get("Content-Disposition") != "" {
-			t.Fatal("default unavailable must fail without a fallback or credentials", w.Code)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), backup.Name+" · "+backup.ID) || strings.Contains(w.Body.String(), defaultNode.Name+" · "+defaultNode.ID) {
+			t.Fatal("service did not choose eligible replacement", w.Code, w.Body.String())
 		}
 	}
 	for _, suffix := range []string{"", "?format=v2ray"} {

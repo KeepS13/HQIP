@@ -42,6 +42,7 @@ func TestRecoveryTerminalAuthorizationReasons(t *testing.T) {
 			if err != nil && !retryable(err) {
 				f.c.stopRecovery(r, err.Error())
 			}
+			waitState(t, f.c, "failed")
 			v := f.c.View()
 			if v.ConnectionIntent || v.LastError == "" || v.RunState != "failed" || f.e.Alive() {
 				t.Fatalf("did not stop %s: %+v", kind, v.Status)

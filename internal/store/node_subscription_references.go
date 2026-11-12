@@ -25,7 +25,7 @@ func (e *NodeSubscriptionConflict) Error() string {
 	for _, template := range e.Templates {
 		names = append(names, template.Name)
 	}
-	return "节点仍被订阅模板引用（" + strings.Join(names, "、") + "），请先在订阅管理中移除该节点并确认默认节点，再删除节点"
+	return "节点仍被订阅模板引用（" + strings.Join(names, "、") + "），请先在订阅管理中移除该节点，再删除节点"
 }
 
 func (e *NodeSubscriptionConflict) Unwrap() error { return ErrConflict }
@@ -34,14 +34,12 @@ type nodeReferenceQuery interface {
 	Query(string, ...any) (*sql.Rows, error)
 }
 
-// Hidden and disabled templates retain their node references. Inspect both
-// membership and the default so an older inconsistent template also blocks
-// deletion. DeleteNode uses this query within its mutation transaction.
+// Hidden and disabled templates retain their membership references. Legacy
+// defaults are ignored. DeleteNode uses this query within its transaction.
 func nodeSubscriptionReferences(q nodeReferenceQuery, node string) ([]NodeSubscriptionReference, error) {
 	rows, err := q.Query(`SELECT id,config FROM portal_templates
-WHERE json_extract(config,'$.defaultNodeId')=?
-OR EXISTS(SELECT 1 FROM json_each(portal_templates.config,'$.nodeIds') WHERE value=?)
-ORDER BY id`, node, node)
+WHERE EXISTS(SELECT 1 FROM json_each(portal_templates.config,'$.nodeIds') WHERE value=?)
+ORDER BY id`, node)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +55,7 @@ ORDER BY id`, node, node)
 			return nil, err
 		}
 		refs = append(refs, NodeSubscriptionReference{ID: id, Name: template.Name,
-			DefaultNode: template.DefaultNodeID == node, Enabled: template.Enabled, Listed: template.Listed})
+			Enabled: template.Enabled, Listed: template.Listed})
 	}
 	return refs, rows.Err()
 }

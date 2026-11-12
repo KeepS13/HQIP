@@ -238,7 +238,6 @@ func (s *Store) PortalClientProfile(user, scope, subscriptionID string) (model.C
 	if e.Status != "active" {
 		return p, e, nil
 	}
-	p.DefaultNodeID = e.DefaultNodeID
 	for _, id := range e.NodeIDs {
 		n, err := s.Node(id)
 		if errors.Is(err, ErrNotFound) {
@@ -255,6 +254,18 @@ func (s *Store) PortalClientProfile(user, scope, subscriptionID string) (model.C
 			return p, e, err
 		}
 		p.Nodes = append(p.Nodes, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.PublicIP, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && s.nodeAdmissionCapable(id)})
+	}
+	// The wire field is retained for existing clients. It is a live suggestion,
+	// never a template setting or a reason to replace a still-authorized choice.
+	readyIDs := []string{}
+	for _, node := range p.Nodes {
+		if node.Ready {
+			readyIDs = append(readyIDs, node.ID)
+		}
+	}
+	p.DefaultNodeID, err = s.automaticSubscriptionNode(readyIDs)
+	if err != nil {
+		return p, e, err
 	}
 	var finalRevision int64
 	if err = s.DB.QueryRow("SELECT revision FROM portal_users WHERE id=?", user).Scan(&finalRevision); err != nil {

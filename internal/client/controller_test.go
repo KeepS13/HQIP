@@ -152,12 +152,12 @@ func TestFailedDefaultStopsWithoutFallback(t *testing.T) {
 	}
 	waitState(t, c, "failed")
 	v := c.View()
-	if v.ConnectionIntent || v.ActualNodeID != "" || v.DesiredNodeID != "A" || v.LastError == "" {
+	if v.ConnectionIntent || v.ActualNodeID != "" || v.DesiredNodeID != "B" || v.LastError == "" {
 		t.Fatalf("bad failed state %+v", v)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.alive || len(e.calls) != 1 || e.calls[0] != "A" {
+	if e.alive || len(e.calls) != 2 || e.calls[0] != "A" || e.calls[1] != "B" {
 		t.Fatalf("rollback or unexpected retry: %+v", e.calls)
 	}
 }

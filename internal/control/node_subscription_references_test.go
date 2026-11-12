@@ -43,7 +43,7 @@ func TestNodeDeletionRechecksSubscriptionReferencesAfterPreview(t *testing.T) {
 		Error                 string                            `json:"error"`
 		SubscriptionTemplates []store.NodeSubscriptionReference `json:"subscriptionTemplates"`
 	}
-	if err = json.Unmarshal(w.Body.Bytes(), &conflict); err != nil || w.Code != 409 || conflict.Code != "NODE_REFERENCED_BY_SUBSCRIPTIONS" || len(conflict.SubscriptionTemplates) != 1 || conflict.SubscriptionTemplates[0].ID != p.ID || !conflict.SubscriptionTemplates[0].DefaultNode {
+	if err = json.Unmarshal(w.Body.Bytes(), &conflict); err != nil || w.Code != 409 || conflict.Code != "NODE_REFERENCED_BY_SUBSCRIPTIONS" || len(conflict.SubscriptionTemplates) != 1 || conflict.SubscriptionTemplates[0].ID != p.ID || conflict.SubscriptionTemplates[0].DefaultNode {
 		t.Fatal("stale preview bypassed reference protection", w.Code, w.Body.String(), err)
 	}
 	w = request(h, "GET", previewPath, nil, admin, csrf)

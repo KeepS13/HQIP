@@ -60,7 +60,7 @@ func TestPortalEnabledCASDoesNotOverwriteNewerAssignment(t *testing.T) {
 func TestPortalProfileRetainsUnavailableDefaultWithoutFallback(t *testing.T) {
 	s, _, u, p, primary, _ := portalFixture(t, 1, nil)
 	other := newNode(t, s, "other-plan-node")
-	if _, err := s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]' WHERE id=?", other.ID); err != nil {
+	if _, err := s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]',last_seen=?,core_healthy=1 WHERE id=?", s.Now().Unix(), other.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetStatus(other.ID, "ready", "test", false); err != nil {
@@ -77,7 +77,7 @@ func TestPortalProfileRetainsUnavailableDefaultWithoutFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.DefaultNodeID != primary.ID || len(profile.Nodes) != 1 || profile.Nodes[0].ID != other.ID {
-		t.Fatal("profile silently replaced removed default")
+	if profile.DefaultNodeID != other.ID || len(profile.Nodes) != 1 || profile.Nodes[0].ID != other.ID {
+		t.Fatal("profile did not select the eligible replacement")
 	}
 }

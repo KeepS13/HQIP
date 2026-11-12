@@ -32,9 +32,6 @@ func validSubscriptionTemplate(p model.SubscriptionTemplate) error {
 		}
 		seen[id] = true
 	}
-	if len(seen) > 0 && !seen[p.DefaultNodeID] || len(seen) == 0 && p.DefaultNodeID != "" {
-		return errors.New("默认节点必须属于订阅")
-	}
 	return nil
 }
 
@@ -46,6 +43,7 @@ func subscriptionTemplate(q portalQuery, id string) (model.SubscriptionTemplate,
 		return p, notFound(err)
 	}
 	err = json.Unmarshal([]byte(raw), &p)
+	p.DefaultNodeID = "" // Legacy template defaults no longer select a node.
 	return p, err
 }
 func (s *Store) SubscriptionTemplate(id string) (model.SubscriptionTemplate, error) {
@@ -67,6 +65,7 @@ func (s *Store) SubscriptionTemplates(listedOnly bool) ([]model.SubscriptionTemp
 		if err = json.Unmarshal([]byte(raw), &p); err != nil {
 			return nil, err
 		}
+		p.DefaultNodeID = ""
 		if !listedOnly || p.Listed && p.Enabled {
 			out = append(out, p)
 		}
@@ -74,6 +73,7 @@ func (s *Store) SubscriptionTemplates(listedOnly bool) ([]model.SubscriptionTemp
 	return out, rows.Err()
 }
 func (s *Store) SaveSubscriptionTemplate(id string, p model.SubscriptionTemplate, expected int64) (model.SubscriptionTemplate, error) {
+	p.DefaultNodeID = ""
 	if err := validSubscriptionTemplate(p); err != nil {
 		return p, err
 	}
@@ -172,7 +172,6 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	e.BandwidthMbps = t.BandwidthMbps
 	e.MaxConnections = t.MaxConnections
 	e.NodeIDs = t.NodeIDs
-	e.DefaultNodeID = t.DefaultNodeID
 	e.Status = "active"
 	if e.NodeIDs == nil {
 		e.NodeIDs = []string{}

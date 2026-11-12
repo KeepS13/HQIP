@@ -126,16 +126,14 @@ export function DeleteNode({
                   请先解除 {references.length} 个订阅模板的节点引用
                 </strong>
                 <p>
-                  隐藏或停用的模板也需处理。打开模板，移除此节点并明确选择新的默认节点；也可清空全部节点。
+                  隐藏或停用的模板也需处理。打开模板，移除此节点后，系统会为受影响的用户自动选择可用节点；也可清空全部节点。
                 </p>
                 {references.map((template) => (
                   <div className="node-deletion-reference" key={template.id}>
                     <div>
                       <strong>{template.name}</strong>
                       <div className="node-deletion-reference-badges">
-                        <Badge tone={template.defaultNode ? "warning" : "info"}>
-                          {template.defaultNode ? "默认节点" : "可用节点"}
-                        </Badge>
+                        <Badge tone="info">可用节点</Badge>
                         {!template.enabled && (
                           <Badge tone="muted">已停用</Badge>
                         )}

@@ -26,7 +26,7 @@ func TestPortalSubscriptionRotationRejectsInFlightOldURL(t *testing.T) {
 			if err = s.Store.SetStatus(n.ID, "ready", "test", false); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = s.Store.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]' WHERE id=?", n.ID); err != nil {
+			if _, err = s.Store.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]',last_seen=?,core_healthy=1 WHERE id=?", s.Store.Now().Unix(), n.ID); err != nil {
 				t.Fatal(err)
 			}
 			sub := subscriptionFixture(t, s, u, []string{n.ID}, n.ID, 2)

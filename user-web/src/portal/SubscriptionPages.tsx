@@ -486,7 +486,7 @@ export function UserSubscriptionDetail() {
                   </Badge>
                 </div>
                 <h3>{n.name}</h3>
-                <p>{n.id === value.defaultNodeId ? "默认节点" : "可选节点"}</p>
+                <p>可选节点</p>
                 <small className="muted">
                   {n.publicIp || n.server || ""}
                   {n.sni || n.domain ? ` · ${n.sni || n.domain}` : ""}

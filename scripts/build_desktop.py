@@ -5,7 +5,7 @@ import argparse,hashlib,json,os,pathlib,subprocess,tempfile,urllib.request,zipfi
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 OUT=ROOT/'dist/desktop'
 VERSION='1.14.4'
-DESKTOP_VERSION='4.3.4'
+DESKTOP_VERSION='4.3.5'
 ZIP_HASH='99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df'
 CORE_HASH='8f30682ee198855440d2a7fe070d5d3653793b2d01bb8c85eea88f93bbe7c8b9'
 RESOURCE_TOOL=ROOT/'desktop/build/windows'

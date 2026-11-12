@@ -43,7 +43,16 @@ func (c *Controller) rememberedNodeLocked(p Profile) string {
 			return id
 		}
 	}
-	return p.DefaultNodeID
+	return automaticNode(p)
+}
+
+func automaticNode(p Profile) string {
+	for _, node := range p.Nodes {
+		if node.ID == p.DefaultNodeID && node.Ready {
+			return node.ID
+		}
+	}
+	return ""
 }
 
 // Restore only an explicit choice previously made by this account on this PC.
@@ -296,6 +305,9 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 	c.view.SyncError = ""
 	c.view.LastError = ""
 	c.view.ProcessedConfigRevision = p.Revision
+	if c.saved.SelectedNodeID == "" {
+		c.view.LastError = "暂无可用节点，请稍后刷新或手动选择节点"
+	}
 	on := c.view.ConnectionIntent
 	if !on {
 		c.view.RunState = "cached"

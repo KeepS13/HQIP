@@ -30,7 +30,7 @@ func TestNodeDeletionBlocksAllTemplateReferencesWithoutMutation(t *testing.T) {
 	for _, r := range refs {
 		byID[r.ID] = r
 	}
-	if !byID[active.ID].DefaultNode || byID[disabled.ID].DefaultNode || byID[disabled.ID].Enabled || byID[disabled.ID].Listed {
+	if byID[active.ID].DefaultNode || byID[disabled.ID].DefaultNode || byID[disabled.ID].Enabled || byID[disabled.ID].Listed {
 		t.Fatal("reference roles or disabled template omitted", byID)
 	}
 	var beforeJobs string
@@ -83,9 +83,8 @@ func TestNodeDeletionAlsoBlocksDanglingDefaultReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.DeleteNode(n.ID, model.NodeDeleteOptions{ExpectedRevision: n.Revision})
-	var conflict *NodeSubscriptionConflict
-	if !errors.As(err, &conflict) || len(conflict.Templates) != 1 || !conflict.Templates[0].DefaultNode {
-		t.Fatal("dangling default ignored", err)
+	if err != nil {
+		t.Fatal("obsolete default blocked deletion", err)
 	}
 }
 

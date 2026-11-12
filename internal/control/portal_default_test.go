@@ -1,6 +1,7 @@
 package control
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/KeepS13/HQIP/internal/model"
@@ -19,12 +20,16 @@ func TestPortalSubscriptionDefaultOrderAndUnavailableRequiresSelection(t *testin
 		if err = s.Store.SetStatus(n.ID, "ready", "test", false); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = s.Store.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]' WHERE id=?", n.ID); err != nil {
+		if _, err = s.Store.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]',last_seen=?,core_healthy=1 WHERE id=?", s.Store.Now().Unix(), n.ID); err != nil {
 			t.Fatal(err)
 		}
 		nodes = append(nodes, n)
 	}
-	sub := subscriptionFixture(t, s, u, []string{nodes[0].ID, nodes[1].ID}, nodes[1].ID, 1)
+	// Prefer the unlimited server even though the stored legacy default is first.
+	if _, err := s.Store.DB.Exec("UPDATE servers SET config=json_set(config,'$.monthlyQuotaBytes',1000) WHERE id=?", nodes[0].ServerID); err != nil {
+		t.Fatal(err)
+	}
+	sub := subscriptionFixture(t, s, u, []string{nodes[0].ID, nodes[1].ID}, nodes[0].ID, 1)
 	link, err := s.Store.PortalSubscription(u.ID, sub.ID, "create")
 	if err != nil {
 		t.Fatal(err)
@@ -32,11 +37,13 @@ func TestPortalSubscriptionDefaultOrderAndUnavailableRequiresSelection(t *testin
 	if err = s.Store.ActivatePortal(); err != nil {
 		t.Fatal(err)
 	}
-	for _, defaultReady := range []bool{true, false} {
-		if !defaultReady {
+	for _, preferredReady := range []bool{true, false} {
+		wantNode := nodes[1]
+		if !preferredReady {
 			if err = s.Store.SetStatus(nodes[1].ID, "pending_verification", "test", false); err != nil {
 				t.Fatal(err)
 			}
+			wantNode = nodes[0]
 		}
 		w := request(s.PublicHandler(), "GET", link, nil, "", "")
 		if w.Code != 200 {
@@ -53,18 +60,18 @@ func TestPortalSubscriptionDefaultOrderAndUnavailableRequiresSelection(t *testin
 		if err = yaml.Unmarshal(w.Body.Bytes(), &config); err != nil {
 			t.Fatal(err)
 		}
-		if defaultReady {
-			want := nodes[1].Name + " · " + nodes[1].ID
-			if len(config.Proxies) != 2 || len(config.Groups) != 1 || config.Proxies[0].Name != want || config.Groups[0].Proxies[0] != want {
-				t.Fatal("subscription did not select plan default first")
-			}
-		} else if len(config.Proxies) != 1 || len(config.Groups) != 2 || config.Groups[0].Proxies[0] != "默认节点不可用，请手动选择" || config.Groups[1].Name != config.Groups[0].Proxies[0] || len(config.Groups[1].Proxies) != 1 || config.Groups[1].Proxies[0] != "REJECT" || len(config.Groups[0].Proxies) != 2 {
-			t.Fatal("unavailable default silently selected a different node")
+		want := wantNode.Name + " · " + wantNode.ID
+		if len(config.Proxies) == 0 || len(config.Groups) != 1 || config.Proxies[0].Name != want || config.Groups[0].Proxies[0] != want || config.Groups[0].Type != "select" {
+			t.Fatal("export did not use service-selected node first")
 		}
-		for _, group := range config.Groups {
-			if group.Type != "select" {
-				t.Fatal("subscription added automatic switching")
-			}
+	}
+	if _, err = s.Store.DB.Exec("UPDATE nodes SET last_seen=0"); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "?format=v2ray", "?format=singbox"} {
+		w := request(s.PublicHandler(), "GET", link+suffix, nil, "", "")
+		if w.Code != 503 || !strings.Contains(w.Body.String(), "暂无可用节点") || strings.Contains(w.Body.String(), "password") {
+			t.Fatal("empty automatic selection exported an arbitrary node", w.Code)
 		}
 	}
 }

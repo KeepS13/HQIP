@@ -594,8 +594,8 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 			proxies = append(proxies, proxy)
 		}
 	}
-	if len(proxies) == 0 {
-		fail(w, 503, "此订阅尚无可用节点")
+	if !defaultReady {
+		fail(w, 503, errPortalDefaultNodeUnavailable.Error())
 		return
 	}
 	var body []byte
@@ -604,10 +604,6 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		body, err = portalV2RaySubscription(p)
 		contentType = "text/plain; charset=utf-8"
 	} else if format == "singbox" {
-		if !defaultReady {
-			fail(w, 503, errPortalDefaultNodeUnavailable.Error())
-			return
-		}
 		v, rulesErr := s.Store.Rules()
 		if rulesErr != nil {
 			portalResult(w, nil, rulesErr)
@@ -627,11 +623,6 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		groups := []map[string]any{}
-		if !defaultReady {
-			const unavailable = "默认节点不可用，请手动选择"
-			names = append([]string{unavailable}, names...)
-			groups = append(groups, map[string]any{"name": unavailable, "type": "select", "proxies": []string{"REJECT"}})
-		}
 		groups = append([]map[string]any{{"name": "节点选择", "type": "select", "proxies": names}}, groups...)
 		body, err = yaml.Marshal(map[string]any{"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": groups, "rules": rules})
 	}

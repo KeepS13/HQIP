@@ -10,7 +10,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/rules"
 )
 
-var errPortalDefaultNodeUnavailable = errors.New("默认节点尚未就绪，请等待恢复或联系管理员调整默认节点")
+var errPortalDefaultNodeUnavailable = errors.New("暂无可用节点，请稍后刷新或联系管理员")
 
 // portalSingBoxSubscription produces a complete remote profile for the official
 // Android and Apple clients. It targets the same sing-box 1.14.4 as HQIP, without
