@@ -5,6 +5,7 @@ import { api, usePolling } from "../api";
 import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, TrafficChart, bytes, date, useToast } from "../components";
 import QuotaFields from "../QuotaFields";
 import { hasNodeReport } from "../monitoring";
+import { compareResourceNames } from "../resource-order";
 import { billingExpiry, billingFor, billingTotal, billingUsageLabel, defaultServerExpiry, parseBeijingExpiry } from "../billing";
 import { BillingSummary, ExpiryFields, ServerBillingSettings } from "./ServerBilling";
 import type { ManagedServer, ServerAddress, Node, TrafficPoint } from "../types";
@@ -110,7 +111,7 @@ export function Servers() {
   const [add, setAdd] = useState(false), [search, setSearch] = useState(""), [abnormal, setAbnormal] = useState(false);
   const navigate = useNavigate();
   const query = search.trim().toLowerCase();
-  const visible = (data || []).filter(server => (!query || [server.name, server.sshHost, ...(server.addresses || []).map(address => address.ip)].some(value => value.toLowerCase().includes(query))) && (!abnormal || serverHealth(server, !!error).tone === "warning" || billingExpiry(billingFor(server)).abnormal));
+  const visible = (data || []).filter(server => (!query || [server.name, server.sshHost, ...(server.addresses || []).map(address => address.ip)].some(value => value.toLowerCase().includes(query))) && (!abnormal || serverHealth(server, !!error).tone === "warning" || billingExpiry(billingFor(server)).abnormal)).sort(compareResourceNames);
   return <>
     <PageHeader title="服务器" eyebrow="SERVERS" description="按 VPS 汇总资源、节点速率与代理用量，独立管理每个公网 IP。" actions={<><RefreshButton refresh={refresh} /><Button icon={Plus} onClick={() => setAdd(true)}>添加服务器</Button></>} />
     <ErrorNotice message={error ? `${error}${data ? "；以下保留上次成功数据，已标记过期。" : ""}` : ""} retry={() => void refresh()} />

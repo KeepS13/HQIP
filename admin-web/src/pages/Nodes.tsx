@@ -55,6 +55,7 @@ import {
 import { DeployNode, DeleteNode, RetireNode, DeletedNodeNotice } from "./NodeActions";
 import { NetworkQuality } from "./NetworkQuality";
 import { NodeAudience, type NodeListItem } from "../NodeAudience";
+import { compareResourceNames } from "../resource-order";
 import type { Node, NodeDetail, TaskEvent, ManagedServer, ServerAddress, CloudflareSettings, CloudflareZone } from "../types";
 
 function AddNode({ onClose }: { onClose: () => void }) {
@@ -100,7 +101,7 @@ export function Nodes() {
       `${n.name} ${n.domain} ${n.publicIp}`
         .toLowerCase()
         .includes(search.toLowerCase()),
-    );
+    ).sort(compareResourceNames);
   function close() {
     setParams((p) => {
       p.delete("add");

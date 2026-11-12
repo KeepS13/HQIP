@@ -404,6 +404,9 @@ select option {
   padding: 33px 37px 0;
   animation: fade-up 0.25s ease;
 }
+.page-content.inventory-page {
+  max-width: 1920px;
+}
 .page-heading {
   display: flex;
   justify-content: space-between;
@@ -1194,9 +1197,10 @@ tbody tr:hover {
   background: #171d29;
   border-color: #2e374a;
 }
+.server-grid,
 .node-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr));
   gap: 20px;
   margin-bottom: 20px;
 }
@@ -2481,9 +2485,6 @@ tbody tr:hover {
   .stat-hint {
     font-size: 8px;
   }
-  .node-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .page-heading {
     gap: 15px;
   }
@@ -2659,9 +2660,6 @@ tbody tr:hover {
   }
   .page-heading {
     margin-bottom: 24px;
-  }
-  .node-grid {
-    gap: 17px;
   }
   .overview-middle {
     grid-template-columns: minmax(0, 1fr) 235px;
@@ -2881,10 +2879,6 @@ tbody tr:hover {
   }
   .chart-legend {
     padding-left: 17px;
-  }
-  .node-grid {
-    grid-template-columns: 1fr;
-    gap: 15px;
   }
   .node-card {
     padding: 20px;
@@ -3369,7 +3363,6 @@ tbody tr:hover {
 }
 
 /* Server summaries share host resources while aggregating per-node proxy use. */
-.server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 20px; margin-bottom: 20px; }
 .server-card { display: flex; flex-direction: column; min-width: 0; color: #dce2f4; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; transition: border-color .2s, transform .2s, box-shadow .2s; }
 .server-card:hover { color: #edf0ff; border-color: #7872b6; transform: translateY(-2px); box-shadow: 0 12px 30px #0b0b1b44; }
 .server-card:focus-visible { outline: 2px solid #beb2ff; outline-offset: 4px; }
@@ -3419,7 +3412,7 @@ tbody tr:hover {
 .server-detail-quota > p { margin: 12px 0 0; font-size: 11px; color: #aeb5ce; line-height: 1.6; }
 .chart-state { margin: 0; padding: 10px 22px 0; color: #e0bd7a; font-size: 11px; line-height: 1.6; }
 @media (max-width: 700px) {
-  .server-grid { grid-template-columns: 1fr; gap: 16px; }
+  .server-grid, .node-grid { grid-template-columns: 1fr; gap: 16px; }
   .server-toolbar { align-items: stretch; }
   .server-filters { width: 100%; }
   .server-filters .search-input { width: auto; flex: 1; min-width: 0; }

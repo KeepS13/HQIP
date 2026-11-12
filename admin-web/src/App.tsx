@@ -505,7 +505,7 @@ export default function App() {
               </button>
             </div>
           </header>
-          <main className="page-content">
+          <main className={`page-content${["/servers", "/nodes"].includes(location.pathname.replace(/\/$/, "")) ? " inventory-page" : ""}`}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/servers" element={<Servers />} />
