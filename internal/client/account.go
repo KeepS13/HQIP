@@ -284,6 +284,10 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 	timeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	state, err := api.Connections(timeout)
+	if errors.Is(err, ErrUnauthorized) {
+		_ = c.expireSession(api)
+		return
+	}
 	c.mu.Lock()
 	current := c.api == api && c.selectionGeneration == selection && c.generation == generation && !c.view.SelectionPending && !c.closed
 	if !current {

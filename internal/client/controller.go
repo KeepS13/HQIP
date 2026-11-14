@@ -162,6 +162,19 @@ func (c *Controller) Logout() error {
 }
 
 func (c *Controller) logoutFor(expected *API) error {
+	return c.endSession(expected, false)
+}
+
+// Expiry belongs to the account session, not one connection generation. A
+// delayed response from a replaced API must never sign out the new account.
+func (c *Controller) expireSession(expected *API) error {
+	if expected == nil {
+		return nil
+	}
+	return c.endSession(expected, true)
+}
+
+func (c *Controller) endSession(expected *API, expired bool) error {
 	if !c.beginWork() {
 		return context.Canceled
 	}
@@ -183,10 +196,16 @@ func (c *Controller) logoutFor(expected *API) error {
 	if c.cancelApply != nil {
 		c.cancelApply()
 	}
+	if c.nodeTest != nil {
+		c.nodeTest.cancel()
+		c.nodeTest = nil
+	}
 	c.view.ConnectionIntent = false
 	c.mu.Unlock()
-	_ = c.engine.Stop()
-	if api != nil {
+	stopErr := c.engine.Stop()
+	// Rejected credentials cannot revoke anything remotely. Do not make login
+	// expiry wait on another network request or attempt a second token refresh.
+	if api != nil && !expired {
 		ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
 		_ = api.Logout(ctx)
 		cancel()
@@ -198,11 +217,28 @@ func (c *Controller) logoutFor(expected *API) error {
 	c.saved.Profile = Profile{}
 	c.saved.SelectedNodeID = ""
 	c.saved.SelectedSubscriptionID = ""
+	c.cancelSelection = nil
+	c.cancelApply = nil
+	c.autoNodeTestAPI = nil
+	c.restoreSelection = false
+	c.suspended = false
 	c.bundle = rules.Bundle{}
 	c.etag = ""
 	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, RunState: "disconnected", CoreVersion: CoreVersion}}
+	if expired {
+		c.view.LastError = ErrUnauthorized.Error()
+	}
 	_ = os.Remove(filepath.Join(c.dir, "rules.json"))
-	return c.persistLocked()
+	persistErr := c.persistLocked()
+	if persistErr != nil {
+		// If writing the logged-out state fails, remove the old encrypted session
+		// rather than restoring its invalid credentials on the next launch.
+		if err := os.Remove(filepath.Join(c.dir, "session.dat")); err != nil && !os.IsNotExist(err) {
+			persistErr = errors.Join(persistErr, err)
+		}
+		_ = os.Remove(filepath.Join(c.dir, "session.tmp"))
+	}
+	return errors.Join(stopErr, persistErr)
 }
 func (c *Controller) Run(ctx context.Context) {
 	if !c.beginWork() {
@@ -273,6 +309,10 @@ func (c *Controller) Sync(ctx context.Context) error {
 	}
 	p, newTag, unchanged, e := api.Profile(ctx, etag)
 	if e != nil {
+		if errors.Is(e, ErrUnauthorized) {
+			_ = c.expireSession(api)
+			return e
+		}
 		if errors.Is(e, context.Canceled) {
 			return e
 		}
@@ -312,7 +352,7 @@ func (c *Controller) Sync(ctx context.Context) error {
 		return nil
 	}
 	if !p.Enabled {
-		c.failGeneration(generation, "账号授权已撤销，请重新登录")
+		_ = c.expireSession(api)
 		return ErrUnauthorized
 	}
 	if subscriptionFailure(p, c.clockNow()) != nil {
@@ -332,6 +372,10 @@ func (c *Controller) Sync(ctx context.Context) error {
 	if old.Rules.Hash != p.Rules.Hash || len(b.Rules) == 0 {
 		data, e := api.Rules(ctx, p.Rules.URL)
 		if e != nil {
+			if errors.Is(e, ErrUnauthorized) {
+				_ = c.expireSession(api)
+				return e
+			}
 			if retryable(e) {
 				c.mu.Lock()
 				if c.api == api && c.generation == generation {
@@ -680,12 +724,18 @@ func (c *Controller) applyLatest() {
 	if e == nil {
 		e = c.engine.Apply(ctx, p, b, id, mode, tun, server)
 	}
-	if e != nil && ctx.Err() == nil {
-		if state, err := api.Connections(ctx); err == nil && state.Message != "" {
+	if e != nil && !errors.Is(e, ErrUnauthorized) && ctx.Err() == nil {
+		if state, err := api.Connections(ctx); errors.Is(err, ErrUnauthorized) {
+			e = err
+		} else if err == nil && state.Message != "" {
 			e = errors.New(state.Message)
 		}
 	}
 	cancel()
+	if errors.Is(e, ErrUnauthorized) {
+		_ = c.expireSession(api)
+		return
+	}
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	if e != nil {
@@ -735,7 +785,12 @@ func (c *Controller) report() {
 	}
 	ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
 	defer cancel()
-	_ = api.Report(ctx, s)
+	if err := api.Report(ctx, s); errors.Is(err, ErrUnauthorized) {
+		// Some callers hold routeMu until reporting finishes. Clean up in a
+		// tracked worker so expiry cannot deadlock that route operation.
+		c.launch(func() { _ = c.expireSession(api) })
+		return
+	}
 	c.mu.Lock()
 	if c.api == api && !c.closed {
 		_ = c.persistLocked()

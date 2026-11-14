@@ -172,6 +172,9 @@ func (c *Controller) recoveryAttempt(r *recoveryRun) (bool, error) {
 	before, err := r.api.Connections(ctx)
 	cancel()
 	if err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			_ = c.expireSession(r.api)
+		}
 		return false, err
 	}
 	if before.MaxConnections > 0 && before.Occupied >= before.MaxConnections && !matchingLease(before, r.subscription, r.node, c.clockNow()) {
@@ -193,6 +196,9 @@ func (c *Controller) recoveryAttempt(r *recoveryRun) (bool, error) {
 	state, err := r.api.Connections(ctx)
 	cancel()
 	if err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			_ = c.expireSession(r.api)
+		}
 		return false, err
 	}
 	// A successful probe alone is insufficient: admission must be confirmed.

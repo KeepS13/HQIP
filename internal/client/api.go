@@ -79,7 +79,9 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	if e != nil {
 		return nil, "", resp.StatusCode, temporary(errors.New("账户服务响应中断"))
 	}
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+	// Native authentication failures are 401. A 403 can be a subscription
+	// entitlement failure and must not discard an otherwise valid login.
+	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, "", resp.StatusCode, ErrUnauthorized
 	}
 	if resp.StatusCode == http.StatusConflict {

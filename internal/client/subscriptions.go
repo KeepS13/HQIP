@@ -207,6 +207,10 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 			if err != nil || !current() {
 				break
 			}
+			if !fresh.Enabled {
+				err = ErrUnauthorized
+				break
+			}
 			err = api.Drain(ctx, fresh.SubscriptionID, fresh.SelectionRevision)
 			if errors.Is(err, ErrConflict) {
 				continue
@@ -230,7 +234,9 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 	var bundle rules.Bundle
 	var data []byte
 	if err == nil && current() {
-		if !p.Enabled || !usableSubscription(p) || p.SubscriptionID != id {
+		if !p.Enabled {
+			err = ErrUnauthorized
+		} else if !usableSubscription(p) || p.SubscriptionID != id {
 			err = errors.New("订阅已失效，VPN 已关闭，请重新选择")
 		} else {
 			if nodeID != "" {
@@ -260,6 +266,10 @@ func (c *Controller) changeSubscription(ctx context.Context, cancel context.Canc
 				err = rules.Validate(bundle)
 			}
 		}
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		_ = c.expireSession(api)
+		return
 	}
 	c.routeMu.Lock()
 	c.mu.Lock()

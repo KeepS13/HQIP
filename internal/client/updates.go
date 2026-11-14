@@ -17,7 +17,7 @@ import (
 )
 
 // Official bundles inject the same version as their release manifest.
-var AppVersion = "4.3.5-dev"
+var AppVersion = "4.3.6-dev"
 
 type UpdateView struct {
 	CurrentVersion string     `json:"currentVersion"`

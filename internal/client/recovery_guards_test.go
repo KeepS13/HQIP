@@ -42,9 +42,16 @@ func TestRecoveryTerminalAuthorizationReasons(t *testing.T) {
 			if err != nil && !retryable(err) {
 				f.c.stopRecovery(r, err.Error())
 			}
+			if kind == "account" {
+				v := f.c.View()
+				if !errors.Is(err, ErrUnauthorized) || v.LoggedIn || v.ConnectionIntent || v.RunState != "disconnected" || f.e.Alive() {
+					t.Fatalf("revoked account did not log out: %+v, %v", v, err)
+				}
+				return
+			}
 			waitState(t, f.c, "failed")
 			v := f.c.View()
-			if v.ConnectionIntent || v.LastError == "" || v.RunState != "failed" || f.e.Alive() {
+			if !v.LoggedIn || v.ConnectionIntent || v.LastError == "" || v.RunState != "failed" || f.e.Alive() {
 				t.Fatalf("did not stop %s: %+v", kind, v.Status)
 			}
 			if kind == "exhausted" && !strings.Contains(v.LastError, "额度已耗尽") {
