@@ -8,6 +8,7 @@ import (
 
 func TestSubscriptionConcurrentRequestsGrantsAndCancellation(t *testing.T) {
 	s, _, user, template, _, _ := portalFixture(t, 1, nil)
+	template = allocationStockForTest(t, s, template, 3)
 	run := func(f func(int) error) {
 		t.Helper()
 		var wg sync.WaitGroup

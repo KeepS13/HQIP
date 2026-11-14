@@ -3,18 +3,33 @@ package model
 import "time"
 
 type SubscriptionTemplate struct {
-	PriceCents     *int64   `json:"priceCents"`
-	Listed         bool     `json:"listed"`
-	ValidityDays   int      `json:"validityDays"`
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Enabled        bool     `json:"enabled"`
-	NodeIDs        []string `json:"nodeIds"`
-	DefaultNodeID  string   `json:"defaultNodeId"`
-	BandwidthMbps  *float64 `json:"bandwidthMbps"`
-	QuotaBytes     *int64   `json:"quotaBytes"`
-	MaxConnections int      `json:"maxConnections"`
-	Revision       int64    `json:"revision"`
+	Description          string                `json:"description"`
+	NodesPerSubscription int                   `json:"nodesPerSubscription"`
+	AllocationShortfalls []AllocationShortfall `json:"allocationShortfalls,omitempty"`
+	PriceCents           *int64                `json:"priceCents"`
+	Listed               bool                  `json:"listed"`
+	ValidityDays         int                   `json:"validityDays"`
+	ID                   string                `json:"id"`
+	Name                 string                `json:"name"`
+	Enabled              bool                  `json:"enabled"`
+	NodeIDs              []string              `json:"nodeIds"`
+	DefaultNodeID        string                `json:"defaultNodeId"`
+	BandwidthMbps        *float64              `json:"bandwidthMbps"`
+	QuotaBytes           *int64                `json:"quotaBytes"`
+	MaxConnections       int                   `json:"maxConnections"`
+	Revision             int64                 `json:"revision"`
+}
+type AllocationShortfall struct {
+	SubscriptionID string `json:"subscriptionId,omitempty"`
+	OrderID        string `json:"orderId,omitempty"`
+	UserID         string `json:"userId"`
+	Required       int    `json:"required"`
+	Assigned       int    `json:"assigned"`
+}
+type CatalogSubscription struct {
+	SubscriptionTemplate
+	AvailableCopies    int    `json:"availableCopies"`
+	AvailabilityReason string `json:"availabilityReason"`
 }
 type PortalUser struct {
 	Revision      int64              `json:"revision"`
@@ -25,22 +40,23 @@ type PortalUser struct {
 	Subscriptions []UserSubscription `json:"subscriptions"`
 }
 type UserSubscription struct {
-	ID             string    `json:"id"`
-	UserID         string    `json:"userId"`
-	TemplateID     string    `json:"templateId"`
-	TemplateName   string    `json:"templateName"`
-	CreatedAt      time.Time `json:"createdAt"`
-	ExpiresAt      time.Time `json:"expiresAt"`
-	Status         string    `json:"status"`
-	QuotaBytes     *int64    `json:"quotaBytes"`
-	UsedBytes      int64     `json:"usedBytes"`
-	ReservedBytes  int64     `json:"reservedBytes"`
-	BandwidthMbps  *float64  `json:"bandwidthMbps"`
-	MaxConnections int       `json:"maxConnections"`
-	Occupied       int       `json:"occupied"`
-	NodeIDs        []string  `json:"nodeIds"`
-	DefaultNodeID  string    `json:"defaultNodeId"`
-	Revision       int64     `json:"revision"`
+	NodesPerSubscription int       `json:"nodesPerSubscription"`
+	ID                   string    `json:"id"`
+	UserID               string    `json:"userId"`
+	TemplateID           string    `json:"templateId"`
+	TemplateName         string    `json:"templateName"`
+	CreatedAt            time.Time `json:"createdAt"`
+	ExpiresAt            time.Time `json:"expiresAt"`
+	Status               string    `json:"status"`
+	QuotaBytes           *int64    `json:"quotaBytes"`
+	UsedBytes            int64     `json:"usedBytes"`
+	ReservedBytes        int64     `json:"reservedBytes"`
+	BandwidthMbps        *float64  `json:"bandwidthMbps"`
+	MaxConnections       int       `json:"maxConnections"`
+	Occupied             int       `json:"occupied"`
+	NodeIDs              []string  `json:"nodeIds"`
+	DefaultNodeID        string    `json:"defaultNodeId"`
+	Revision             int64     `json:"revision"`
 }
 type SubscriptionRequest struct {
 	ID             string     `json:"id"`

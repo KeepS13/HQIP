@@ -43,6 +43,11 @@ func paymentFixture(t *testing.T) (*Store, *time.Time, model.PortalUser, model.S
 	}
 	price := int64(1200)
 	p.PriceCents = &price
+	p.NodesPerSubscription = 1
+	for i := 0; i < 5; i++ {
+		n := automaticTestNode(t, s, fmt.Sprintf("payment-stock-%d", i))
+		p.NodeIDs = append(p.NodeIDs, n.ID)
+	}
 	p, e := s.SaveSubscriptionTemplate(p.ID, p, p.Revision)
 	if e != nil {
 		t.Fatal(e)
@@ -56,6 +61,7 @@ func paymentFixture(t *testing.T) (*Store, *time.Time, model.PortalUser, model.S
 }
 func makePaymentOrder(t *testing.T, s *Store, u model.PortalUser, p model.SubscriptionTemplate, key string) model.PaymentOrder {
 	t.Helper()
+	refreshAllocationReports(t, s)
 	o, e := s.CreatePaymentOrder(context.Background(), u.ID, model.PaymentOrderInput{RequestID: key, TemplateID: p.ID, TemplateRevision: p.Revision}, paymentTestClient())
 	if e != nil {
 		t.Fatal(e)
@@ -301,6 +307,7 @@ func TestPaymentLateClosedDuplicateNotificationsGrantExactlyOneWithOriginalDurat
 		t.Fatal(e)
 	}
 	*now = now.Add(48 * time.Hour)
+	refreshAllocationReports(t, s)
 	v := paymentNotice(o, "test-payment-secret-v1")
 	v.Set("attch", "different-order")
 	var wg sync.WaitGroup

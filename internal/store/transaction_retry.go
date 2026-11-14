@@ -17,7 +17,9 @@ func retryDatabase[T any](attempt func() (T, error)) (T, error) {
 	for i := 0; i < 32; i++ {
 		result, err = attempt()
 		var pg *pgconn.PgError
-		if !errors.As(err, &pg) || (pg.Code != "40001" && pg.Code != "40P01") {
+		var sqlite interface{ Code() int }
+		busy := errors.As(err, &sqlite) && (sqlite.Code()&255 == 5 || sqlite.Code()&255 == 6)
+		if !busy && (!errors.As(err, &pg) || (pg.Code != "40001" && pg.Code != "40P01")) {
 			return result, err
 		}
 		// A short fixed attempt count can exhaust while a burst of Agent

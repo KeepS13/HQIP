@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse,hashlib,json,os,shlex,shutil,sqlite3,subprocess,sys,time
 from pathlib import Path
 from contextlib import closing
+from urllib.parse import urlsplit
 sys.dont_write_bytecode=True
 import upgrade_control as control
 from fresh_deploy import require_free_space
@@ -12,11 +13,12 @@ UNIT=Path('/etc/systemd/system/hqip-control.service')
 BACKUPS=Path('/root/backups')
 PREP=Path('/etc/nginx/sites-enabled/hqip-domains-prepare.conf')
 STORAGE_ENV=Path('/etc/hqip-control/storage.env')
+MIGRATION_ENV=Path('/etc/hqip-storage/migration.env')
 
 def postgres_enabled():
  return (control.DATA/'postgresql.enabled').is_file()
 
-def storage_environment():
+def storage_environment(path=None):
  # A deliberately small EnvironmentFile subset: one quoted KEY=value per line,
  # no shell evaluation, interpolation, includes or inherited PG credentials.
  # The probe/backup binary needs only these explicitly parsed settings. Do not
@@ -25,9 +27,10 @@ def storage_environment():
  # pg_dump/pg_restore are child processes of the backup binary. Supply only
  # trusted system directories, never the caller's potentially writable PATH.
  env={'PATH':'/usr/bin:/bin'}
- if STORAGE_ENV.is_symlink() or not STORAGE_ENV.is_file():raise ValueError('PostgreSQL storage environment is missing')
- if os.name!='nt' and STORAGE_ENV.stat().st_mode & 0o077:raise ValueError('Storage environment must have mode 0600')
- for line in STORAGE_ENV.read_text().splitlines():
+ if path is None:path=STORAGE_ENV
+ if path.is_symlink() or not path.is_file():raise ValueError('PostgreSQL storage environment is missing')
+ if os.name!='nt' and path.stat().st_mode & 0o077:raise ValueError('Storage environment must have mode 0600')
+ for line in path.read_text().splitlines():
   parts=shlex.split(line,comments=True,posix=True)
   if not parts:continue
   if len(parts)!=1 or '=' not in parts[0]:raise ValueError('Invalid storage environment line')
@@ -36,6 +39,33 @@ def storage_environment():
   env[key]=value
  if not env.get('HQIP_DATABASE_URL') or not env.get('HQIP_REDIS_URL'):raise ValueError('Both PostgreSQL and Redis configuration are required')
  return env
+
+def allocation_migration_environment(manifest):
+ target=manifest.get('subscriptionAllocationsVersion',0)
+ if not target or not postgres_enabled():return None
+ if target!=1:raise ValueError('Unsupported subscription allocation migration')
+ if postgres_info().get('subscriptionAllocationsVersion',0)>=target:return None
+ env=storage_environment(MIGRATION_ENV)
+ app=urlsplit(storage_environment()['HQIP_DATABASE_URL'])
+ migration=urlsplit(env['HQIP_DATABASE_URL'])
+ if (app.hostname,app.port,app.path,app.query)!=(migration.hostname,migration.port,migration.path,migration.query) or migration.username!='hqip_migrator':
+  raise ValueError('Migration role must target the active PostgreSQL database')
+ return env
+
+def migrate_allocations(release,env,state,info):
+ if env is None:return
+ # Record the attempt before starting: a timeout or lost response cannot prove
+ # the transaction rolled back, so an old controller must not restart.
+ info['allocationMigrationAttempted']=True
+ info['allocationTarget']=1
+ (state/'domains-state.json').write_text(json.dumps(info,indent=2))
+ try:
+  process=subprocess.run([str(release/'hqip'),'migrate-subscription-allocations'],env=env,capture_output=True,timeout=330,check=False)
+ except subprocess.TimeoutExpired:
+  raise RuntimeError('Subscription allocation migration result is uncertain; controller remains stopped') from None
+ if process.returncode:raise RuntimeError('Subscription allocation migration failed; controller remains stopped')
+ info['allocationMigrationCompleted']=True
+ (state/'domains-state.json').write_text(json.dumps(info,indent=2))
 
 def postgres_info():
  process=subprocess.run([str(control.BASE/'current/hqip'),'storage-info','--data-dir',str(control.DATA)],env=storage_environment(),capture_output=True,text=True,timeout=30,check=False)
@@ -90,9 +120,13 @@ def require_billing_compatible(manifest):
  if postgres_enabled():
   if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
   if manifest.get('serverBillingVersion',0)<2:raise ValueError('PostgreSQL requires serverBillingVersion 2')
+  if manifest.get('subscriptionAllocationsVersion',0)<postgres_info().get('subscriptionAllocationsVersion',0):raise ValueError('Subscription allocations require a compatible release; node grants and reservations are preserved')
   if manifest.get('paymentsVersion',0)<1 and postgres_info().get('paymentsRequired',False):raise ValueError('Payment orders require a payment-compatible release; live orders are preserved')
   return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
+  has_metadata=db.execute("SELECT 1 FROM sqlite_master WHERE name='metadata'").fetchone()
+  allocation_version=db.execute("SELECT value FROM metadata WHERE key='subscription_allocations_version'").fetchone() if has_metadata else None
+  if allocation_version and manifest.get('subscriptionAllocationsVersion',0)<int(allocation_version[0]):raise ValueError('Subscription allocations require a compatible release; node grants and reservations are preserved')
   payment_table=db.execute("SELECT 1 FROM sqlite_master WHERE name='payment_orders'").fetchone()
   if payment_table and manifest.get('paymentsVersion',0)<1:
    if db.execute('SELECT 1 FROM payment_orders LIMIT 1').fetchone() or db.execute('SELECT 1 FROM payment_settings WHERE enabled<>0 LIMIT 1').fetchone():raise ValueError('Payment orders require a payment-compatible release; live orders are preserved')
@@ -131,6 +165,8 @@ def rollback(state):
  active=(control.BASE/'current').resolve(strict=True)
  if active not in [Path(info['previous']),Path(info['release'])]:raise ValueError('Refusing rollback over a later release')
  _,previous_manifest=control.verify_release(Path(info['previous']))
+ if info.get('allocationMigrationAttempted') and previous_manifest.get('subscriptionAllocationsVersion',0)<info.get('allocationTarget',0):
+  raise ValueError('Subscription allocation migration prevents rollback to an older controller; fix forward with current data')
  require_billing_compatible(previous_manifest)
  if schema_version()>previous_manifest.get('schemaVersion',4):raise ValueError('Rollback binary cannot read the current subscription schema; current data and release are preserved')
  if data_identity()!=info['masterSHA256']:raise ValueError('Master key changed; manual recovery required')
@@ -153,6 +189,7 @@ def rollback(state):
 
 def upgrade(release,state):
  check_state(state);release,manifest,previous=verify(release)
+ migration_env=allocation_migration_environment(manifest)
  if SITE.is_symlink() or UNIT.is_symlink():raise ValueError('Unexpected configuration symlink')
  state.mkdir(mode=0o700,exist_ok=False)
  shutil.copyfile(SITE,state/'nginx.before.conf');shutil.copyfile(UNIT,state/'unit.before.service')
@@ -174,6 +211,7 @@ def upgrade(release,state):
   # Backups can be larger than the uploaded release. Check actual remaining
   # space after backup and before changing the active code or service files.
   require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
+  migrate_allocations(release,migration_env,state,info)
   from fresh_deploy import install_log_limits
   install_log_limits(release)
   control.point_current(release)
@@ -183,6 +221,9 @@ def upgrade(release,state):
   control.run('nginx','-t');control.run('systemctl','daemon-reload');control.run('systemctl','start',control.SERVICE);control.healthy();control.run('systemctl','reload','nginx')
   if data_identity()!=info['masterSHA256']:raise ValueError('Live data identity changed')
  except Exception:
+  if info.get('allocationMigrationAttempted'):
+   info['phase']='failed-allocation-migration-data-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
+   raise RuntimeError('Subscription allocation migration was attempted; refusing an incompatible controller rollback. Fix forward with this data.') from None
   if schema_version()>info['schemaBefore']:
    info['phase']='failed-schema-advanced-data-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
    raise RuntimeError('Schema migration completed; refusing incompatible old binary. Fix forward with this data or deploy a compatible v5 release.')

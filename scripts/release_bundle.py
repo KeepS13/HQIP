@@ -44,6 +44,9 @@ def validate_manifest(manifest, *, allow_legacy=False):
                        'serverBillingVersion': 2, 'agentTelemetryVersion': 1}.items():
         if manifest.get(key) != value:
             raise ValueError('Unsupported release capability: ' + key)
+    allocation = manifest.get('subscriptionAllocationsVersion', 0)
+    if type(allocation) is not int or allocation not in ((0, 1) if allow_legacy else (1,)):
+        raise ValueError('New releases require subscriptionAllocationsVersion 1')
     recovery = manifest.get('postgresRecoveryVersion', 0)
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')

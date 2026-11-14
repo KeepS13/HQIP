@@ -10,19 +10,44 @@ type ClosingConnection struct {
 	Reason         string `json:"reason"`
 }
 type SubscriptionImpact struct {
-	AffectedUsers         int                 `json:"affectedUsers"`
-	AffectedSubscriptions int                 `json:"affectedSubscriptions"`
-	ActiveConnections     int                 `json:"activeConnections"`
-	AffectedUserIDs       []string            `json:"affectedUserIds"`
-	ConnectionsToClose    []ClosingConnection `json:"connectionsToClose"`
+	AllocationShortfalls  []model.AllocationShortfall `json:"allocationShortfalls"`
+	AffectedUsers         int                         `json:"affectedUsers"`
+	AffectedSubscriptions int                         `json:"affectedSubscriptions"`
+	ActiveConnections     int                         `json:"activeConnections"`
+	AffectedUserIDs       []string                    `json:"affectedUserIds"`
+	ConnectionsToClose    []ClosingConnection         `json:"connectionsToClose"`
 }
 
 func (s *Store) PreviewSubscriptionTemplate(id string, p model.SubscriptionTemplate) (SubscriptionImpact, error) {
-	out := SubscriptionImpact{AffectedUserIDs: []string{}, ConnectionsToClose: []ClosingConnection{}}
+	normalizeSubscriptionTemplate(&p)
+	p.ID = id
+	out := SubscriptionImpact{AllocationShortfalls: []model.AllocationShortfall{}, AffectedUserIDs: []string{}, ConnectionsToClose: []ClosingConnection{}}
 	if err := validSubscriptionTemplate(p); err != nil {
 		return out, err
 	}
-	rows, err := s.DB.Query("SELECT id,user_id FROM portal_subscriptions WHERE template_id=? AND revoked=0 AND expires>? ORDER BY id", id, s.Now().Unix())
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback()
+	current, err := subscriptionTemplate(tx, id)
+	if err != nil {
+		return out, err
+	}
+	allocations := map[string][]string{}
+	if !sameNodeSet(current.NodeIDs, p.NodeIDs) {
+		holders, shortfalls, e := reconcileNodeAllocations(tx, p, s.Now())
+		if e != nil {
+			return out, e
+		}
+		out.AllocationShortfalls = shortfalls
+		for _, h := range holders {
+			if !h.order {
+				allocations[h.id] = h.nodes
+			}
+		}
+	}
+	rows, err := tx.Query("SELECT id,user_id FROM portal_subscriptions WHERE template_id=? AND revoked=0 AND expires>? ORDER BY id", id, s.Now().Unix())
 	if err != nil {
 		return out, err
 	}
@@ -48,16 +73,20 @@ func (s *Store) PreviewSubscriptionTemplate(id string, p model.SubscriptionTempl
 	}
 	out.AffectedUsers = len(users)
 	out.AffectedSubscriptions = len(members)
-	allowed := map[string]bool{}
-	for _, n := range p.NodeIDs {
-		allowed[n] = true
-	}
 	for _, m := range members {
-		e, err := s.UserSubscription(m.user, m.id)
+		e, err := userSubscription(tx, m.user, m.id, s.Now())
 		if err != nil {
 			return out, err
 		}
-		rows, err := s.DB.Query("SELECT id,node_id FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? ORDER BY created_at,rowid", m.id, s.Now().Unix())
+		nodes := e.NodeIDs
+		if proposed, ok := allocations[m.id]; ok {
+			nodes = proposed
+		}
+		allowed := map[string]bool{}
+		for _, node := range nodes {
+			allowed[node] = true
+		}
+		rows, err := tx.Query("SELECT id,node_id FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? ORDER BY created_at,rowid", m.id, s.Now().Unix())
 		if err != nil {
 			return out, err
 		}

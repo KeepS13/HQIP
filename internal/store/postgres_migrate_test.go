@@ -17,7 +17,7 @@ func TestPostgresMigrationPreservesSecretsAndOpenLedger(t *testing.T) {
 	dsn := emptyPostgresSchema(t)
 	s, now := sqliteFixture(t)
 	n := newNode(t, s, "migrated-node")
-	if _, err := s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]' WHERE id=?", n.ID); err != nil {
+	if _, err := s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]',last_seen=?,core_healthy=1 WHERE id=?", s.Now().Unix(), n.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetStatus(n.ID, "ready", "test", false); err != nil {

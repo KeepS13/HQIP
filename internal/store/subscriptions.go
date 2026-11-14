@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +14,12 @@ import (
 )
 
 func validSubscriptionTemplate(p model.SubscriptionTemplate) error {
+	if !utf8.ValidString(p.Description) || utf8.RuneCountInString(p.Description) > 2000 {
+		return errors.New("订阅介绍最多2000字")
+	}
+	if p.NodesPerSubscription < 1 || p.NodesPerSubscription > 1000 {
+		return errors.New("每份分配节点数须为1至1000的整数")
+	}
 	if p.PriceCents != nil && (*p.PriceCents < 100 || *p.PriceCents > 100000000) {
 		return errors.New("订阅价格须为 1 至 1000000 元，最多两位小数")
 	}
@@ -43,7 +50,7 @@ func subscriptionTemplate(q portalQuery, id string) (model.SubscriptionTemplate,
 		return p, notFound(err)
 	}
 	err = json.Unmarshal([]byte(raw), &p)
-	p.DefaultNodeID = "" // Legacy template defaults no longer select a node.
+	normalizeSubscriptionTemplate(&p)
 	return p, err
 }
 func (s *Store) SubscriptionTemplate(id string) (model.SubscriptionTemplate, error) {
@@ -65,7 +72,7 @@ func (s *Store) SubscriptionTemplates(listedOnly bool) ([]model.SubscriptionTemp
 		if err = json.Unmarshal([]byte(raw), &p); err != nil {
 			return nil, err
 		}
-		p.DefaultNodeID = ""
+		normalizeSubscriptionTemplate(&p)
 		if !listedOnly || p.Listed && p.Enabled {
 			out = append(out, p)
 		}
@@ -73,82 +80,112 @@ func (s *Store) SubscriptionTemplates(listedOnly bool) ([]model.SubscriptionTemp
 	return out, rows.Err()
 }
 func (s *Store) SaveSubscriptionTemplate(id string, p model.SubscriptionTemplate, expected int64) (model.SubscriptionTemplate, error) {
-	p.DefaultNodeID = ""
+	normalizeSubscriptionTemplate(&p)
+	p.Description = strings.TrimSpace(strings.ReplaceAll(p.Description, "\r\n", "\n"))
 	if err := validSubscriptionTemplate(p); err != nil {
 		return p, err
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return p, err
-	}
-	defer tx.Rollback()
-	for _, node := range p.NodeIDs {
-		var caps string
-		if err = tx.QueryRow("SELECT capabilities FROM nodes WHERE id=? AND lifecycle='active'", node).Scan(&caps); err != nil {
-			return p, notFound(err)
-		}
-		if !containsCapability(caps, "admission-v1") {
-			return p, errors.New("节点须支持连接准入与订阅限制")
-		}
-	}
-	p.ID = id
-	p.Revision = 1
-	if id == "" {
-		p.ID = NewID()
-	} else {
-		var revision int64
-		if err = tx.QueryRow("SELECT revision FROM portal_templates WHERE id=?", id).Scan(&revision); err != nil {
-			return p, notFound(err)
-		}
-		if revision != expected {
-			return p, ErrConflict
-		}
-		p.Revision = revision + 1
-	}
-	if p.NodeIDs == nil {
-		p.NodeIDs = []string{}
-	}
-	if _, err = tx.Exec("INSERT INTO portal_templates(id,config,revision) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET config=excluded.config,revision=excluded.revision", p.ID, jsonString(p), p.Revision); err != nil {
-		return p, err
-	}
-	if _, err = tx.Exec("UPDATE portal_subscriptions SET revision=revision+1 WHERE template_id=?", p.ID); err != nil {
-		return p, err
-	}
-	if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id IN (SELECT user_id FROM portal_subscriptions WHERE template_id=?)", p.ID); err != nil {
-		return p, err
-	}
-	rows, err := tx.Query("SELECT user_id,id FROM portal_subscriptions WHERE template_id=?", p.ID)
-	if err != nil {
-		return p, err
-	}
-	type member struct{ user, id string }
-	members := []member{}
-	for rows.Next() {
-		var m member
-		if err = rows.Scan(&m.user, &m.id); err != nil {
-			rows.Close()
+	return retryDatabase(func() (model.SubscriptionTemplate, error) {
+		// A retried transaction must not persist the previous attempt's response.
+		p.AllocationShortfalls = nil
+		tx, err := s.DB.Begin()
+		if err != nil {
 			return p, err
 		}
-		members = append(members, m)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return p, err
-	}
-	for _, m := range members {
-		e, eerr := userSubscription(tx, m.user, m.id, s.Now())
-		if eerr != nil {
-			return p, eerr
+		defer tx.Rollback()
+		for _, node := range p.NodeIDs {
+			var caps string
+			if err = tx.QueryRow("SELECT capabilities FROM nodes WHERE id=? AND lifecycle='active'", node).Scan(&caps); err != nil {
+				return p, notFound(err)
+			}
+			if !containsCapability(caps, "admission-v1") {
+				return p, errors.New("节点须支持连接准入与订阅限制")
+			}
 		}
-		if err = reconcileSubscriptionLeases(tx, e, s.Now()); err != nil {
+		var previous model.SubscriptionTemplate
+		if id != "" {
+			previous, err = subscriptionTemplate(tx, id)
+			if err != nil {
+				return p, err
+			}
+		}
+		p.ID = id
+		p.Revision = 1
+		if id == "" {
+			p.ID = NewID()
+		} else {
+			var revision int64
+			if err = tx.QueryRow("SELECT revision FROM portal_templates WHERE id=?", id).Scan(&revision); err != nil {
+				return p, notFound(err)
+			}
+			if revision != expected {
+				return p, ErrConflict
+			}
+			p.Revision = revision + 1
+		}
+		if p.NodeIDs == nil {
+			p.NodeIDs = []string{}
+		}
+		if _, err = tx.Exec("INSERT INTO portal_templates(id,config,revision) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET config=excluded.config,revision=excluded.revision", p.ID, jsonString(p), p.Revision); err != nil {
 			return p, err
 		}
-	}
-	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.template_saved',?)", s.Now().Unix(), p.ID); err != nil {
-		return p, err
-	}
-	return p, tx.Commit()
+		nodesChanged := !sameNodeSet(previous.NodeIDs, p.NodeIDs)
+		entitlementsChanged := nodesChanged || previous.Enabled != p.Enabled || previous.MaxConnections != p.MaxConnections || !reflect.DeepEqual(previous.QuotaBytes, p.QuotaBytes) || !reflect.DeepEqual(previous.BandwidthMbps, p.BandwidthMbps)
+		if !entitlementsChanged {
+			if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.template_saved',?)", s.Now().Unix(), p.ID); err != nil {
+				return p, err
+			}
+			return p, tx.Commit()
+		}
+		if nodesChanged && id != "" {
+			holders, shortfalls, e := reconcileNodeAllocations(tx, p, s.Now())
+			if e != nil {
+				return p, e
+			}
+			if e = persistNodeAllocations(tx, holders); e != nil {
+				return p, e
+			}
+			p.AllocationShortfalls = shortfalls
+		}
+		if _, err = tx.Exec("UPDATE portal_subscriptions SET revision=revision+1 WHERE template_id=?", p.ID); err != nil {
+			return p, err
+		}
+		if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id IN (SELECT user_id FROM portal_subscriptions WHERE template_id=?)", p.ID); err != nil {
+			return p, err
+		}
+		rows, err := tx.Query("SELECT user_id,id FROM portal_subscriptions WHERE template_id=?", p.ID)
+		if err != nil {
+			return p, err
+		}
+		type member struct{ user, id string }
+		members := []member{}
+		for rows.Next() {
+			var m member
+			if err = rows.Scan(&m.user, &m.id); err != nil {
+				rows.Close()
+				return p, err
+			}
+			members = append(members, m)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return p, err
+		}
+		for _, m := range members {
+			e, eerr := userSubscription(tx, m.user, m.id, s.Now())
+			if eerr != nil {
+				return p, eerr
+			}
+			if err = reconcileSubscriptionLeases(tx, e, s.Now()); err != nil {
+				return p, err
+			}
+		}
+		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.template_saved',?)", s.Now().Unix(), p.ID); err != nil {
+			return p, err
+		}
+		return p, tx.Commit()
+	})
 }
 
 func userSubscription(q portalQuery, user, id string, now time.Time) (*model.UserSubscription, error) {
@@ -171,7 +208,13 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	e.QuotaBytes = t.QuotaBytes
 	e.BandwidthMbps = t.BandwidthMbps
 	e.MaxConnections = t.MaxConnections
-	e.NodeIDs = t.NodeIDs
+	var allocated string
+	if err = q.QueryRow("SELECT target_count,node_ids FROM subscription_allocations WHERE subscription_id=?", id).Scan(&e.NodesPerSubscription, &allocated); err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal([]byte(allocated), &e.NodeIDs); err != nil {
+		return nil, err
+	}
 	e.Status = "active"
 	if e.NodeIDs == nil {
 		e.NodeIDs = []string{}
@@ -233,10 +276,12 @@ func grantSubscription(tx *sql.Tx, user, template, key string, expectedUser, exp
 	return grantSubscriptionWithValidity(tx, user, template, key, expectedUser, expectedTemplate, now, 0)
 }
 
-// Paid orders keep the purchased duration while their live node set and limits
-// continue to follow the template, just like an administrator-assigned copy.
+// Paid orders retain purchased duration and node count; live service limits follow the template.
 func grantSubscriptionWithValidity(tx *sql.Tx, user, template, key string, expectedUser, expectedTemplate int64, now time.Time, validityDays int) (model.UserSubscription, error) {
 	var empty model.UserSubscription
+	if err := lockAllocationUser(tx, user); err != nil {
+		return empty, err
+	}
 	var existing, oldTemplate string
 	err := tx.QueryRow("SELECT id,template_id FROM portal_subscriptions WHERE user_id=? AND grant_key=?", user, key).Scan(&existing, &oldTemplate)
 	if err == nil {
@@ -273,6 +318,33 @@ func grantSubscriptionWithValidity(tx *sql.Tx, user, template, key string, expec
 	if p.Revision != expectedTemplate {
 		return empty, ErrConflict
 	}
+	var allocated []string
+	target := p.NodesPerSubscription
+	if strings.HasPrefix(key, "payment:") {
+		orderID := strings.TrimPrefix(key, "payment:")
+		var raw string
+		if err = tx.QueryRow("SELECT template_snapshot FROM payment_orders WHERE id=?", orderID).Scan(&raw); err != nil {
+			return empty, err
+		}
+		var snapshot model.SubscriptionTemplate
+		if err = json.Unmarshal([]byte(raw), &snapshot); err != nil {
+			return empty, err
+		}
+		normalizeSubscriptionTemplate(&snapshot)
+		target = snapshot.NodesPerSubscription
+		var stored int
+		if e := tx.QueryRow("SELECT target_count FROM payment_node_reservations WHERE order_id=?", orderID).Scan(&stored); e == nil {
+			target = stored
+		} else if !errors.Is(e, sql.ErrNoRows) {
+			return empty, e
+		}
+		allocated, err = reserveOrderNodes(tx, orderID, user, p, target, now)
+	} else {
+		allocated, err = allocateSubscriptionNodes(tx, user, p, now)
+	}
+	if err != nil {
+		return empty, err
+	}
 	id := NewID()
 	if validityDays == 0 {
 		validityDays = p.ValidityDays
@@ -282,6 +354,9 @@ func grantSubscriptionWithValidity(tx *sql.Tx, user, template, key string, expec
 	}
 	expires := now.Add(time.Duration(validityDays) * 24 * time.Hour)
 	if _, err = tx.Exec("INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", id, user, template, now.Unix(), expires.Unix(), key); err != nil {
+		return empty, err
+	}
+	if _, err = tx.Exec("INSERT INTO subscription_allocations(subscription_id,target_count,node_ids) VALUES(?,?,?)", id, target, jsonString(allocated)); err != nil {
 		return empty, err
 	}
 	if _, err = tx.Exec("INSERT INTO portal_usage(subscription_id) VALUES(?)", id); err != nil {

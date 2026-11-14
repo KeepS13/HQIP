@@ -37,6 +37,7 @@ func audienceInt(v int) *int { return &v }
 
 func TestNodeAudienceDeduplicatesPeopleAndUsesActualOnlineReports(t *testing.T) {
 	s, now, user, template, node, password := portalFixture(t, 3, nil)
+	audienceExec(t, s, "UPDATE nodes SET last_seen=0 WHERE id=?", node.ID)
 	second := grantAnother(t, s, user.ID, template, "second-copy")
 	third := grantAnother(t, s, user.ID, template, "third-copy")
 	other, err := s.RegisterPortal("other-audience@example.com", "other-test-password")
@@ -88,6 +89,7 @@ func TestNodeAudienceDeduplicatesPeopleAndUsesActualOnlineReports(t *testing.T) 
 func TestNodeAudienceMembershipMatchesSubscriptionEligibility(t *testing.T) {
 	quota := 4 * model.MinimumSubscriptionLeaseBytes
 	s, now, user, template, node, _ := portalFixture(t, 3, &quota)
+	audienceExec(t, s, "UPDATE nodes SET last_seen=0 WHERE id=?", node.ID)
 	revoked := grantAnother(t, s, user.ID, template, "revoked-copy")
 	expired := grantAnother(t, s, user.ID, template, "expired-copy")
 	exhausted := grantAnother(t, s, user.ID, template, "exhausted")

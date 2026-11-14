@@ -31,15 +31,18 @@ func nativeSubscriptionSession(t *testing.T, s *Store, user, subscription string
 }
 func grantAnother(t *testing.T, s *Store, user string, p model.SubscriptionTemplate, key string) model.UserSubscription {
 	t.Helper()
-	u, err := s.PortalUser(user)
+	// This helper represents grandfathered copies that could overlap before
+	// per-purchase allocation. New allocation tests use AssignSubscription.
+	id := NewID()
+	audienceExec(t, s, "INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", id, user, p.ID, s.Now().Unix(), s.Now().Add(time.Duration(p.ValidityDays)*24*time.Hour).Unix(), "legacy:"+key)
+	audienceExec(t, s, "INSERT INTO portal_usage(subscription_id) VALUES(?)", id)
+	audienceExec(t, s, "INSERT INTO subscription_allocations(subscription_id,target_count,node_ids) VALUES(?,?,?)", id, len(p.NodeIDs), jsonString(p.NodeIDs))
+	audienceExec(t, s, "UPDATE portal_users SET revision=revision+1 WHERE id=?", user)
+	e, err := s.UserSubscription(user, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := s.AssignSubscription(user, p.ID, key, u.Revision, p.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return e
+	return *e
 }
 func subscriptionPassword(t *testing.T, s *Store, user, subscription, node string) string {
 	t.Helper()
@@ -93,6 +96,7 @@ func TestSubscriptionsAreIndependentAcrossIdenticalTemplatePurchases(t *testing.
 
 func TestSubscriptionRequestsApprovalCASIdempotenceAndHiddenAssignment(t *testing.T) {
 	s, now, u, p, _, _ := portalFixture(t, 1, nil)
+	p = allocationStockForTest(t, s, p, 4)
 	r, err := s.CreateSubscriptionRequest(u.ID, p.ID, "purchase-key-1", p.Revision)
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +110,7 @@ func TestSubscriptionRequestsApprovalCASIdempotenceAndHiddenAssignment(t *testin
 		t.Fatal("separate purchases of the same template were collapsed")
 	}
 	*now = now.Add(2 * time.Hour)
+	refreshAllocationReports(t, s)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	ids := map[string]bool{}
@@ -265,6 +270,7 @@ func TestSubscriptionNodeRemovalAndLowerLimitKeepOldestEligibleConnection(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	audienceExec(t, s, "UPDATE subscription_allocations SET node_ids=?,target_count=? WHERE subscription_id=?", jsonString(p.NodeIDs), len(p.NodeIDs), u.Subscriptions[0].ID)
 	password := subscriptionPassword(t, s, u.ID, u.Subscriptions[0].ID, kept.ID)
 	old := acquire(t, s, removed, oldPassword, "a")
 	current := acquire(t, s, kept, password, "b")

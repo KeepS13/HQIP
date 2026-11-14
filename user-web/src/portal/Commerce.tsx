@@ -29,7 +29,7 @@ import {
   type PaymentInfo,
   type PaymentOrder,
 } from "./payment-data";
-import type { SubscriptionTemplate } from "./types";
+import type { CatalogSubscription, SubscriptionTemplate } from "./types";
 import "./commerce.css";
 
 function ProductFacts({ value }: { value: SubscriptionTemplate }) {
@@ -58,11 +58,16 @@ function ProductFacts({ value }: { value: SubscriptionTemplate }) {
         <dd>{value.maxConnections} 个</dd>
       </div>
       <div>
-        <dt>可选节点</dt>
-        <dd>{value.nodeIds.length} 个</dd>
+        <dt>每份分配节点</dt>
+        <dd>{value.nodesPerSubscription ?? value.nodeIds.length} 个</dd>
       </div>
     </dl>
   );
+}
+
+function SubscriptionDescription({ text }: { text?: string }) {
+  const lines = (text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length ? <ul className="commerce-description">{lines.map((line, index) => <li key={index}>{line}</li>)}</ul> : null;
 }
 
 function PurchaseDialog({
@@ -70,11 +75,13 @@ function PurchaseDialog({
   userId,
   duration,
   onClose,
+  refreshCatalog,
 }: {
   template: SubscriptionTemplate;
   userId: string;
   duration: number;
   onClose: () => void;
+  refreshCatalog: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => checkoutDraft(userId, template));
   const [busy, setBusy] = useState(false),
@@ -107,6 +114,7 @@ function PurchaseDialog({
       navigate(`/orders/${encodeURIComponent(order.id)}`);
     } catch (e) {
       setError((e as Error).message);
+      await refreshCatalog();
     } finally {
       submitting.current = false;
       setBusy(false);
@@ -131,12 +139,13 @@ function PurchaseDialog({
           <strong>{money(draft.template.priceCents!)}</strong>
         </div>
         <ProductFacts value={draft.template} />
+        <SubscriptionDescription text={draft.template.description} />
         <Notice>
           本次购买一份独立订阅，支付核验成功后自动开通。有效期从实际开通时起算，不会合并或延长已有订阅。
         </Notice>
         <p className="commerce-hint">
           下单后请在 {duration}{" "}
-          分钟内付款。价格和有效天数在下单时锁定；节点及使用限额以订阅当前设置为准。
+          分钟内付款。价格、有效天数及分配数量在下单时锁定；节点在支付有效期内预留，使用限额以订阅当前设置为准。
         </p>
         <ErrorNotice message={error} />
         {error && (
@@ -197,7 +206,7 @@ function PurchaseDialog({
 }
 
 export function SubscriptionCatalog({ userId }: { userId: string }) {
-  const catalog = useUserData<SubscriptionTemplate[]>("/catalog", 5000);
+  const catalog = useUserData<CatalogSubscription[]>("/catalog", 5000);
   const payment = useUserData<PaymentInfo>("/payment-info", 15000);
   const [selected, setSelected] = useState<SubscriptionTemplate | null>(null),
     [search, setSearch] = useState("");
@@ -265,37 +274,38 @@ export function SubscriptionCatalog({ userId }: { userId: string }) {
               Number.isSafeInteger(t.priceCents) &&
               t.priceCents !== null &&
               t.priceCents >= 100;
-            const hasNodes = t.nodeIds.length > 0;
+            const hasStock = t.availableCopies > 0;
             return (
               <article key={t.id} className="user-sub-card commerce-product">
                 <div className="user-sub-heading">
                   <span className="user-sub-icon">
                     <Package size={23} />
                   </span>
-                  <Badge tone="info">一次性流量包</Badge>
+                  <Badge tone={hasStock ? "info" : "warning"}>{hasStock ? `您还可购买 ${t.availableCopies} 份` : "无货"}</Badge>
                 </div>
                 <h2>{t.name}</h2>
-                <p className="muted">可重复购买，每份独立生效。</p>
+                <p className="muted">每份独立生效，同一套餐的节点不重复分配。</p>
                 <div className="commerce-price">
                   <strong>{priced ? money(t.priceCents!) : "暂未定价"}</strong>
                   {priced && <span>/ 份</span>}
                 </div>
                 <ProductFacts value={t} />
-                {!hasNodes && (
+                <SubscriptionDescription text={t.description} />
+                {!hasStock && (
                   <p className="commerce-hint">
-                    此订阅尚未配置可用节点，暂不可购买。
+                    {t.availabilityReason || "暂无足够的可分配节点。"}
                   </p>
                 )}
                 <Button
                   className="full-width"
                   icon={ArrowRight}
                   disabled={
-                    !priced || !hasNodes || !available || !!catalog.error
+                    !priced || !hasStock || !available || !!catalog.error
                   }
                   onClick={() => setSelected(t)}
                 >
-                  {!hasNodes
-                    ? "暂无可用节点"
+                  {!hasStock
+                    ? "无货"
                     : !priced
                       ? "暂不可购买"
                       : payment.loading
@@ -321,6 +331,7 @@ export function SubscriptionCatalog({ userId }: { userId: string }) {
         <PurchaseDialog
           key={`${userId}:${selected.id}`}
           userId={userId}
+          refreshCatalog={catalog.refresh}
           template={selected}
           duration={payment.data?.payDurationMinutes || 10}
           onClose={() => setSelected(null)}

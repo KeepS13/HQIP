@@ -24,7 +24,7 @@ class PostgresReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             data=Path(folder)
             (data/'postgresql.enabled').write_text('1\n')
-            with patch.object(deploy.control,'DATA',data), patch.object(deploy.sqlite3,'connect') as sqlite:
+            with patch.object(deploy.control,'DATA',data), patch.object(deploy,'postgres_info',return_value={}), patch.object(deploy.sqlite3,'connect') as sqlite:
                 with self.assertRaisesRegex(ValueError,'PostgreSQL-compatible'):
                     deploy.require_billing_compatible({'schemaVersion':5,'serverBillingVersion':2})
                 deploy.require_billing_compatible({'postgresSchemaVersion':1,'serverBillingVersion':2,'paymentsVersion':1})

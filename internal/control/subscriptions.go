@@ -111,7 +111,7 @@ func (s *Server) adminRemoveSubscription(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) userCatalog(w http.ResponseWriter, r *http.Request, user, session string) {
-	v, err := s.Store.SubscriptionTemplates(true)
+	v, err := s.Store.SubscriptionCatalog(user)
 	portalResult(w, v, err)
 }
 

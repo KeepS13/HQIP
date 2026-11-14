@@ -35,6 +35,7 @@ func TestPortalPlanRequiresUpgradedNodeButAllowsOfflineEditing(t *testing.T) {
 
 func TestPortalEnabledCASDoesNotOverwriteNewerAssignment(t *testing.T) {
 	s, _, u, plan, _, _ := portalFixture(t, 1, nil)
+	plan = allocationStockForTest(t, s, plan, 1)
 	before, err := s.PortalUser(u.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestPortalProfileRetainsUnavailableDefaultWithoutFallback(t *testing.T) {
 	if err := s.SetStatus(other.ID, "ready", "test", false); err != nil {
 		t.Fatal(err)
 	}
-	p.NodeIDs = append(p.NodeIDs, other.ID)
+	p.NodeIDs = []string{other.ID}
 	if _, err := s.SaveSubscriptionTemplate(p.ID, p, p.Revision); err != nil {
 		t.Fatal(err)
 	}

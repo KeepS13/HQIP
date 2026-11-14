@@ -6,6 +6,9 @@ export interface PortalUser {
   revision: number;
 }
 export interface SubscriptionTemplate {
+  description: string;
+  nodesPerSubscription: number;
+  allocationShortfalls?: { userId: string; subscriptionId?: string; orderId?: string; required: number; assigned: number }[];
   priceCents: number | null;
   id: string;
   name: string;
@@ -122,4 +125,9 @@ export interface SubscriptionDetail {
   subscription: UserSubscription;
   nodes: PortalNode[];
   subscriptionUrl: string;
+}
+
+export interface CatalogSubscription extends SubscriptionTemplate {
+  availableCopies: number;
+  availabilityReason: string;
 }

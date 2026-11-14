@@ -119,7 +119,7 @@ func portalResult(w http.ResponseWriter, v any, err error) {
 		fail(w, 401, "登录或连接凭据无效")
 	case errors.Is(err, store.ErrNotFound):
 		fail(w, 404, "记录不存在")
-	case errors.Is(err, store.ErrSlots), errors.Is(err, store.ErrConflict):
+	case errors.Is(err, store.ErrSlots), errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrSubscriptionStock):
 		fail(w, 409, err.Error())
 	case errors.Is(err, store.ErrEntitlement):
 		fail(w, 403, err.Error())

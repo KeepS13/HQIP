@@ -283,6 +283,7 @@ class UpgradeDiskGateTests(unittest.TestCase):
             stack.enter_context(patch.object(domains.control, 'verify_release', return_value=(previous, manifest)))
             stack.enter_context(patch.object(domains, 'data_identity', return_value='paired-identity'))
             stack.enter_context(patch.object(domains, 'schema_version', return_value=5))
+            stack.enter_context(patch.object(domains, 'postgres_info', return_value={'subscriptionAllocationsVersion': 0}))
             stack.enter_context(patch.object(domains, 'subscription_migration_ready'))
             stack.enter_context(patch.object(domains, 'storage_environment', return_value={}))
             run = stack.enter_context(patch.object(domains.control, 'run'))

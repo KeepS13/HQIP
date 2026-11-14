@@ -55,20 +55,184 @@
   text-align: right;
   overflow-wrap: anywhere;
 }
-.account-node-picker.subscription-node-picker > input {
+.modal:has(> .subscription-editor) {
+  width: 1160px;
+  height: min(820px, calc(100dvh - 56px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.subscription-editor {
+  flex: 1;
+  min-height: 0;
+}
+.subscription-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 28px;
+  flex: 1;
+  min-height: 0;
+}
+.subscription-editor-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 8px;
+}
+.subscription-editor-settings > .notice {
+  margin: 0;
+}
+.subscription-editor-settings > .subscription-impact {
+  flex-shrink: 0;
+}
+.subscription-editor > .modal-actions {
+  flex-shrink: 0;
+  margin-top: 0;
+  padding-top: 17px;
+}
+.subscription-description {
+  flex-shrink: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(16, 23, 36, 0.3);
+}
+.subscription-description-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.subscription-description-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+.subscription-description-heading h3 span {
+  margin-left: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.subscription-description-heading p,
+.subscription-description-editor > p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.subscription-description-count {
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: rgba(155, 149, 255, 0.08);
+  color: var(--purple);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.subscription-description-count > span { color: var(--muted); }
+.subscription-description-count[data-over-limit="true"] { color: #ff8a98; }
+.subscription-description textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 136px;
+  max-height: 190px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #131b29;
+  color: #e5e9f2;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.8;
+  resize: vertical;
+  color-scheme: dark;
+  transition: border-color 150ms, box-shadow 150ms;
+}
+.subscription-description-editor > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.subscription-description textarea::placeholder { color: var(--muted); opacity: .65; }
+.subscription-description textarea:focus {
+  outline: none;
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px rgba(155, 149, 255, .12);
+}
+.subscription-preview-trigger { margin-right: auto; }
+.modal:has(> .subscription-storefront-preview) { width: 460px; }
+.subscription-product-preview {
+  min-width: 0;
+  padding: 26px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .07);
+}
+.subscription-product-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.subscription-product-preview h3 { margin: 24px 0 9px; font-size: 23px; overflow-wrap: anywhere; }
+.subscription-product-subtitle { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.subscription-product-price { display: flex; gap: 8px; align-items: baseline; margin-top: 16px; }
+.subscription-product-price strong { font-size: 30px; letter-spacing: -.7px; color: var(--purple); }
+.subscription-product-price span { color: var(--muted); font-size: 12px; }
+.subscription-product-preview .subscription-facts { gap: 16px; }
+.subscription-product-description { margin: 0 0 20px; padding-left: 1.2rem; color: #a6aec1; line-height: 1.7; overflow-wrap: anywhere; }
+.subscription-product-description li { padding-left: .2rem; margin: .35rem 0; }
+.subscription-product-description li::marker { color: var(--purple); }
+.subscription-product-buy { width: 100%; }
+.subscription-product-buy:disabled { opacity: 1; cursor: default; }
+.account-node-picker.subscription-node-picker {
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  padding: 12px;
+  overflow: hidden;
+  background: #141b282e;
+}
+.subscription-picker-body {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.account-node-picker .subscription-picker-search {
   width: 100%;
   height: 38px;
-  margin: 4px 0 16px;
+  flex-shrink: 0;
 }
-.subscription-node-group {
+.subscription-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+.subscription-node-options {
   min-width: 0;
+  display: grid;
+  gap: 9px;
 }
-.subscription-node-group h4 {
-  margin: 18px 0 8px;
+.subscription-picker-empty {
+  padding: 24px 12px;
+  text-align: center;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.8;
 }
-.subscription-node-group > label {
+.subscription-node-options > label {
   display: grid;
   grid-template-columns: 17px minmax(0, 1fr) auto;
   align-items: center;
@@ -76,18 +240,40 @@
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  margin-bottom: 8px;
+  background: var(--panel-light);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
-.subscription-node-group > label > span {
+.subscription-node-options > label:hover {
+  border-color: #71699c;
+}
+.subscription-node-options > label.selected {
+  border-color: #9c8ad7;
+  background: #aa95ec18;
+}
+.subscription-node-options > label:focus-within {
+  outline: 2px solid var(--purple);
+  outline-offset: -2px;
+}
+.subscription-node-options > label > span {
   min-width: 0;
 }
-.subscription-node-group small {
+.subscription-node-options strong,
+.subscription-node-options small {
   display: block;
   overflow-wrap: anywhere;
+}
+.subscription-node-options strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.subscription-node-options small {
   color: var(--muted);
   margin-top: 5px;
 }
-.subscription-node-group .badge {
+.subscription-node-options .badge {
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -96,7 +282,7 @@
   flex-shrink: 0;
   min-width: 140px;
 }
-.subscription-node-group input[type="checkbox"] {
+.subscription-node-options input[type="checkbox"] {
   flex-shrink: 0;
   width: 17px;
   height: 17px;
@@ -152,7 +338,12 @@
 .subscription-picker-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 12px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.subscription-picker-list > .subscription-invalid-nodes {
+  margin-bottom: 12px;
 }
 .node-deletion-reference-badges {
   display: flex;
@@ -304,11 +495,36 @@
   margin-top: 6px;
 }
 @media (max-width: 900px) {
+  .subscription-editor { overflow-y: auto; }
+  .subscription-editor-layout { flex: none; }
+  .subscription-editor > .modal-actions { position: sticky; bottom: 0; background: #1b2333; padding-bottom: 4px; z-index: 1; }
+  .subscription-editor-layout {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    gap: 22px;
+  }
+  .subscription-editor-settings {
+    overflow: visible;
+    flex-shrink: 0;
+    padding-right: 0;
+    scrollbar-gutter: auto;
+  }
+  .account-node-picker.subscription-node-picker {
+    height: min(520px, 100%);
+    max-height: 100%;
+    flex-shrink: 0;
+  }
   .subscription-owned-grid {
     grid-template-columns: 1fr;
   }
 }
 @media (max-width: 560px) {
+  .subscription-product-preview { padding: 20px; }
+  .subscription-editor > .modal-actions { flex-wrap: wrap; }
+  .modal:has(> .subscription-editor) {
+    height: calc(100dvh - 24px);
+  }
   .subscription-invalid-node,
   .node-deletion-reference {
     align-items: flex-start;
@@ -333,13 +549,13 @@
   .subscription-request-title .badge {
     white-space: nowrap;
   }
-  .subscription-node-group > label {
+  .subscription-node-options > label {
     grid-template-columns: 17px minmax(0, 1fr);
   }
-  .subscription-node-group > label > span {
+  .subscription-node-options > label > span {
     flex: 1;
   }
-  .subscription-node-group .badge {
+  .subscription-node-options .badge {
     grid-column: 2;
     margin-left: 0;
     width: fit-content;

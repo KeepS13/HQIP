@@ -217,6 +217,7 @@ func TestSubscriptionLiveTailIsSharedAcrossNodesButIsolatedAcrossCopies(t *testi
 		t.Fatal(err)
 	}
 	id := user.Subscriptions[0].ID
+	audienceExec(t, s, "UPDATE subscription_allocations SET node_ids=?,target_count=? WHERE subscription_id=?", jsonString(template.NodeIDs), len(template.NodeIDs), id)
 	secondPassword, err := s.PortalCredential(user.ID, id, secondNode.ID, "subscription")
 	if err != nil {
 		t.Fatal(err)

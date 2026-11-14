@@ -128,8 +128,9 @@ func nodeOnlineAudience(q audienceQuery, now time.Time) (map[string]model.NodeAu
 func nodeSubscribedAudience(q audienceQuery, now time.Time, out map[string]model.NodeAudience) error {
 	// Match userSubscription's usable-quota policy, including a still-live
 	// authorized tail. Reservations alone never make an exhausted pack valid.
-	rows, err := q.Query(`SELECT s.id,s.user_id,s.template_id,t.config,x.upload+x.download,COALESCE(l.live_budget,0)
+	rows, err := q.Query(`SELECT s.id,s.user_id,s.template_id,t.config,a.node_ids,x.upload+x.download,COALESCE(l.live_budget,0)
 	 FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id
+	 JOIN subscription_allocations a ON a.subscription_id=s.id
 	 JOIN portal_templates t ON t.id=s.template_id JOIN portal_usage x ON x.subscription_id=s.id
 	 LEFT JOIN (SELECT subscription_id,MAX(CASE WHEN revoked=0 AND budget>upload+download THEN 1 ELSE 0 END) AS live_budget
 	 FROM portal_leases WHERE closed=0 AND expires>? GROUP BY subscription_id) l ON l.subscription_id=s.id
@@ -140,10 +141,10 @@ func nodeSubscribedAudience(q audienceQuery, now time.Time, out map[string]model
 	templates := map[string]model.SubscriptionTemplate{}
 	subscribers := map[string]map[string]bool{}
 	for rows.Next() {
-		var id, user, templateID, raw string
+		var id, user, templateID, raw, allocated string
 		var used int64
 		var liveBudget bool
-		if err = rows.Scan(&id, &user, &templateID, &raw, &used, &liveBudget); err != nil {
+		if err = rows.Scan(&id, &user, &templateID, &raw, &allocated, &used, &liveBudget); err != nil {
 			rows.Close()
 			return err
 		}
@@ -158,8 +159,13 @@ func nodeSubscribedAudience(q audienceQuery, now time.Time, out map[string]model
 		if !template.Enabled || template.QuotaBytes != nil && (used >= *template.QuotaBytes || !liveBudget && *template.QuotaBytes-used < model.MinimumSubscriptionLeaseBytes) {
 			continue
 		}
+		var ids []string
+		if err = json.Unmarshal([]byte(allocated), &ids); err != nil {
+			rows.Close()
+			return err
+		}
 		seen := map[string]bool{}
-		for _, node := range template.NodeIDs {
+		for _, node := range ids {
 			v, exists := out[node]
 			if !exists || seen[node] {
 				continue

@@ -6,6 +6,9 @@ export interface PortalUser {
   revision: number;
 }
 export interface SubscriptionTemplate {
+  description: string;
+  nodesPerSubscription: number;
+  allocationShortfalls?: { userId: string; subscriptionId?: string; orderId?: string; required: number; assigned: number }[];
   id: string;
   name: string;
   enabled: boolean;
@@ -135,6 +138,7 @@ export interface UserRow extends PortalUser {
   subscriptions: UserSubscription[];
 }
 export interface SubscriptionImpact {
+  allocationShortfalls: NonNullable<SubscriptionTemplate["allocationShortfalls"]>;
   affectedUsers: number;
   affectedSubscriptions: number;
   activeConnections: number;

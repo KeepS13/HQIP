@@ -240,6 +240,9 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 			return out, e
 		}
 		defer tx.Rollback()
+		if e = lockAllocationUser(tx, userID); e != nil {
+			return out, e
+		}
 		var oldTemplate string
 		var oldRevision int64
 		e = tx.QueryRow("SELECT id,template_id,template_revision FROM payment_orders WHERE user_id=? AND request_key=?", userID, in.RequestID).Scan(&out.id, &oldTemplate, &oldRevision)
@@ -319,7 +322,10 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 			out.raced = true
 			return out, nil
 		}
-		if e = paymentActivity(tx, out.id, "created", "订单已创建，正在获取支付链接", now.Unix()); e != nil {
+		if _, e = reserveOrderNodes(tx, out.id, userID, template, template.NodesPerSubscription, now); e != nil {
+			return out, e
+		}
+		if e = paymentActivity(tx, out.id, "created", "订单已创建，节点已预留，正在获取支付链接", now.Unix()); e != nil {
 			return out, e
 		}
 		out.dispatch = true
@@ -398,6 +404,9 @@ func (s *Store) finishPaymentCreation(id string, created payment.CreatedOrder, c
 		if err = paymentActivity(tx, id, "creation."+state, activity, s.Now().Unix()); err != nil {
 			return err
 		}
+		if err = expireNodeReservations(tx, s.Now()); err != nil {
+			return err
+		}
 		return tx.Commit()
 	})
 }
@@ -429,6 +438,9 @@ func (s *Store) ClosePaymentOrder(userID, id string, expected int64) (model.Paym
 			return e
 		}
 		if e = paymentActivity(tx, id, "closed", "用户关闭支付入口；已付款通知仍会核验处理", s.Now().Unix()); e != nil {
+			return e
+		}
+		if e = expireNodeReservations(tx, s.Now()); e != nil {
 			return e
 		}
 		return tx.Commit()

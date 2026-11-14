@@ -52,7 +52,24 @@ func storageInfo(args []string) error {
 	if err = s.DB.QueryRow("SELECT enabled FROM payment_settings WHERE id=1").Scan(&paymentEnabled); err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"backend": backend, "schemaVersion": version, "postgresSchemaVersion": pgVersion, "serverBillingVersion": 2, "paymentsVersion": 1, "paymentsRequired": paymentOrders > 0 || paymentEnabled != 0, "masterSHA256": hex.EncodeToString(h[:])})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"backend": backend, "schemaVersion": version, "postgresSchemaVersion": pgVersion, "serverBillingVersion": 2, "paymentsVersion": 1, "subscriptionAllocationsVersion": 1, "paymentsRequired": paymentOrders > 0 || paymentEnabled != 0, "masterSHA256": hex.EncodeToString(h[:])})
+}
+
+func migrateSubscriptionAllocations(args []string) error {
+	f := flag.NewFlagSet("migrate-subscription-allocations", flag.ContinueOnError)
+	if err := f.Parse(args); err != nil {
+		return err
+	}
+	if f.NArg() != 0 {
+		return errors.New("migrate-subscription-allocations 不接受额外参数")
+	}
+	dsn := os.Getenv("HQIP_DATABASE_URL")
+	if dsn == "" {
+		return errors.New("请使用 PostgreSQL 迁移账号配置 HQIP_DATABASE_URL；SQLite 随启动升级")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return store.MigratePostgresSubscriptionAllocations(ctx, dsn)
 }
 
 func migratePayments(args []string) error {

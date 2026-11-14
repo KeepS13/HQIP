@@ -187,7 +187,7 @@ func TestPortalSingBoxDefaultUnavailableDoesNotFallBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	template.NodeIDs = []string{defaultNode.ID, backup.ID}
+	template.NodeIDs = []string{backup.ID}
 	if _, err = s.Store.SaveSubscriptionTemplate(template.ID, template, template.Revision); err != nil {
 		t.Fatal(err)
 	}

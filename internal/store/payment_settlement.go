@@ -93,6 +93,13 @@ func recordVerifiedPayment(tx *sql.Tx, r paymentOrderRecord, p payment.NotifyPro
 		_, err := tx.Exec("UPDATE payment_orders SET last_notify_at=? WHERE id=?", now.Unix(), r.Order.ID)
 		return err
 	}
+	if err := lockAllocationUser(tx, r.Order.UserID); err != nil {
+		return err
+	}
+	// Release an expired/cancelled unpaid hold before marking a late notice paid.
+	if err := expireNodeReservations(tx, now); err != nil {
+		return err
+	}
 	// The callback's platformOrderNo is not signed. It is recorded as evidence
 	// but cannot acquire the trusted global platform-ID uniqueness constraint.
 	if _, err := tx.Exec("UPDATE payment_orders SET payment_state='paid',paid_at=?,last_notify_at=?,fulfillment_state='pending',last_error='',revision=revision+1 WHERE id=? AND payment_state='unpaid'", now.Unix(), now.Unix(), r.Order.ID); err != nil {
@@ -120,6 +127,9 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 		}
 		if r.Order.PaymentState != "paid" || r.Order.FulfillmentState == "fulfilled" {
 			return false, nil
+		}
+		if err = lockAllocationUser(tx, r.Order.UserID); err != nil {
+			return false, err
 		}
 		now := s.Now()
 		var enabled bool
@@ -162,6 +172,16 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 			return false, nil
 		}
 		e, err := grantSubscriptionWithValidity(tx, r.Order.UserID, r.Order.TemplateID, "payment:"+id, -1, template.Revision, now, r.Order.ValidityDays)
+		if errors.Is(err, ErrSubscriptionStock) {
+			message := "节点库存不足，已付款订单等待管理员处理"
+			if _, err = tx.Exec("UPDATE payment_orders SET fulfillment_state='blocked',last_error=?,revision=revision+1 WHERE id=?", message, id); err != nil {
+				return false, err
+			}
+			if err = paymentActivity(tx, id, "fulfillment.blocked", message, now.Unix()); err != nil {
+				return false, err
+			}
+			return false, tx.Commit()
+		}
 		if err != nil {
 			return false, err
 		}
@@ -169,6 +189,9 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 			return false, err
 		}
 		if err = paymentActivity(tx, id, "fulfilled", "订阅已开通，有效期从本次开通时开始计算", now.Unix()); err != nil {
+			return false, err
+		}
+		if _, err = tx.Exec("UPDATE payment_node_reservations SET released=1 WHERE order_id=?", id); err != nil {
 			return false, err
 		}
 		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'payment.fulfilled',?)", now.Unix(), id+":"+e.ID); err != nil {

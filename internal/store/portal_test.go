@@ -20,7 +20,7 @@ func portalFixture(t *testing.T, slots int, quota *int64) (*Store, *time.Time, m
 	if e := s.SetStatus(n.ID, "ready", "test", false); e != nil {
 		t.Fatal(e)
 	}
-	_, _ = s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]' WHERE id=?", n.ID)
+	_, _ = s.DB.Exec("UPDATE nodes SET capabilities='[\"admission-v1\"]',last_seen=?,core_healthy=1 WHERE id=?", s.Now().Unix(), n.ID)
 	u, e := s.RegisterPortal("Person@Example.com", "test-user-password-123")
 	if e != nil {
 		t.Fatal(e)

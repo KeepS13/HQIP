@@ -1,8 +1,10 @@
 package control
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/store"
@@ -25,15 +27,28 @@ func subscriptionFixture(t *testing.T, s *Server, user model.PortalUser, ids []s
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := s.Store.PortalUser(user.ID)
+	// Seed a pre-upgrade full-pool subscription; export tests may intentionally
+	// start with offline nodes. Purchase allocation is tested separately.
+	id := store.NewID()
+	raw, _ := json.Marshal(ids)
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", []any{id, user.ID, p.ID, s.Store.Now().Unix(), s.Store.Now().Add(30 * 24 * time.Hour).Unix(), store.NewID()}},
+		{"INSERT INTO portal_usage(subscription_id) VALUES(?)", []any{id}},
+		{"INSERT INTO subscription_allocations(subscription_id,target_count,node_ids) VALUES(?,?,?)", []any{id, len(ids), string(raw)}},
+		{"UPDATE portal_users SET revision=revision+1 WHERE id=?", []any{user.ID}},
+	} {
+		if _, err = s.Store.DB.Exec(q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sub, err := s.Store.UserSubscription(user.ID, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sub, err := s.Store.AssignSubscription(user.ID, p.ID, store.NewID(), current.Revision, p.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return sub
+	return *sub
 }
 
 func TestSubscriptionRequestApprovalAndUserIsolation(t *testing.T) {
@@ -62,6 +77,20 @@ func TestSubscriptionRequestApprovalAndUserIsolation(t *testing.T) {
 		t.Fatal("retired approval route remained writable", w.Code)
 	}
 	current, err := s.Store.PortalUser(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.NodeIDs = append(p.NodeIDs, allocationNode(t, s).ID)
+	p, err = s.Store.SaveSubscriptionTemplate(p.ID, p, p.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.Store.UserSubscription(u.ID, sub.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub = *updated
+	current, err = s.Store.PortalUser(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

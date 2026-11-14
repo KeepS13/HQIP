@@ -27,6 +27,7 @@ func TestPaymentRoutesAndAutomaticIndependentGrant(t *testing.T) {
 	}
 	price := int64(100)
 	p.PriceCents = &price
+	p.NodeIDs = append(p.NodeIDs, allocationNode(t, s).ID)
 	p, err = s.Store.SaveSubscriptionTemplate(p.ID, p, p.Revision)
 	if err != nil {
 		t.Fatal(err)
