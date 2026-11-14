@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowDown, ArrowRight, ArrowUp, CalendarClock, Clock3, Globe2, Plus, Search, Server, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, CalendarClock, Clock3, Globe2, Plus, Search, Server, Settings2, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { api, usePolling } from "../api";
 import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, TrafficChart, bytes, date, useToast } from "../components";
 import QuotaFields from "../QuotaFields";
@@ -117,7 +117,7 @@ export function Servers() {
   const query = search.trim().toLowerCase();
   const visible = (data || []).filter(server => (!query || [server.name, server.sshHost, ...(server.addresses || []).map(address => address.ip)].some(value => value.toLowerCase().includes(query))) && (!abnormal || serverHealth(server, !!error).tone === "warning" || billingExpiry(billingFor(server)).abnormal)).sort(compareResourceNames);
   return <>
-    <PageHeader title="服务器" eyebrow="SERVERS" description="按 VPS 汇总资源、节点速率与代理用量，独立管理每个公网 IP。" actions={<><RefreshButton refresh={refresh} /><Button variant="secondary" onClick={()=>setUpgrade(true)}>批量升级 Agent</Button><Button icon={Plus} onClick={() => setAdd(true)}>添加服务器</Button></>} />
+    <PageHeader title="服务器" eyebrow="SERVERS" description="按 VPS 汇总资源、节点速率与代理用量，独立管理每个公网 IP。" actions={<><RefreshButton refresh={refresh} /><Button variant="secondary" icon={Upload} onClick={()=>setUpgrade(true)}>批量升级 Agent</Button><Button icon={Plus} onClick={() => setAdd(true)}>添加服务器</Button></>} />
     <ErrorNotice message={error ? `${error}${data ? "；以下保留上次成功数据，已标记过期。" : ""}` : ""} retry={() => void refresh()} />
     <div className="list-toolbar server-toolbar"><span className="list-count">服务器 <span>{data?.length || 0}</span></span><div className="server-filters"><label className="search-input"><Search size={15} /><input aria-label="搜索服务器名称或 IP" placeholder="搜索服务器名称 / IP" value={search} onChange={e => setSearch(e.target.value)} /></label><button type="button" className={`server-filter ${abnormal ? "active" : ""}`} aria-pressed={abnormal} onClick={() => setAbnormal(value => !value)}>仅看异常</button></div></div>
     {loading ? <Loading /> : !data ? null : !data.length ? <Panel title="添加第一台服务器"><Empty icon={Server} title="还没有服务器" description="登记 SSH 地址并完成身份检查后，可以添加一个或多个公网 IP。" action={<Button onClick={() => setAdd(true)} icon={Plus}>添加服务器</Button>} /></Panel> : !visible.length ? <Panel title="筛选结果"><Empty icon={Search} title="没有匹配的服务器" description="尝试更换名称、IP，或关闭异常筛选。" /></Panel> : <div className="server-grid">{visible.map(server => {
@@ -169,12 +169,9 @@ export function ServerPage() {
   }
   return <>
     <Breadcrumb to="/servers" label="服务器" current={server.name} />
-    <PageHeader title={server.name} eyebrow="SERVER DETAILS" description={`${server.sshUser}@${server.sshHost}:${server.sshPort} · ${server.platform || "待验证"}`} actions={<><RefreshButton refresh={async () => { await Promise.all([refresh(), traffic.refresh()]); }} /><Button variant="secondary" icon={Settings2} onClick={() => setSettings(true)}>额度与续期</Button><Button variant="secondary" onClick={() => setEdit(true)}>编辑连接</Button><Button variant="danger" icon={Trash2} onClick={() => { setActionError(""); setRemove("server"); }}>删除服务器</Button></>} />
+    <PageHeader title={server.name} eyebrow="SERVER DETAILS" description={`${server.sshUser}@${server.sshHost}:${server.sshPort} · ${server.platform || "待验证"}`} actions={<><RefreshButton refresh={async () => { await Promise.all([refresh(), traffic.refresh()]); }} /><Button variant="secondary" icon={Upload} onClick={()=>setUpgrade(true)}>升级 Agent</Button><Button variant="secondary" icon={Settings2} onClick={() => setSettings(true)}>额度与续期</Button><Button variant="secondary" onClick={() => setEdit(true)}>编辑连接</Button><Button variant="danger" icon={Trash2} onClick={() => { setActionError(""); setRemove("server"); }}>删除服务器</Button></>} />
     <ErrorNotice message={error ? `${error}；以下为上次成功数据，当前状态未知。` : ""} retry={() => void refresh()} />
     <div className="server-detail-summary"><Badge tone={health.tone}>{health.label}</Badge><span><ShieldCheck size={14} />{server.machineId ? "主机身份已验证" : "主机身份待验证"}</span><span>{server.nodeCount} 个节点 / {server.ipCount} 个 IP</span><span>带宽容量：{server.bandwidthMbps == null ? "不限量" : `${server.bandwidthMbps} Mbps`}</span></div>
-    <BillingSummary resource={server} />
-    <ServerCredentialPanel server={server} />
-    <div className="row-actions"><Button variant="secondary" onClick={()=>setUpgrade(true)}>升级本机 Agent</Button></div>
     <div className="two-column server-detail-metrics">
       <Panel title="服务器资源" subtitle="采用一个最新主机样本；磁盘为 Agent 数据目录所在文件系统">
         <ServerResources server={server} stale={!!error} />
@@ -184,6 +181,8 @@ export function ServerPage() {
         <ServerRates server={server} stale={!!error} /><div className="server-detail-quota"><ServerQuota server={server} /><p>自然月流量 {bytes(server.monthUpload + server.monthDownload)} · 累计代理流量 {bytes(server.totalUpload + server.totalDownload)}<br />累计上传 {bytes(server.totalUpload)} / 下载 {bytes(server.totalDownload)}</p></div>
       </Panel>
     </div>
+    <div className="server-management-grid"><BillingSummary resource={server} /><ServerCredentialPanel server={server} /></div>
+    <OperationHistory serverId={server.id} />
     <TrafficChart points={traffic.data || []} title="服务器代理流量" subtitle="所有节点合计 · 包含已删除节点历史 · 不含探测 · 北京时间" period={period} onPeriodChange={setPeriod} loading={traffic.loading} error={traffic.error} />
     <Panel title="节点流量贡献" subtitle="各节点实际上传与下载；实时速率含探测，代理用量不含探测">
       {activeUsage.length ? <div className="table-scroll"><table><thead><tr><th>节点 / 公网 IP / 域名</th><th>状态</th><th>实时速率</th><th>代理用量</th><th>本月上传 / 下载</th><th>累计代理流量</th></tr></thead><tbody>{activeUsage.map(node => <tr key={node.id}>
