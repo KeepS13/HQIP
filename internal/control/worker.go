@@ -20,13 +20,18 @@ func (s *Server) RunWorker(ctx context.Context) error {
 	if s.initErr != nil {
 		return s.initErr
 	}
-	if err := s.Store.RecoverNetworkQuality(); err != nil {
-		return err
+	if !retryTaskState(ctx, "恢复中断的后台任务", func() error {
+		if err := s.Store.RecoverNetworkQuality(); err != nil {
+			return err
+		}
+		if err := s.Store.RecoverJobs(); err != nil {
+			return err
+		}
+		return s.Store.RecoverServerOperations()
+	}) {
+		return nil
 	}
-	if err := s.Store.RecoverJobs(); err != nil {
-		return err
-	}
-	_ = s.Store.Maintenance()
+	s.maintain(ctx)
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
 	defer stopMaintenance()
 	s.cloudflareMaintenance(maintenanceCtx)
@@ -38,7 +43,7 @@ func (s *Server) RunWorker(ctx context.Context) error {
 			case <-maintenanceCtx.Done():
 				return
 			case <-ticker.C:
-				_ = s.Store.Maintenance()
+				s.maintain(maintenanceCtx)
 				s.cloudflareMaintenance(maintenanceCtx)
 			}
 		}
@@ -49,13 +54,48 @@ func (s *Server) RunWorker(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		job, err := s.Store.NextJob()
-		if err == nil {
-			s.runJob(ctx, job)
+		var op store.ServerOperation
+		var job store.Job
+		// Recover an ambiguous claim only while this sole worker has no
+		// remote operation in flight; never repeat a running remote effect.
+		recoverClaims := false
+		if !retryTaskState(ctx, "领取后台任务", func() error {
+			if recoverClaims {
+				if err := s.Store.RecoverJobs(); err != nil {
+					return err
+				}
+				if err := s.Store.RecoverServerOperations(); err != nil {
+					return err
+				}
+			}
+			var err error
+			op, err = s.Store.NextServerOperation()
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				recoverClaims = true
+				return err
+			}
+			job, err = s.Store.NextJob()
+			if errors.Is(err, store.ErrNotFound) {
+				job = store.Job{}
+				return nil
+			}
+			if err != nil {
+				recoverClaims = true
+			}
+			return err
+		}) {
+			return nil
+		}
+		if op.ID != "" {
+			s.runServerOperation(ctx, op)
 			continue
 		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return err
+		if job.ID != 0 {
+			s.runJob(ctx, job)
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -72,19 +112,19 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	}
 	node, err := s.Store.Node(job.NodeID)
 	if err != nil {
-		s.Store.FinishJob(job, false)
+		s.finishJob(parent, job, false)
 		return
 	}
 	password, token, probe, err := s.Store.NodeSecrets(node.ID)
 	if err != nil {
 		_ = s.Store.SetStatus(node.ID, "error", "读取节点凭据失败，请检查主密钥", node.SharedHost)
-		s.Store.FinishJob(job, false)
+		s.finishJob(parent, job, false)
 		return
 	}
 	if (job.Kind == "install" || job.Kind == "retire") && password == "" {
 		_ = s.Store.SetStatus(node.ID, "error", "SSH 密码已过期，请重新输入密码并重试", node.SharedHost)
 		_ = s.Store.Event(node.ID, "error", "SSH 密码已过期，请重新输入密码并重试")
-		s.Store.FinishJob(job, false)
+		s.finishJob(parent, job, false)
 		return
 	}
 	redact := func(message string) string {
@@ -152,7 +192,7 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	active, checkErr := s.Store.JobActive(job.ID)
 	if checkErr != nil || !active {
 		log("cancelled", "部署任务已取消，保留需要确认清理的安装记录")
-		s.Store.FinishJob(job, false)
+		s.finishJob(parent, job, false)
 		return
 	}
 	if job.Kind == "retire" {
@@ -162,7 +202,7 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 			log("deleted", "已确认本节点服务停止并清理")
 			s.cloudflareMaintenance(parent)
 		}
-		s.Store.FinishJob(job, err == nil)
+		s.finishJob(parent, job, err == nil)
 		return
 	}
 	if err == nil && job.Kind == "install" && job.CertificateMode != "" {
@@ -172,7 +212,7 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 		message := "部署或验证失败：" + redact(err.Error())
 		_ = s.Store.SetStatus(node.ID, "error", message, output.SharedHost || node.SharedHost)
 		log("error", message)
-		s.Store.FinishJob(job, false)
+		s.finishJob(parent, job, false)
 		return
 	}
 	if job.Kind == "install" {
@@ -201,7 +241,9 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	}
 	_ = s.Store.SetStatus(node.ID, status, message, output.ACMEViaCaddy)
 	log(status, message)
-	s.Store.FinishJob(job, output.Verified || output.ControlOnNode)
+	if !s.finishJob(parent, job, output.Verified || output.ControlOnNode) {
+		return
+	}
 	if job.Kind == "install" && (output.Verified || output.ControlOnNode) {
 		if _, ok := s.runner.(networkQualityRunner); ok {
 			// Commit installation first: a crash during an optional diagnostic

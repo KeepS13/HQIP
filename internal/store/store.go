@@ -110,6 +110,10 @@ func Open(dataDir, baseURL string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = EnsureOperationsSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = os.Chmod(filepath.Join(dataDir, "hqip.db"), 0600); err != nil {
 		db.Close()
 		return nil, err
@@ -176,31 +180,7 @@ func (s *Store) DeleteSession(token string) {
 }
 
 func (s *Store) Maintenance() error {
-	now := s.Now()
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, q := range []struct {
-		query string
-		arg   any
-	}{
-		{"UPDATE nodes SET password='',password_expires=0 WHERE password_expires>0 AND password_expires<?", now.Unix()},
-		{"DELETE FROM sessions WHERE expires<?", now.Unix()},
-		{"DELETE FROM spent_refresh WHERE expires<?", now.Unix()},
-		{"DELETE FROM minute WHERE start<?", now.AddDate(0, 0, -7).Unix()},
-		{"DELETE FROM hourly WHERE start<?", now.AddDate(0, 0, -90).Unix()},
-		{"DELETE FROM daily WHERE start<?", DayStart(now.AddDate(0, -13, 0))},
-		{"DELETE FROM events WHERE created_at<?", now.AddDate(0, 0, -30).Unix()},
-		{"DELETE FROM audit WHERE at<?", now.AddDate(0, -13, 0).Unix()},
-		{"DELETE FROM jobs WHERE state IN ('done','error') AND created_at<?", now.AddDate(0, 0, -30).Unix()},
-	} {
-		if _, err = tx.Exec(q.query, q.arg); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return s.MaintenanceContext(context.Background())
 }
 
 func (s *Store) Event(nodeID, stage, message string) error {

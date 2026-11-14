@@ -310,11 +310,11 @@ class UpgradeDiskGateTests(unittest.TestCase):
             gate.assert_called_once()
             self.assertNotIn(unittest.mock.call(release), pointer.call_args_list)
             self.assertEqual((base / 'current').resolve(), previous)
-            run.assert_any_call('systemctl', 'start', domains.control.SERVICE)
+            run.assert_not_called()  # Online preparation failed before stopping the API.
             self.assertEqual((data / 'postgresql.enabled').read_text(), 'paired-live-pg')
             self.assertEqual((data / 'master.key').read_text(), 'paired-live-key')
             self.assertEqual((state / 'postgres.before.tar.gz').read_text(), 'postgres backup preserved')
-            self.assertEqual(json.loads((state / 'domains-state.json').read_text())['phase'], 'rolled-back-data-preserved')
+            self.assertEqual(json.loads((state / 'domains-state.json').read_text())['phase'], 'preparation-failed-service-preserved')
             sqlite.assert_not_called()
             # With sufficient space, limits are installed before selecting the
             # new release, while the same PostgreSQL data is kept in place.
@@ -326,7 +326,7 @@ class UpgradeDiskGateTests(unittest.TestCase):
             pointer.side_effect = lambda target: order.append(('current', target))
             with patch('fresh_deploy.install_log_limits', side_effect=lambda target: order.append(('limits', target))):
                 domains.upgrade(release, backups / 'ci-success')
-            self.assertEqual(order, ['space', ('limits', release), ('current', release)])
+            self.assertEqual(order, ['space', ('limits', release), 'space', ('current', release)])
             self.assertEqual((data / 'postgresql.enabled').read_text(), 'paired-live-pg')
             self.assertEqual((data / 'master.key').read_text(), 'paired-live-key')
             sqlite.assert_not_called()

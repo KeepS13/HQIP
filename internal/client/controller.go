@@ -88,6 +88,7 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 			return nil, e
 		}
 		c.api = a
+		c.bindTokenPersistence(a)
 		c.view.LoggedIn = true
 		c.view.DeviceName = c.saved.Profile.Name
 		c.view.DesiredNodeID = c.saved.SelectedNodeID

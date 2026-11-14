@@ -150,6 +150,13 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.SSHHost, f.SSHPort, f.SSHUser = server.SSHHost, server.SSHPort, server.SSHUser
+		if f.Password == "" {
+			f.Password, err = s.Store.ServerPassword(server)
+			if err != nil {
+				managementError(w, err)
+				return
+			}
+		}
 	}
 	if err := f.validate(); err != nil {
 		fail(w, 400, err.Error())
@@ -292,6 +299,14 @@ func (s *Server) retryNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if !readJSON(w, r, &body) {
 		return
+	}
+	if body.Password == "" {
+		var err error
+		body.Password, err = s.savedNodePassword(r.PathValue("id"))
+		if err != nil {
+			managementError(w, err)
+			return
+		}
 	}
 	if len(body.Password) < 1 || len(body.Password) > 1024 {
 		fail(w, 400, "请重新填写 SSH 密码")

@@ -25,6 +25,7 @@ type serverForm struct {
 	SSHPort           int        `json:"sshPort"`
 	SSHUser           string     `json:"sshUser"`
 	Password          string     `json:"password"`
+	SaveCredential    bool       `json:"saveCredential"`
 	ExpectedRevision  int64      `json:"expectedRevision"`
 	BandwidthMbps     *float64   `json:"bandwidthMbps"`
 	MonthlyQuotaBytes *int64     `json:"monthlyQuotaBytes"`
@@ -144,7 +145,11 @@ func (s *Server) createServer(w http.ResponseWriter, r *http.Request) {
 		result(w, nil, err)
 		return
 	}
-	v, err := s.Store.CreateServer(checked, actor)
+	password := ""
+	if f.SaveCredential {
+		password = f.Password
+	}
+	v, err := s.Store.CreateServerWithCredential(checked, password, actor)
 	if err != nil {
 		managementError(w, err)
 		return
@@ -178,7 +183,11 @@ func (s *Server) updateServer(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	v, err := s.Store.UpdateServer(checked, f.ExpectedRevision)
+	password := ""
+	if f.SaveCredential {
+		password = f.Password
+	}
+	v, err := s.Store.UpdateServer(checked, f.ExpectedRevision, password)
 	if err != nil {
 		managementError(w, err)
 		return
@@ -354,6 +363,14 @@ func (s *Server) nodePreflight(w http.ResponseWriter, r *http.Request) {
 	}
 	if !readJSON(w, r, &b) {
 		return
+	}
+	if b.Password == "" {
+		var err error
+		b.Password, err = s.savedNodePassword(r.PathValue("id"))
+		if err != nil {
+			managementError(w, err)
+			return
+		}
 	}
 	if len(b.Password) < 1 || len(b.Password) > 1024 {
 		fail(w, 400, "请填写 SSH 密码")

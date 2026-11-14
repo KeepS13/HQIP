@@ -381,7 +381,8 @@ func (s *Store) NextJob() (Job, error) {
 	var options string
 	err = tx.QueryRow(`SELECT j.id,j.node_id,j.kind,j.options FROM jobs j JOIN nodes n ON n.id=j.node_id
 WHERE j.state='pending' AND ((n.lifecycle='active' AND j.kind!='retire') OR (n.lifecycle='retiring' AND j.kind='retire'))
-AND NOT EXISTS(SELECT 1 FROM jobs busy JOIN nodes bn ON bn.id=busy.node_id WHERE busy.state IN ('running','cancelling') AND json_extract(bn.config,'$.serverId')=json_extract(n.config,'$.serverId')) ORDER BY j.id LIMIT 1`).Scan(&j.ID, &j.NodeID, &j.Kind, &options)
+AND NOT EXISTS(SELECT 1 FROM jobs busy JOIN nodes bn ON bn.id=busy.node_id WHERE busy.state IN ('running','cancelling') AND json_extract(bn.config,'$.serverId')=json_extract(n.config,'$.serverId'))
+AND NOT EXISTS(SELECT 1 FROM server_operations op WHERE op.server_id=json_extract(n.config,'$.serverId') AND op.state IN ('running','uncertain')) ORDER BY j.id LIMIT 1`).Scan(&j.ID, &j.NodeID, &j.Kind, &options)
 	if err != nil {
 		return j, notFound(err)
 	}
@@ -398,32 +399,36 @@ AND NOT EXISTS(SELECT 1 FROM jobs busy JOIN nodes bn ON bn.id=busy.node_id WHERE
 	}
 	return j, tx.Commit()
 }
-func (s *Store) FinishJob(j Job, success bool) {
+func (s *Store) FinishJob(j Job, success bool) error {
 	state := "error"
 	if success {
 		state = "done"
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return
+		return err
 	}
+	defer tx.Rollback()
 	err = tx.QueryRow("UPDATE jobs SET state=CASE WHEN state='cancelling' THEN 'cancelled' ELSE ? END WHERE id=? AND state IN ('running','cancelling') RETURNING state", state, j.ID).Scan(&state)
 	if err == nil && state == "error" {
 		err = recordJobNotification(tx, j.ID, s.Now().Unix())
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		_ = tx.Rollback()
-		return
+		return err
 	}
 	if err = tx.Commit(); err != nil {
-		return
+		return err
 	}
 	// If no owner was ever installed, cancellation has no remote resources to
 	// retire. Managed partial installs remain visible until stopped/cleaned.
 	var abandoned int
-	if s.DB.QueryRow("SELECT COUNT(*) FROM nodes WHERE id=? AND lifecycle='retiring' AND managed=0 AND NOT EXISTS(SELECT 1 FROM jobs WHERE node_id=? AND state IN ('running','cancelling'))", j.NodeID, j.NodeID).Scan(&abandoned) == nil && abandoned == 1 {
-		_ = s.CompleteNodeRetirement(j.NodeID)
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM nodes WHERE id=? AND lifecycle='retiring' AND managed=0 AND NOT EXISTS(SELECT 1 FROM jobs WHERE node_id=? AND state IN ('running','cancelling'))", j.NodeID, j.NodeID).Scan(&abandoned); err != nil {
+		return err
 	}
+	if abandoned == 1 {
+		return s.CompleteNodeRetirement(j.NodeID)
+	}
+	return nil
 }
 func (s *Store) Queue(id, kind, password string) (model.Node, error) {
 	if kind != "install" && kind != "verify" {

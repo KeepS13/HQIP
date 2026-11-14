@@ -27,6 +27,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { api, usePolling } from "../api";
+import { AgentUpgradeDialog } from "./ServerOperations";
 import { billingFor, billingTotal, billingUsageLabel } from "../billing";
 import { BillingSummary } from "./ServerBilling";
 import {
@@ -85,7 +86,7 @@ function AddNode({ onClose }: { onClose: () => void }) {
       <Field label="域名方式"><select value={form.dnsMode || "manual"} onChange={e => change("dnsMode", e.target.value)}><option value="cloudflare" disabled={!settings.data?.configured}>Cloudflare 自动分配</option><option value="manual">使用已有域名</option></select></Field>
       {form.dnsMode === "cloudflare" ? <Field label="Cloudflare 域名" hint="自动创建独立子域名和仅 DNS 的 A 记录"><select required value={form.zoneId} onChange={e => change("zoneId", e.target.value)}><option value="">选择域名</option>{settings.data?.defaultZoneId && !zones.some(z => z.id === settings.data!.defaultZoneId) && <option value={settings.data.defaultZoneId}>{settings.data.defaultZoneName}</option>}{zones.map(z => <option value={z.id} key={z.id} disabled={z.status !== "active"}>{z.name}</option>)}</select></Field> : <Field label="已有节点域名" hint="A 记录需指向所选 IP；HTTP 证书验证需要此 IP 的 TCP 80 可用"><input required value={form.domain} pattern="[^/ :]+[.][^/ :]+" onChange={e => change("domain", e.target.value)} placeholder="node.example.com" autoCapitalize="none" /></Field>}
       {!settings.data?.configured && <p className="muted"><Link to="/domains">配置 Cloudflare Token</Link> 后可自动分配域名。</p>}
-      <div className="form-grid"><Field label="本次部署的 SSH 密码"><input type="password" required autoComplete="new-password" value={form.password} onChange={e => change("password", e.target.value)} /></Field><Field label="Hysteria UDP 端口"><input type="number" required min={1} max={65535} value={form.port} onChange={e => change("port", e.target.value)} /></Field></div>
+      <div className="form-grid"><Field label="本次部署的 SSH 密码" hint="留空使用服务器已保存的 SSH 凭据。"><input type="password" autoComplete="new-password" value={form.password} onChange={e => change("password", e.target.value)} /></Field><Field label="Hysteria UDP 端口"><input type="number" required min={1} max={65535} value={form.port} onChange={e => change("port", e.target.value)} /></Field></div>
       <Notice>节点记录实际上传与下载流量，统计周期随所属服务器。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。</Notice>
       <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy} icon={Plus}>添加并部署</Button></div>
     </form>
@@ -386,6 +387,7 @@ function TaskLog({ node, events }: { node: Node; events: TaskEvent[] }) {
 }
 
 export function NodePage() {
+	const [upgrade,setUpgrade]=useState(false);
   const { id } = useParams(),
     { data, error, loading, refresh } = usePolling<NodeDetail>(`/nodes/${id}`),
     [edit, setEdit] = useState(false),
@@ -426,6 +428,7 @@ export function NodePage() {
         actions={
           <>
             <NodeBadge node={node} />
+            {node.lifecycle === "active" && node.managed && <Button variant="secondary" onClick={()=>setUpgrade(true)}>升级 Agent</Button>}
             {node.lifecycle === "active" && ["ready", "awaiting_external"].includes(node.status) && <Button variant="secondary" icon={Terminal} onClick={() => setRetry(true)}>重新部署 / 证书方式</Button>}
             {node.lifecycle === "active" && <Button variant="danger" icon={Trash2} onClick={() => setRemove(true)}>删除节点</Button>}
             <Button
@@ -630,6 +633,7 @@ export function NodePage() {
           refresh={refresh}
         />
       )}
+      {upgrade && <AgentUpgradeDialog nodes={[node]} onClose={()=>setUpgrade(false)} />}
     </>
   );
 }

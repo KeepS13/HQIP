@@ -53,6 +53,8 @@ func run(args []string) error {
 		return migratePayments(args[1:])
 	case "migrate-subscription-allocations":
 		return migrateSubscriptionAllocations(args[1:])
+	case "migrate-operations":
+		return migrateOperations(args[1:])
 	default:
 		return errors.New("未知命令；可用命令：serve、init-admin、backup、restore、storage-info、migrate-payments、migrate-subscription-allocations")
 	}

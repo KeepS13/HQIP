@@ -99,7 +99,12 @@ func (s *Server) portalAuth(kind string, next portalHandler) http.Handler {
 		}
 		user, session, csrf, err := s.Store.PortalIdentity(token, kind)
 		if err != nil {
-			fail(w, 401, "用户登录已失效")
+			if errors.Is(err, store.ErrUnauthorized) {
+				fail(w, 401, "用户登录已失效")
+			} else {
+				w.Header().Set("Retry-After", "5")
+				fail(w, 503, "账户服务暂时不可用，请稍后重试")
+			}
 			return
 		}
 		if kind == "browser" && r.Method != "GET" && r.Method != "HEAD" && (!s.portalOrigin(r) || !secure.Equal(csrf, r.Header.Get("X-CSRF-Token"))) {
@@ -308,7 +313,12 @@ func (s *Server) finishPortalLogin(w http.ResponseWriter, b portalLoginBody) {
 func (s *Server) portalSession(w http.ResponseWriter, r *http.Request) {
 	user, _, csrf, err := s.Store.PortalIdentity(portalCookie(r), "browser")
 	if err != nil {
-		reply(w, 200, map[string]bool{"authenticated": false})
+		if errors.Is(err, store.ErrUnauthorized) {
+			reply(w, 200, map[string]bool{"authenticated": false})
+		} else {
+			w.Header().Set("Retry-After", "5")
+			fail(w, 503, "账户服务暂时不可用，请稍后重试")
+		}
 		return
 	}
 	u, err := s.Store.PortalUser(user)
@@ -459,11 +469,17 @@ func (s *Server) nativeToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) nativeRefresh(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		RefreshToken string `json:"refreshToken"`
+		RequestID    string `json:"requestId"`
 	}
 	if !readJSON(w, r, &b) {
 		return
 	}
-	t, e := s.Store.PortalRefresh(b.RefreshToken)
+	t, e := s.Store.PortalRefreshRequest(b.RefreshToken, b.RequestID)
+	if e != nil && !errors.Is(e, store.ErrUnauthorized) {
+		w.Header().Set("Retry-After", "5")
+		fail(w, 503, "账户服务暂时不可用，请稍后重试")
+		return
+	}
 	portalResult(w, t, e)
 }
 func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, session string) {

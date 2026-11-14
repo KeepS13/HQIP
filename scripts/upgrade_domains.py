@@ -190,6 +190,8 @@ def rollback(state):
 def upgrade(release,state):
  check_state(state);release,manifest,previous=verify(release)
  migration_env=allocation_migration_environment(manifest)
+ from operations_deployment import prepare as prepare_operations, migrate as migrate_operations
+ operations_env=prepare_operations(sys.modules[__name__],manifest)
  if SITE.is_symlink() or UNIT.is_symlink():raise ValueError('Unexpected configuration symlink')
  state.mkdir(mode=0o700,exist_ok=False)
  shutil.copyfile(SITE,state/'nginx.before.conf');shutil.copyfile(UNIT,state/'unit.before.service')
@@ -197,23 +199,36 @@ def upgrade(release,state):
  if PREP.is_symlink():info['prepareTarget']=str(PREP.resolve(strict=True))
  elif PREP.exists():raise ValueError('Unexpected preparation site')
  (state/'domains-state.json').write_text(json.dumps(info,indent=2))
- control.run('systemctl','stop',control.SERVICE)
+ # pg_dump takes a transactionally consistent online snapshot. Back up and
+ # prepare additive schema while APIs still serve lease renewals; rollback
+ # always keeps the live database rather than restoring this older snapshot.
  try:
-  if data_identity()!=info['masterSHA256']:raise ValueError('Stopped data identity changed')
-  if manifest.get('schemaVersion',4)==5:subscription_migration_ready()
   if any(p.is_symlink() for p in control.DATA.rglob('*')):raise ValueError('Symlink in live data')
   if postgres_enabled():
    process=subprocess.run([str(previous/'hqip'),'backup','--data-dir',str(control.DATA),'--output',str(state/'postgres.before.tar.gz')],env=storage_environment(),capture_output=True,timeout=1900,check=False)
    if process.returncode:raise RuntimeError('PostgreSQL backup failed; release activation refused')
-  else:shutil.copytree(control.DATA,state/'data.before')
+   info['backupMode']='online-consistent-snapshot'
   for p in state.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
+  require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
+  migrate_operations(release,operations_env)
+  from fresh_deploy import install_log_limits
+  install_log_limits(release)
+ except Exception:
+  info['phase']='preparation-failed-service-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
+  raise
+ info['phase']='prepared';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
+ control.run('systemctl','stop',control.SERVICE)
+ try:
+  if data_identity()!=info['masterSHA256']:raise ValueError('Stopped data identity changed')
+  if manifest.get('schemaVersion',4)==5:subscription_migration_ready()
+  if not postgres_enabled():
+   shutil.copytree(control.DATA,state/'data.before')
+   for p in state.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
   disable_feishu()
   # Backups can be larger than the uploaded release. Check actual remaining
   # space after backup and before changing the active code or service files.
   require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
   migrate_allocations(release,migration_env,state,info)
-  from fresh_deploy import install_log_limits
-  install_log_limits(release)
   control.point_current(release)
   shutil.copyfile(release/'deploy/hqip-control.service',UNIT);UNIT.chmod(0o644)
   shutil.copyfile(release/'deploy/nginx-hqip.conf',SITE);SITE.chmod(0o644)

@@ -72,7 +72,7 @@ func (s *Server) queueNetworkQuality(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) runQualityJob(parent context.Context, job store.Job) {
 	// Never turn a failed optional diagnostic into a node deployment failure.
-	defer func() { s.Store.ClearSSHPassword(job.NodeID); s.Store.FinishJob(job, true) }()
+	defer func() { s.Store.ClearSSHPassword(job.NodeID); s.finishJob(parent, job, true) }()
 	n, err := s.Store.Node(job.NodeID)
 	if err != nil {
 		_ = s.Store.FinishNetworkQuality(job.NodeID, job.ID, "cancelled", "节点已不可用", nil)

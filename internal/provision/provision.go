@@ -149,11 +149,13 @@ func (r *remote) put(ctx context.Context, path string, data []byte, mode string)
 }
 
 func (r *Runner) connect(ctx context.Context, in Input, pin PinFunc) (*remote, error) {
+	var identityErr error
 	cfg := &ssh.ClientConfig{User: in.Node.SSHUser, Auth: []ssh.AuthMethod{ssh.Password(in.Password)}, Timeout: 20 * time.Second,
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			fp := ssh.FingerprintSHA256(key)
 			if in.Node.HostKey != "" && in.Node.HostKey != fp {
-				return errors.New("SSH 主机指纹已改变，已停止连接")
+				identityErr = ErrSSHIdentity
+				return identityErr
 			}
 			if pin == nil {
 				return errors.New("缺少 SSH 指纹持久化回调")
@@ -166,10 +168,20 @@ func (r *Runner) connect(ctx context.Context, in Input, pin PinFunc) (*remote, e
 	if err != nil {
 		return nil, fmt.Errorf("SSH 网络连接失败: %w", err)
 	}
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	deadline := time.Now().Add(30 * time.Second)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
+	}
+	_ = conn.SetDeadline(deadline)
 	c, ch, req, err := ssh.NewClientConn(conn, address, cfg)
 	if err != nil {
 		conn.Close()
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		if strings.Contains(err.Error(), "unable to authenticate") {
+			return nil, ErrSSHAuthentication
+		}
 		return nil, errors.New("SSH 握手、密码或主机指纹验证失败")
 	}
 	_ = conn.SetDeadline(time.Time{})

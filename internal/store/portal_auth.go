@@ -73,7 +73,10 @@ func (s *Store) PortalIdentity(token, kind string) (user, session, csrf string, 
 	}
 	err = s.DB.QueryRow("SELECT x.user_id,x.id,x.csrf FROM portal_sessions x JOIN portal_users u ON u.id=x.user_id WHERE x.access_hash=? AND x.kind=? AND x.revoked=0 AND x.access_expires>? AND x.expires>? AND u.enabled=1", secure.Hash(token), kind, s.Now().Unix(), s.Now().Unix()).Scan(&user, &session, &csrf)
 	if err != nil {
-		return "", "", "", ErrUnauthorized
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", "", ErrUnauthorized
+		}
+		return "", "", "", err
 	}
 	_, err = s.DB.Exec("UPDATE portal_sessions SET last_seen=? WHERE id=?", s.Now().Unix(), session)
 	return
@@ -124,40 +127,7 @@ func (s *Store) PortalSessions(user, current string) ([]model.PortalSession, err
 	return out, rows.Err()
 }
 func (s *Store) PortalRefresh(token string) (model.PortalTokens, error) {
-	var t model.PortalTokens
-	if len(token) != 43 {
-		return t, ErrUnauthorized
-	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return t, err
-	}
-	defer tx.Rollback()
-	hash := secure.Hash(token)
-	var user, id string
-	var expires int64
-	err = tx.QueryRow("SELECT x.user_id,x.id,x.expires FROM portal_sessions x JOIN portal_users u ON u.id=x.user_id WHERE x.refresh_hash=? AND x.kind='native' AND x.revoked=0 AND x.expires>? AND u.enabled=1", hash, s.Now().Unix()).Scan(&user, &id, &expires)
-	if err != nil {
-		var spent string
-		if tx.QueryRow("SELECT session_id FROM portal_spent_refresh WHERE hash=?", hash).Scan(&spent) == nil {
-			_, _ = tx.Exec("UPDATE portal_sessions SET revoked=1 WHERE id=?", spent)
-			_, _ = tx.Exec("UPDATE portal_leases SET revoked=1 WHERE session_id=?", spent)
-			_ = tx.Commit()
-		}
-		return t, ErrUnauthorized
-	}
-	t = model.PortalTokens{AccessToken: secure.Token(), RefreshToken: secure.Token(), SessionID: id, AccessExpiresAt: s.Now().Add(15 * time.Minute), RefreshExpiresAt: time.Unix(expires, 0).UTC()}
-	if _, err = tx.Exec("INSERT INTO portal_spent_refresh(hash,session_id,expires) VALUES(?,?,?)", hash, id, expires); err != nil {
-		return t, err
-	}
-	if _, err = tx.Exec("UPDATE portal_sessions SET access_hash=?,refresh_hash=?,access_expires=?,last_seen=? WHERE id=?", secure.Hash(t.AccessToken), secure.Hash(t.RefreshToken), t.AccessExpiresAt.Unix(), s.Now().Unix(), id); err != nil {
-		return t, err
-	}
-	if err = tx.Commit(); err != nil {
-		return t, err
-	}
-	t.User, err = s.PortalUser(user)
-	return t, err
+	return s.PortalRefreshRequest(token, "")
 }
 
 var pkceRE = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)

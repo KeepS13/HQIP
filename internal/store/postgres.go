@@ -42,7 +42,7 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	// PostgreSQL extended protocol accepts one statement per Parse. Execute
 	// schema statements individually instead of sending the whole migration
 	// script as one multi-command query.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.ExecContext(ctx, statement); err != nil {
 				return err
@@ -53,6 +53,9 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('subscription_allocations_version','1')"); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('operations_schema_version','1')"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -84,6 +87,10 @@ func OpenPostgres(dataDir, baseURL, dsn string) (*Store, error) {
 	if err = db.QueryRow("SELECT value FROM metadata WHERE key='subscription_allocations_version'").Scan(&version); err != nil || version != "1" {
 		db.Close()
 		return nil, errors.New("订阅节点分配尚未升级，请使用迁移账号执行 hqip migrate-subscription-allocations")
+	}
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='operations_schema_version'").Scan(&version); err != nil || version != "1" {
+		db.Close()
+		return nil, errors.New("服务器运维 schema 未升级，请使用迁移账号执行 hqip migrate-operations")
 	}
 	key, err := os.ReadFile(filepath.Join(dataDir, "master.key"))
 	if err != nil {

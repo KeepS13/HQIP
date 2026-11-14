@@ -55,6 +55,7 @@ type Subscription struct {
 	Revision       int64     `json:"revision"`
 }
 type Tokens struct {
+	RefreshRequestID string    `json:"refreshRequestId,omitempty"`
 	AccessToken      string    `json:"accessToken"`
 	RefreshToken     string    `json:"refreshToken"`
 	AccessExpiresAt  time.Time `json:"accessExpiresAt"`

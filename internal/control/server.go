@@ -88,6 +88,7 @@ func (s *Server) AdminHandler() http.Handler {
 		m.Handle(pattern, s.auth(handler, false))
 	}
 	s.registerServerRoutes(m)
+	s.registerServerOperations(m)
 	s.registerHostResourceRoutes(m)
 	s.registerCloudflareRoutes(m)
 	s.registerPortalAdmin(m)

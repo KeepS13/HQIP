@@ -208,6 +208,7 @@ func (c *Controller) LoginBrowser(server string, open func(string) error) error 
 		return errors.New("登录已取消")
 	}
 	c.api = a
+	c.bindTokenPersistence(a)
 	c.saved.ServerURL = a.base
 	c.saved.AccountVersion = 3
 	c.saved.Tokens = a.Tokens()

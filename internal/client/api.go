@@ -20,11 +20,12 @@ var ErrUnauthorized = errors.New("用户登录已失效，请重新登录")
 var ErrConflict = errors.New("订阅选择已变化，请刷新后重试")
 
 type API struct {
-	mu     sync.Mutex
-	authMu sync.Mutex // Serialize token rotation without blocking local snapshots.
-	base   string
-	tokens Tokens
-	http   *http.Client
+	mu         sync.Mutex
+	authMu     sync.Mutex // Serialize token rotation without blocking local snapshots.
+	base       string
+	tokens     Tokens
+	http       *http.Client
+	saveTokens func() error
 }
 
 func NewAPI(base string, tokens Tokens) (*API, error) {
@@ -126,7 +127,18 @@ func (a *API) auth(ctx context.Context, method, path string, body any, etag stri
 	return b, t, s, e
 }
 func (a *API) refresh(ctx context.Context) error {
-	b, _, _, e := a.request(ctx, "POST", "/api/v3/client/refresh", map[string]string{"refreshToken": a.Tokens().RefreshToken}, "", "")
+	a.mu.Lock()
+	if a.tokens.RefreshRequestID == "" {
+		a.tokens.RefreshRequestID = randomID()
+	}
+	tokensBefore := a.tokens
+	a.mu.Unlock()
+	if a.saveTokens != nil {
+		if e := a.saveTokens(); e != nil {
+			return temporary(errors.New("无法保存登录恢复信息，请检查本机存储"))
+		}
+	}
+	b, _, _, e := a.request(ctx, "POST", "/api/v3/client/refresh", map[string]string{"refreshToken": tokensBefore.RefreshToken, "requestId": tokensBefore.RefreshRequestID}, "", "")
 	if e != nil {
 		return e
 	}
@@ -140,6 +152,11 @@ func (a *API) refresh(ctx context.Context) error {
 	a.mu.Lock()
 	a.tokens = tokens
 	a.mu.Unlock()
+	if a.saveTokens != nil {
+		if e := a.saveTokens(); e != nil {
+			return temporary(errors.New("无法保存刷新后的登录信息，请检查本机存储"))
+		}
+	}
 	return nil
 }
 func (a *API) Profile(ctx context.Context, etag string) (Profile, string, bool, error) {

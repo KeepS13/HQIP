@@ -10,7 +10,8 @@ import zipfile
 NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
                'hysteria-linux-amd64', 'hysteria-linux-arm64', 'caddy-linux-amd64')
 RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py',
-                   'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py')
+                   'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py',
+                   'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py')
 REQUIRED = {'hqip', 'artifacts/manifest.json', 'artifacts/HQIP-Windows-x64.zip',
             'artifacts/desktop-manifest.json', 'admin-web/index.html', 'user-web/index.html',
             'deploy/hqip-control.service', 'deploy/hqip-storage.service', 'deploy/nginx-hqip.conf',
@@ -51,6 +52,11 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
+    operations = manifest.get('operationsVersion', 0)
+    if type(operations) is not int or operations not in (0, 1):
+        raise ValueError('Unsupported operations schema capability')
+    if operations == 0:
+        required = required - {'scripts/operations_deployment.py', 'scripts/upgrade_node_agent.py', 'scripts/upgrade_node_admission.py'}
     hashes = manifest.get('sha256', {})
     if not isinstance(hashes, dict) or not required <= hashes.keys():
         raise ValueError('Incomplete full release manifest')

@@ -27,6 +27,12 @@ func validServer(v model.Server) error {
 	return nil
 }
 func (s *Store) CreateServer(v model.Server, actor ...string) (model.Server, error) {
+	return s.createServer(v, "", actor...)
+}
+func (s *Store) CreateServerWithCredential(v model.Server, password string, actor ...string) (model.Server, error) {
+	return s.createServer(v, password, actor...)
+}
+func (s *Store) createServer(v model.Server, password string, actor ...string) (model.Server, error) {
 	if v.SSHPort == 0 {
 		v.SSHPort = 22
 	}
@@ -65,6 +71,11 @@ func (s *Store) CreateServer(v model.Server, actor ...string) (model.Server, err
 	_, err = tx.Exec("INSERT INTO servers(id,config) VALUES(?,?)", v.ID, config)
 	if err != nil {
 		return v, err
+	}
+	if password != "" {
+		if err = s.saveServerCredential(tx, v, password); err != nil {
+			return v, err
+		}
 	}
 	if v.Billing.ExpiresAt != nil {
 		if err = setupServerBilling(tx, v.ID, *v.Billing.ExpiresAt, v.Revision, billingActor(actor), s.Now()); err != nil {
@@ -131,7 +142,7 @@ func (s *Store) Servers() ([]model.Server, error) {
 	}
 	return result, nil
 }
-func (s *Store) UpdateServer(v model.Server, expected int64) (model.Server, error) {
+func (s *Store) UpdateServer(v model.Server, expected int64, password ...string) (model.Server, error) {
 	if err := validServer(v); err != nil {
 		return v, err
 	}
@@ -147,6 +158,9 @@ func (s *Store) UpdateServer(v model.Server, expected int64) (model.Server, erro
 	}
 	if rev != expected {
 		return v, ErrConflict
+	}
+	if err = ensureServerIdle(tx, v.ID); err != nil {
+		return v, err
 	}
 	var old model.Server
 	if err = json.Unmarshal([]byte(raw), &old); err != nil {
@@ -169,6 +183,11 @@ func (s *Store) UpdateServer(v model.Server, expected int64) (model.Server, erro
 	}
 	if _, err = tx.Exec("UPDATE nodes SET config=json_set(config,'$.sshHost',?,'$.sshPort',?,'$.sshUser',?,'$.hostKey',?,'$.machineId',?) WHERE json_extract(config,'$.serverId')=? AND lifecycle!='deleted'", v.SSHHost, v.SSHPort, v.SSHUser, v.HostKey, v.MachineID, v.ID); err != nil {
 		return v, err
+	}
+	if len(password) > 0 && password[0] != "" {
+		if err = s.saveServerCredential(tx, v, password[0]); err != nil {
+			return v, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return v, err
@@ -204,6 +223,9 @@ func (s *Store) DeleteServer(id string, expected int64) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err = ensureServerIdle(tx, id); err != nil {
+		return err
+	}
 	var rev int64
 	if err = tx.QueryRow("SELECT revision FROM servers WHERE id=? AND deleted_at=0", id).Scan(&rev); err != nil {
 		return notFound(err)
@@ -219,6 +241,9 @@ func (s *Store) DeleteServer(id string, expected int64) error {
 		return errors.New("请先完成服务器下全部节点的删除和清理")
 	}
 	if _, err = tx.Exec("UPDATE servers SET deleted_at=?,revision=revision+1 WHERE id=?", s.Now().Unix(), id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM server_credentials WHERE server_id=?", id); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("UPDATE server_addresses SET deleted_at=? WHERE server_id=? AND deleted_at=0", s.Now().Unix(), id); err != nil {
