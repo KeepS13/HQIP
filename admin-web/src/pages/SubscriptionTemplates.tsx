@@ -2,6 +2,11 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
+  ChevronDown,
+  Gauge,
+  Network,
+  Search,
+  Store,
   Eye,
   EyeOff,
   Package,
@@ -237,8 +242,18 @@ function TemplateEditor({
     <Modal
       key={showProductPreview ? "product-preview" : "editor"}
       wide={!showProductPreview}
-      title={showProductPreview ? "订阅预览" : template ? "编辑订阅模板" : "新建订阅模板"}
-      description={showProductPreview ? "预览当前编辑内容；实际库存与购买状态因用户而异。" : "每次开通都会创建独立流量包，开通时开始计算有效期。"}
+      title={
+        showProductPreview
+          ? "订阅预览"
+          : template
+            ? "编辑订阅模板"
+            : "新建订阅模板"
+      }
+      description={
+        showProductPreview
+          ? "预览当前编辑内容；实际库存与购买状态因用户而异。"
+          : "每次开通都会创建独立流量包，开通时开始计算有效期。"
+      }
       onClose={() => {
         if (showProductPreview) setShowProductPreview(false);
         else if (!busy) onClose();
@@ -248,7 +263,13 @@ function TemplateEditor({
         <div className="subscription-storefront-preview">
           <SubscriptionCardPreview value={body} price={price} />
           <div className="modal-actions">
-            <Button type="button" variant="secondary" onClick={() => setShowProductPreview(false)}>返回编辑</Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowProductPreview(false)}
+            >
+              返回编辑
+            </Button>
           </div>
         </div>
       ) : savedShortfalls ? (
@@ -280,143 +301,217 @@ function TemplateEditor({
         >
           <div className="subscription-editor-layout">
             <div className="subscription-editor-settings">
-              <div className="form-grid">
-                <Field label="订阅名称">
-                  <input
-                    required
-                    maxLength={80}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="例如：轻享 100 GB"
-                  />
-                </Field>
-                <Field
-                  label="有效期（天）"
-                  hint="每次开通时起算，修改不延长已开通订阅。"
-                >
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={days}
-                    onChange={(e) => setDays(e.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="每份分配节点数"
-                  hint="仅影响新订单和新开通。已有订阅保留原分配数量。"
-                >
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    max={1000}
-                    step={1}
-                    value={nodeCount}
-                    onChange={(e) => setNodeCount(e.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="售价（人民币元）"
-                  hint="¥1.00 起，最多两位小数。留空不开放购买，仍可由管理员赠送。"
-                >
-                  <input
-                    inputMode="decimal"
-                    value={price}
-                    maxLength={12}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="未设置价格"
-                  />
-                </Field>
-                <Field
-                  label="每份共享带宽（Mbps）"
-                  hint="留空不限速；同一份订阅的连接共享。"
-                >
-                  <input
-                    type="number"
-                    min={0.001}
-                    step="any"
-                    value={bandwidth}
-                    onChange={(e) => setBandwidth(e.target.value)}
-                    placeholder="不限速"
-                  />
-                </Field>
-                <Field
-                  label="一次性总流量（GB）"
-                  hint="上传＋下载；不按月重置。留空不限量。"
-                >
-                  <input
-                    type="number"
-                    min={0.000001}
-                    step="any"
-                    value={quota}
-                    onChange={(e) => setQuota(e.target.value)}
-                    placeholder="不限量"
-                  />
-                </Field>
-                <Field
-                  label="每份同时在线连接数"
-                  hint="实际 VPN 连接计数，登录不会占用。"
-                >
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    max={1000}
-                    step={1}
-                    value={maxConnections}
-                    onChange={(e) => setMaxConnections(e.target.value)}
-                  />
-                </Field>
-              </div>
-
+              <section
+                className="subscription-editor-section"
+                aria-label="基本信息"
+              >
+                <h3>
+                  <Package size={16} aria-hidden="true" />
+                  基本信息
+                </h3>
+                <div className="subscription-editor-name">
+                  <Field label="订阅名称">
+                    <input
+                      required
+                      maxLength={80}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="例如：轻享 100 GB"
+                    />
+                  </Field>
+                </div>
+                <div className="form-grid">
+                  <Field
+                    label="有效期（天）"
+                    hint="开通时起算，不延长已有订阅。"
+                  >
+                    <input
+                      required
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={days}
+                      onChange={(e) => setDays(e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="售价（人民币元）"
+                    hint="¥1 起；留空仅支持管理员赠送。"
+                  >
+                    <input
+                      inputMode="decimal"
+                      value={price}
+                      maxLength={12}
+                      onChange={(e) => setPrice(e.target.value)}
+                      placeholder="未设置价格"
+                    />
+                  </Field>
+                </div>
+              </section>
+              <section
+                className="subscription-editor-section"
+                aria-label="额度与连接"
+              >
+                <h3>
+                  <Gauge size={16} aria-hidden="true" />
+                  额度与连接
+                </h3>
+                <div className="form-grid">
+                  <Field
+                    label="一次性总流量（GB）"
+                    hint="上传＋下载，不重置；留空不限量。"
+                  >
+                    <input
+                      type="number"
+                      min={0.000001}
+                      step="any"
+                      value={quota}
+                      onChange={(e) => setQuota(e.target.value)}
+                      placeholder="不限量"
+                    />
+                  </Field>
+                  <Field
+                    label="每份共享带宽（Mbps）"
+                    hint="同一份订阅共享；留空不限速。"
+                  >
+                    <input
+                      type="number"
+                      min={0.001}
+                      step="any"
+                      value={bandwidth}
+                      onChange={(e) => setBandwidth(e.target.value)}
+                      placeholder="不限速"
+                    />
+                  </Field>
+                  <Field
+                    label="每份同时在线连接数"
+                    hint="仅统计 VPN 连接，不含登录。"
+                  >
+                    <input
+                      required
+                      type="number"
+                      min={1}
+                      max={1000}
+                      step={1}
+                      value={maxConnections}
+                      onChange={(e) => setMaxConnections(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="每份分配节点数" hint="仅影响新订单及新开通。">
+                    <input
+                      required
+                      type="number"
+                      min={1}
+                      max={1000}
+                      step={1}
+                      value={nodeCount}
+                      onChange={(e) => setNodeCount(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </section>
+              <section
+                className="subscription-editor-section"
+                aria-label="商城与服务"
+              >
+                <h3>
+                  <Store size={16} aria-hidden="true" />
+                  商城与服务
+                </h3>
+                <div className="subscription-setting-toggles">
+                  <label className="account-checkbox subscription-setting-toggle">
+                    <input
+                      type="checkbox"
+                      checked={listed}
+                      onChange={(e) => setListed(e.target.checked)}
+                    />
+                    <span>
+                      <strong>展示在订阅商城</strong>
+                      <small>设置价格并启用支付后可购买。</small>
+                    </span>
+                  </label>
+                  <label className="account-checkbox subscription-setting-toggle">
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) => setEnabled(e.target.checked)}
+                    />
+                    <span>
+                      <strong>启用订阅服务</strong>
+                      <small>停用会停止该模板已开通订阅的使用权限。</small>
+                    </span>
+                  </label>
+                </div>
+                <details className="subscription-description">
+                  <summary>
+                    <span>
+                      订阅介绍 <small>选填 · 商城展示</small>
+                    </span>
+                    <span
+                      className="subscription-description-count"
+                      data-over-limit={Array.from(description).length > 2000}
+                    >
+                      {Array.from(description).length}
+                      <span> / 2000</span>
+                    </span>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </summary>
+                  <div className="subscription-description-editor">
+                    <label htmlFor="subscription-description-input">
+                      订阅介绍
+                    </label>
+                    <textarea
+                      id="subscription-description-input"
+                      rows={4}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      aria-describedby="subscription-description-help"
+                      aria-invalid={Array.from(description).length > 2000}
+                      placeholder={"例如：适合日常浏览与影音\n支持多设备使用"}
+                    />
+                    <p id="subscription-description-help">
+                      每行一条特点，商城将按列表展示。可在下方预览订阅。
+                    </p>
+                  </div>
+                </details>
+              </section>
+              <details className="subscription-editor-help">
+                <summary>
+                  分配与生效说明 <ChevronDown size={14} aria-hidden="true" />
+                </summary>
+                <p>
+                  每次开通从候选池分配指定数量的节点，优先选择已分配用户较少、剩余流量较多和较早到期的服务器。同一用户在同一套餐内不会重复分配节点。
+                </p>
+                <p>
+                  修改有效期不延长已有订阅；每份分配节点数仅影响新订单和新开通。商城隐藏后，管理员仍可主动分配。
+                </p>
+              </details>
               {!selected.length && (
                 <Notice tone="warning">
                   当前未选择节点。保存后，该模板下的订阅将没有可连接节点，现有连接会停止；流量和有效期保留。
                 </Notice>
               )}
-              <Notice>
-                每次开通从候选池分配指定数量的节点，优先选择已分配用户较少、剩余流量较多和较早到期的服务器。同一用户在同一套餐内不会重复分配节点。
-              </Notice>
-              <label className="account-checkbox">
-                <input
-                  type="checkbox"
-                  checked={listed}
-                  onChange={(e) => setListed(e.target.checked)}
-                />
-                <span>
-                  <strong>展示在订阅商城</strong>
-                  <small>
-                    设置价格并启用支付后可购买；隐藏后管理员仍可主动分配。
-                  </small>
-                </span>
-              </label>
-              <label className="account-checkbox">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(e) => setEnabled(e.target.checked)}
-                />
-                <span>
-                  <strong>启用订阅服务</strong>
-                  <small>停用会停止该模板已开通订阅的使用权限。</small>
-                </span>
-              </label>
-              {template && (
-                <Notice tone={preview ? "warning" : "info"}>
-                  {preview
-                    ? `将影响 ${preview.affectedUsers} 位用户的 ${preview.affectedSubscriptions} 份订阅，当前 ${preview.activeConnections} 个在线连接。`
-                    : "保存前会预览影响范围。节点池变化会尝试补齐已有分配；分配数量只影响新开通，已用流量与到期时间保留。"}
+              {selected.length < Number(nodeCount) && (
+                <Notice tone="warning">
+                  候选节点不足每份分配数量，保存后将显示无货。
+                </Notice>
+              )}
+              {template && !preview && (
+                <Notice>
+                  保存前会预览影响范围。节点池变化会尝试补齐已有分配；分配数量只影响新开通，已用流量与到期时间保留。
                 </Notice>
               )}
               {preview && (
                 <div className="subscription-impact" ref={previewDetails}>
                   <strong>
+                    将影响 {preview.affectedUsers} 位用户的 {preview.affectedSubscriptions} 份订阅
+                  </strong>
+                  <p>当前 {preview.activeConnections} 个在线连接。</p>
+                  <p>
                     {preview.connectionsToClose?.length
                       ? `将停止 ${preview.connectionsToClose.length} 个连接`
                       : "当前没有需要立即停止的连接"}
-                  </strong>
+                  </p>
                   {preview.connectionsToClose?.map((c) => (
                     <p key={c.id}>
                       <Link to={`/users/${c.userId}`}>
@@ -426,21 +521,50 @@ function TemplateEditor({
                       · {c.reason}
                     </p>
                   ))}
+                  {!!preview.allocationShortfalls?.length && (
+                  <Notice tone="warning">
+                  本次修改后，{preview.allocationShortfalls.length}{" "}
+                  份订阅或订单无法补足节点。
+                  <ul>
+                    {preview.allocationShortfalls.map((item) => (
+                      <li key={item.subscriptionId || item.orderId}>
+                        {item.subscriptionId || item.orderId}：{item.assigned} /{" "}
+                        {item.required} 个节点
+                      </li>
+                    ))}
+                  </ul>
+                  </Notice>
+                  )}
                 </div>
               )}
             </div>
-            <fieldset className="account-node-picker subscription-node-picker">
-              <legend>
-                可用节点 <span>{selected.length} 个已选</span>
-              </legend>
+            <section
+              className="subscription-node-picker"
+              aria-labelledby="subscription-picker-title"
+            >
+              <div className="subscription-picker-heading">
+                <h3 id="subscription-picker-title">
+                  <Network size={17} aria-hidden="true" />
+                  可用节点
+                </h3>
+                <span className="subscription-picker-count">
+                  {selected.length} 个已选
+                </span>
+              </div>
+              <p className="subscription-picker-hint">
+                勾选节点组成候选池，按名称排序。
+              </p>
               <div className="subscription-picker-body">
-                <input
-                  className="subscription-picker-search"
-                  aria-label="搜索节点"
-                  placeholder="搜索名称、IP 或域名"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                />
+                <div className="subscription-picker-searchbox">
+                  <Search size={16} aria-hidden="true" />
+                  <input
+                    className="subscription-picker-search"
+                    aria-label="搜索节点"
+                    placeholder="搜索名称、IP 或域名"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  />
+                </div>
                 <div className="subscription-picker-list">
                   {!!invalidSelected.length && (
                     <div className="subscription-invalid-nodes">
@@ -513,54 +637,24 @@ function TemplateEditor({
                     </p>
                   )}
                 </div>
-                {!!selected.length && (
-                  <div className="subscription-picker-actions">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        setSelected([]);
-                        setPreview(null);
-                        setError("");
-                      }}
-                    >
-                      清空所选节点
-                    </Button>
-                  </div>
-                )}
+                <div className="subscription-picker-actions">
+                  <span>共 {eligible.length} 个可选节点</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={!selected.length}
+                    onClick={() => {
+                      setSelected([]);
+                      setPreview(null);
+                      setError("");
+                    }}
+                  >
+                    清空所选节点
+                  </Button>
+                </div>
               </div>
-            </fieldset>
+            </section>
           </div>
-          <section className="subscription-description" aria-labelledby="subscription-description-heading">
-            <div className="subscription-description-heading">
-              <div><h3 id="subscription-description-heading">订阅介绍 <span>选填</span></h3><p>写下套餐特点和适用场景，让用户更容易选择。</p></div>
-              <span className="subscription-description-count" data-over-limit={Array.from(description).length > 2000}>{Array.from(description).length}<span> / 2000</span></span>
-            </div>
-              <div className="subscription-description-editor">
-                <label className="sr-only" htmlFor="subscription-description-input">订阅介绍</label>
-                <textarea id="subscription-description-input" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} aria-describedby="subscription-description-help" aria-invalid={Array.from(description).length > 2000} placeholder={"适合新用户体验\n支持多设备使用\n填写套餐特点和适用场景"} />
-                <p id="subscription-description-help">每行一条介绍，商城将按列表展示。</p>
-              </div>
-          </section>
-          {selected.length < Number(nodeCount) && (
-            <Notice tone="warning">
-              候选节点不足每份分配数量，保存后将显示无货。
-            </Notice>
-          )}
-          {!!preview?.allocationShortfalls?.length && (
-            <Notice tone="warning">
-              本次修改后，{preview.allocationShortfalls.length}{" "}
-              份订阅或订单无法补足节点。
-              <ul>
-                {preview.allocationShortfalls.map((item) => (
-                  <li key={item.subscriptionId || item.orderId}>
-                    {item.subscriptionId || item.orderId}：{item.assigned} /{" "}
-                    {item.required} 个节点
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          )}
           <ErrorNotice message={error} />
           <div className="modal-actions">
             <Button

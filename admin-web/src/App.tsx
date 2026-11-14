@@ -391,57 +391,59 @@ export default function App() {
           >
             <X size={22} />
           </button>
-          <div className="nav-caption">工作空间</div>
-          <nav>
-            <NavLink to="/" end>
-              <LayoutDashboard size={19} />
-              <span>网络总览</span>
-            </NavLink>
-            <NavLink to="/servers">
-              <Server size={19} />
-              <span>服务器</span>
-            </NavLink>
-            <NavLink to="/nodes">
-              <Server size={19} />
-              <span>节点管理</span>
-            </NavLink>
-            <NavLink to="/users">
-              <UsersRound size={19} />
-              <span>用户管理</span>
-            </NavLink>
-            <NavLink to="/subscriptions">
-              <Package size={19} />
-              <span>订阅管理</span>
-            </NavLink>
-            <NavLink to="/orders"><ReceiptText size={19} /><span>订单管理</span></NavLink>
-            <NavLink to="/notifications" className="notification-nav">
-              <BellRing size={19} />
-              <span>预警中心</span>
-              <AlertUnreadBadge />
-            </NavLink>
-          </nav>
-          <div className="nav-caption nav-caption-second">系统设置</div>
-          <nav>
-            <NavLink to="/payments">
-              <CreditCard size={19} />
-              <span>支付设置</span>
-            </NavLink>
-            <NavLink to="/turnstile">
-              <ShieldCheck size={19} />
-              <span>注册与安全验证</span>
-            </NavLink>
-            <NavLink to="/domains">
-              <Globe2 size={19} />
-              <span>域名与证书</span>
-            </NavLink>
-          </nav>
-          <div className="nav-caption nav-caption-second">支持</div>
-          <nav>
-            <NavLink to="/guide">
-              <BookOpen size={19} />
-              <span>使用指南</span>
-            </NavLink>
-          </nav>
+          <div className="sidebar-navigation">
+            <div className="nav-caption">工作空间</div>
+            <nav>
+              <NavLink to="/" end>
+                <LayoutDashboard size={19} />
+                <span>网络总览</span>
+              </NavLink>
+              <NavLink to="/servers">
+                <Server size={19} />
+                <span>服务器</span>
+              </NavLink>
+              <NavLink to="/nodes">
+                <Server size={19} />
+                <span>节点管理</span>
+              </NavLink>
+              <NavLink to="/users">
+                <UsersRound size={19} />
+                <span>用户管理</span>
+              </NavLink>
+              <NavLink to="/subscriptions">
+                <Package size={19} />
+                <span>订阅管理</span>
+              </NavLink>
+              <NavLink to="/orders"><ReceiptText size={19} /><span>订单管理</span></NavLink>
+              <NavLink to="/notifications" className="notification-nav">
+                <BellRing size={19} />
+                <span>预警中心</span>
+                <AlertUnreadBadge />
+              </NavLink>
+            </nav>
+            <div className="nav-caption nav-caption-second">系统设置</div>
+            <nav>
+              <NavLink to="/payments">
+                <CreditCard size={19} />
+                <span>支付设置</span>
+              </NavLink>
+              <NavLink to="/turnstile">
+                <ShieldCheck size={19} />
+                <span>注册与安全验证</span>
+              </NavLink>
+              <NavLink to="/domains">
+                <Globe2 size={19} />
+                <span>域名与证书</span>
+              </NavLink>
+            </nav>
+            <div className="nav-caption nav-caption-second">支持</div>
+            <nav>
+              <NavLink to="/guide">
+                <BookOpen size={19} />
+                <span>使用指南</span>
+              </NavLink>
+            </nav>
+          </div>
           <div className="sidebar-bottom">
             <HostResources />
             <div className="sidebar-version">
