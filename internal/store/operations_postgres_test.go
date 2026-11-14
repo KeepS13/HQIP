@@ -44,7 +44,7 @@ func TestPostgresOperationsMigrationPreservesLoginAndIsIdempotent(t *testing.T) 
 
 func TestManagedPasswordCompletionRetryDoesNotRotateTwice(t *testing.T) {
 	s, _, v, _ := managedServerFixture(t)
-	if _, err := s.QueueServerOperation(v.ID, "", "password", "new-password-123", "", v.Revision); err != nil {
+	if _, err := s.QueueServerOperation(v.ID, "", "check", "", "", v.Revision); err != nil {
 		t.Fatal(err)
 	}
 	j, err := s.NextServerOperation()
@@ -57,7 +57,7 @@ func TestManagedPasswordCompletionRetryDoesNotRotateTwice(t *testing.T) {
 		}
 	}
 	c, err := s.ServerCredential(v.ID)
-	if err != nil || c.Revision != 2 {
+	if err != nil || c.Revision != 1 {
 		t.Fatalf("rotation repeated: revision=%d err=%v", c.Revision, err)
 	}
 }

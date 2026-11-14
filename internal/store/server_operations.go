@@ -13,6 +13,8 @@ type ServerOperation struct {
 	ID                 string `json:"id"`
 	ServerID           string `json:"serverId"`
 	NodeID             string `json:"nodeId"`
+	ServerName         string `json:"serverName,omitempty"`
+	NodeName           string `json:"nodeName,omitempty"`
 	Kind               string `json:"kind"`
 	State              string `json:"state"`
 	CredentialRevision int64  `json:"credentialRevision"`
@@ -33,20 +35,23 @@ func scanOperation(row interface{ Scan(...any) error }) (ServerOperation, error)
 	return j, notFound(err)
 }
 func (s *Store) ServerOperations(serverID string) ([]ServerOperation, error) {
-	query := "SELECT " + operationColumns + " FROM server_operations"
+	query := `SELECT o.id,o.server_id,o.node_id,o.kind,o.state,o.credential_revision,o.binding,o.secret,o.target,o.message,o.created_at,o.started_at,o.finished_at,
+COALESCE(json_extract(s.config,'$.name'),''),COALESCE(json_extract(n.config,'$.name'),'')
+FROM server_operations o LEFT JOIN servers s ON s.id=o.server_id LEFT JOIN nodes n ON n.id=o.node_id`
 	var args []any
 	if serverID != "" {
-		query += " WHERE server_id=?"
+		query += " WHERE o.server_id=?"
 		args = append(args, serverID)
 	}
-	rows, err := s.DB.Query(query+" ORDER BY created_at DESC,id DESC LIMIT 100", args...)
+	rows, err := s.DB.Query(query+" ORDER BY o.created_at DESC,o.id DESC LIMIT 100", args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []ServerOperation{}
 	for rows.Next() {
-		j, e := scanOperation(rows)
+		var j ServerOperation
+		e := rows.Scan(&j.ID, &j.ServerID, &j.NodeID, &j.Kind, &j.State, &j.CredentialRevision, &j.Binding, &j.Secret, &j.Target, &j.Message, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.ServerName, &j.NodeName)
 		if e != nil {
 			return nil, e
 		}
@@ -56,18 +61,11 @@ func (s *Store) ServerOperations(serverID string) ([]ServerOperation, error) {
 }
 func (s *Store) QueueServerOperation(id, node, kind, password, target string, revision int64) (ServerOperation, error) {
 	j := ServerOperation{ID: NewID(), ServerID: id, NodeID: node, Kind: kind, State: "pending", Target: target, CreatedAt: s.Now().Unix()}
-	if kind != "check" && kind != "password" && kind != "agent-upgrade" {
-		return j, errors.New("运维任务类型无效")
+	if kind != "check" && kind != "agent-upgrade" {
+		return j, errors.New("远程改密已停用；仅支持 SSH 巡检和 Agent 升级")
 	}
-	if kind == "password" {
-		if err := validSSHPassword(password); err != nil {
-			return j, err
-		}
-		var err error
-		j.Secret, err = s.Vault.Encrypt(password)
-		if err != nil {
-			return j, err
-		}
+	if password != "" {
+		return j, errors.New("运维任务不能设置服务器密码")
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -156,8 +154,18 @@ func (s *Store) ScheduleCredentialChecks() error {
 	return nil
 }
 func (s *Store) RecoverServerOperations() error {
-	_, err := s.DB.Exec("UPDATE server_operations SET state='pending',message='服务重启，等待核对上次操作结果' WHERE state='running'")
-	return err
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("UPDATE server_operations SET state='failed',secret='',finished_at=?,message='远程改密已停用，请更新后台保存的 SSH 密码' WHERE kind='password' AND state IN ('pending','running','uncertain')", s.Now().Unix()); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE server_operations SET state='pending',message='服务重启，等待核对上次操作结果' WHERE state='running' AND kind IN ('check','agent-upgrade')"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (s *Store) NextServerOperation() (ServerOperation, error) {
 	tx, err := s.DB.Begin()
@@ -165,7 +173,7 @@ func (s *Store) NextServerOperation() (ServerOperation, error) {
 		return ServerOperation{}, err
 	}
 	defer tx.Rollback()
-	row := tx.QueryRow(`SELECT ` + operationColumns + ` FROM server_operations o WHERE state='pending'
+	row := tx.QueryRow(`SELECT ` + operationColumns + ` FROM server_operations o WHERE state='pending' AND kind IN ('check','agent-upgrade')
 AND NOT EXISTS(SELECT 1 FROM server_operations b WHERE b.server_id=o.server_id AND b.state IN ('running','uncertain'))
 AND NOT EXISTS(SELECT 1 FROM jobs j JOIN nodes n ON n.id=j.node_id WHERE json_extract(n.config,'$.serverId')=o.server_id AND j.state IN ('running','cancelling')) ORDER BY created_at,id LIMIT 1`)
 	j, err := scanOperation(row)
@@ -204,8 +212,11 @@ func (s *Store) OperationCredentials(j ServerOperation) (model.Server, string, s
 	return v, old, next, secretError(err)
 }
 func (s *Store) FinishServerOperation(j ServerOperation, state, message, credentialStatus string) error {
-	if state != "succeeded" && state != "failed" && state != "uncertain" {
+	if state != "succeeded" && state != "failed" {
 		return errors.New("无效任务结果")
+	}
+	if j.Kind != "check" && j.Kind != "agent-upgrade" {
+		state, message, credentialStatus = "failed", "远程改密已停用，请更新后台保存的 SSH 密码", ""
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -216,32 +227,20 @@ func (s *Store) FinishServerOperation(j ServerOperation, state, message, credent
 	if err = tx.QueryRow("SELECT state FROM server_operations WHERE id=?", j.ID).Scan(&current); err != nil {
 		return err
 	}
-	// A successful commit may have lost its response. Do not rotate again or
-	// duplicate its audit record when only the acknowledgement is retried.
-	if current == state || (state == "uncertain" && current == "pending") {
+	// A successful commit may have lost its response. Do not duplicate its
+	// audit record when only the acknowledgement is retried.
+	if current == state {
 		return nil
 	}
 	if current != "running" {
 		return ErrConflict
 	}
-	if state == "succeeded" && j.Kind == "password" {
-		result, e := tx.Exec("UPDATE server_credentials SET secret=?,revision=revision+1,updated_at=?,last_checked=?,next_check=?,status='healthy',message='' WHERE server_id=? AND revision=? AND binding=?", j.Secret, s.Now().Unix(), s.Now().Unix(), s.Now().Add(time.Hour).Unix(), j.ServerID, j.CredentialRevision, j.Binding)
-		if e != nil {
-			return e
-		}
-		if n, _ := result.RowsAffected(); n != 1 {
-			return ErrConflict
-		}
-	} else if credentialStatus != "" {
+	if credentialStatus != "" && j.Kind == "check" {
 		if _, err = tx.Exec("UPDATE server_credentials SET status=?,message=?,last_checked=?,next_check=? WHERE server_id=? AND revision=? AND binding=?", credentialStatus, message, s.Now().Unix(), s.Now().Add(time.Hour).Unix(), j.ServerID, j.CredentialRevision, j.Binding); err != nil {
 			return err
 		}
 	}
-	keep := ""
-	if state == "uncertain" {
-		keep = j.Secret
-	}
-	if _, err = tx.Exec("UPDATE server_operations SET state=?,message=?,secret=?,finished_at=? WHERE id=?", state, message, keep, s.Now().Unix(), j.ID); err != nil {
+	if _, err = tx.Exec("UPDATE server_operations SET state=?,message=?,secret=?,finished_at=? WHERE id=?", state, message, "", s.Now().Unix(), j.ID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,?,?)", s.Now().Unix(), "server."+j.Kind+"."+state, j.ServerID+"/"+j.ID); err != nil {
@@ -250,12 +249,5 @@ func (s *Store) FinishServerOperation(j ServerOperation, state, message, credent
 	return tx.Commit()
 }
 func (s *Store) RetryServerOperation(id string) error {
-	result, err := s.DB.Exec("UPDATE server_operations SET state='pending',message='等待重新核对改密结果',finished_at=0 WHERE id=? AND state='uncertain' AND kind='password'", id)
-	if err != nil {
-		return err
-	}
-	if n, _ := result.RowsAffected(); n != 1 {
-		return ErrConflict
-	}
-	return nil
+	return errors.New("远程改密任务已停用，请更新后台保存的 SSH 密码")
 }

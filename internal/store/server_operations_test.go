@@ -84,52 +84,35 @@ func TestManagedCredentialEncryptionHourlyChecksAndIdentity(t *testing.T) {
 	}
 }
 func TestManagedPasswordRecoveryAndSerialization(t *testing.T) {
-	s, _, v, n := managedServerFixture(t)
-	j, err := s.QueueServerOperation(v.ID, "", "password", "replacement-password-456", "", v.Revision)
-	if err != nil {
+	s, _, v, _ := managedServerFixture(t)
+	if _, err := s.QueueServerOperation(v.ID, "", "password", "forbidden-password", "", v.Revision); err == nil {
+		t.Fatal("password mutation was queued")
+	}
+	// Rows written by the retired release must not execute on restart.
+	for _, state := range []string{"pending", "running", "uncertain"} {
+		id := NewID()
+		if _, err := s.DB.Exec("INSERT INTO server_operations(id,server_id,kind,state,credential_revision,binding,secret,created_at) VALUES(?,?,'password',?,1,'old','legacy-secret',?)", id, v.ID, state, s.Now().Unix()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.NextServerOperation(); !errors.Is(err, ErrNotFound) {
+			t.Fatal("legacy password task was claimable", err)
+		}
+		if err := s.RecoverServerOperations(); err != nil {
+			t.Fatal(err)
+		}
+		var savedState, secret string
+		if err := s.DB.QueryRow("SELECT state,secret FROM server_operations WHERE id=?", id).Scan(&savedState, &secret); err != nil || savedState != "failed" || secret != "" {
+			t.Fatal("legacy mutation not retired")
+		}
+		if err := s.RetryServerOperation(id); err == nil {
+			t.Fatal("legacy task could be revived")
+		}
+	}
+	if err := s.SaveServerCredential(v.ID, "provider-new-password", v.Revision, 1); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(j)
-	if strings.Contains(string(raw), "replacement") || strings.Contains(string(raw), j.Secret) {
-		t.Fatal("operation exposes secret")
-	}
-	j, err = s.NextServerOperation()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ServerPassword(v); err == nil {
-		t.Fatal("used credentials during password change")
-	}
-	if _, err = s.QueueServerOperation(v.ID, n.ID, "agent-upgrade", "", "sha", 0); err == nil {
-		t.Fatal("upgrade overlapped password change")
-	}
-	if err = s.FinishServerOperation(j, "uncertain", "等待核对", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.SaveServerCredential(v.ID, "different-password", v.Revision, 1); err == nil {
-		t.Fatal("overwrote uncertain recovery")
-	}
-	if err = s.RetryServerOperation(j.ID); err != nil {
-		t.Fatal(err)
-	}
-	j, err = s.NextServerOperation()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, old, next, err := s.OperationCredentials(j)
-	if err != nil || old != "initial-password-123" || next != "replacement-password-456" {
-		t.Fatalf("recovery lost credentials: %v", err)
-	}
-	if err = s.FinishServerOperation(j, "succeeded", "已验证", ""); err != nil {
-		t.Fatal(err)
-	}
-	password, err := s.ServerPassword(v)
-	if err != nil || password != next {
-		t.Fatal("verified credential not published")
-	}
-	var secret string
-	if err = s.DB.QueryRow("SELECT secret FROM server_operations WHERE id=?", j.ID).Scan(&secret); err != nil || secret != "" {
-		t.Fatal("completed job retained candidate secret")
+	if password, err := s.ServerPassword(v); err != nil || password != "provider-new-password" {
+		t.Fatal("credential update blocked by retired job")
 	}
 }
 func TestManagedAgentUpgradeUsesHostQueueWithoutChangingNodeStatus(t *testing.T) {

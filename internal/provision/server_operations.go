@@ -12,46 +12,32 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/KeepS13/HQIP/internal/model"
 )
 
 var ErrSSHAuthentication = errors.New("SSH 密码认证失败，请更新托管凭据")
 var ErrSSHIdentity = errors.New("SSH 主机指纹已改变，已停止连接")
-var ErrPasswordUncertain = errors.New("改密结果尚未确认，已保留恢复凭据，请重试核对")
 
-func (s *Runner) ChangeServerPassword(ctx context.Context, v model.Server, old, next string, pin PinFunc) error {
-	if old == "" || next == "" || len(next) > 1024 || strings.ContainsAny(next, "\r\n\x00") || strings.ContainsAny(v.SSHUser, ":\r\n\x00") {
-		return errors.New("改密参数无效")
+// AgentUpgradeError exposes only controlled diagnostics, never remote output.
+type AgentUpgradeError struct{ Code string }
+
+func (e *AgentUpgradeError) Error() string {
+	reason := map[string]string{
+		"backup_directory":   "无法创建安全的备份目录，请检查路径和权限",
+		"host_lock":          "无法获取服务器运维锁",
+		"host_busy":          "服务器正在执行其他运维任务，请稍后重试",
+		"disk_full":          "服务器磁盘空间不足",
+		"permission_denied":  "服务器文件或目录权限不足",
+		"artifact_checksum":  "Agent 产物校验失败",
+		"agent_start_failed": "新 Agent 启动或初始化失败，已尝试恢复原版本",
+		"inactive_service":   "节点服务未运行，请先检查节点状态",
+		"core_changed":       "检测到转发核心发生重启，请检查服务器状态",
+		"rollback_failed":    "原 Agent 恢复失败，请立即检查节点服务和任务备份",
+		"interrupted":        "远端升级任务被中断，已尝试恢复原版本",
+	}[e.Code]
+	if reason == "" {
+		reason = "远端升级执行失败，请检查节点服务和任务备份"
 	}
-	// Recovery first: an earlier attempt may have changed Linux but lost its reply.
-	if _, err := s.CheckServer(ctx, v, next, pin); err == nil {
-		return nil
-	} else if !errors.Is(err, ErrSSHAuthentication) {
-		return ErrPasswordUncertain
-	}
-	n := model.Node{SSHHost: v.SSHHost, SSHUser: v.SSHUser, SSHPort: v.SSHPort, HostKey: v.HostKey, MachineID: v.MachineID}
-	rm, err := s.connect(ctx, Input{Node: n, Password: old}, pin)
-	if err != nil {
-		return ErrPasswordUncertain
-	}
-	defer rm.client.Close()
-	unlock, err := rm.lock(ctx)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if _, err = s.inventory(ctx, rm, n); err != nil {
-		return err
-	}
-	// Password travels through encrypted SSH stdin, never argv or remote logs.
-	if _, err = rm.run(ctx, "chpasswd", strings.NewReader(v.SSHUser+":"+next+"\n")); err != nil {
-		return ErrPasswordUncertain
-	}
-	if _, err = s.CheckServer(ctx, v, next, pin); err != nil {
-		return ErrPasswordUncertain
-	}
-	return nil
+	return "Agent 升级失败：" + reason
 }
 
 type AgentRelease struct {
@@ -143,6 +129,7 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 			SourceSHA   string `json:"sourceSHA"`
 			AgentSHA256 string `json:"agentSHA256"`
 			Unchanged   bool   `json:"coreInvocationUnchanged"`
+			ErrorCode   string `json:"errorCode"`
 		}
 		if e = json.Unmarshal([]byte(output), &receipt); e != nil {
 			return "", errors.New("升级任务回执损坏")
@@ -153,6 +140,9 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 		if receipt.State == "succeeded" && (receipt.AgentSHA256 != hash || !receipt.Unchanged) {
 			return "", errors.New("Agent 升级结果校验失败")
 		}
+		if receipt.State == "failed" {
+			return receipt.State, &AgentUpgradeError{Code: receipt.ErrorCode}
+		}
 		return receipt.State, nil
 	}
 	state, err := readResult()
@@ -161,9 +151,6 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 	}
 	if state == "succeeded" {
 		return nil
-	}
-	if state == "failed" {
-		return errors.New("上次升级已失败，请发起新的升级任务")
 	}
 	active, _ := rm.run(ctx, "systemctl show --value -p ActiveState "+shellQuote(unit+".service"), nil)
 	active = strings.TrimSpace(active)
@@ -181,7 +168,9 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 				return errors.New("Agent 产物传输失败")
 			}
 		}
-		command := "systemd-run --quiet --collect --unit=" + shellQuote(unit) + " --property=Type=oneshot --property=TimeoutStartSec=600 python3 -B " + shellQuote(folder+"/run.py")
+		// A oneshot unit otherwise makes systemd-run wait for the entire upgrade;
+		// its failure would hide the diagnostic receipt as a unit-start error.
+		command := "systemd-run --quiet --no-block --collect --unit=" + shellQuote(unit) + " --property=Type=oneshot --property=TimeoutStartSec=600 python3 -B " + shellQuote(folder+"/run.py")
 		if _, err = rm.run(ctx, command, nil); err != nil {
 			return errors.New("无法启动持久化 Agent 升级任务")
 		}
@@ -196,9 +185,6 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 		}
 		if state == "succeeded" {
 			return nil
-		}
-		if state == "failed" {
-			return errors.New("Agent 升级失败，已保留任务备份，请检查后重试")
 		}
 		if err = wait(ctx, time.Second); err != nil {
 			return err

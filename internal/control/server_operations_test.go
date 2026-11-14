@@ -17,9 +17,8 @@ import (
 
 type operationsInstaller struct {
 	managedInstaller
-	checkErr  error
-	rotateErr error
-	upgraded  int
+	checkErr error
+	upgraded int
 }
 
 func (i *operationsInstaller) CheckServer(ctx context.Context, v model.Server, p string, pin provision.PinFunc) (provision.ServerInspection, error) {
@@ -27,9 +26,6 @@ func (i *operationsInstaller) CheckServer(ctx context.Context, v model.Server, p
 		return provision.ServerInspection{}, i.checkErr
 	}
 	return i.managedInstaller.CheckServer(ctx, v, p, pin)
-}
-func (i *operationsInstaller) ChangeServerPassword(context.Context, model.Server, string, string, provision.PinFunc) error {
-	return i.rotateErr
 }
 func (i *operationsInstaller) AgentRelease() (provision.AgentRelease, error) {
 	return provision.AgentRelease{SourceSHA: strings.Repeat("a", 40)}, nil
@@ -59,31 +55,33 @@ func TestManagedCredentialAPIAndPasswordRecovery(t *testing.T) {
 		t.Fatal("missing CSRF accepted")
 	}
 	w = request(h, "POST", path+"/password", map[string]any{"newPassword": "new-secret-password", "expectedRevision": v.Revision}, cookie, csrf)
-	if w.Code != 202 || strings.Contains(w.Body.String(), "new-secret") {
+	if w.Code != http.StatusGone {
+		t.Fatal("remote password mutation endpoint is still enabled", w.Code)
+	}
+	if w = request(h, "POST", "/api/v1/server-operations/legacy/retry", map[string]any{}, cookie, csrf); w.Code != http.StatusGone {
+		t.Fatal("legacy password retry enabled")
+	}
+	// The provider already changed this password. Updating HQIP only checks it.
+	i.checkErr = provision.ErrSSHAuthentication
+	update := map[string]any{"password": "provider-new-password", "expectedRevision": v.Revision, "credentialRevision": 1}
+	if w = request(h, "PUT", path+"/credential", update, cookie, csrf); w.Code != 400 {
+		t.Fatal("invalid password saved")
+	}
+	if password, err := s.Store.ServerPassword(v); err != nil || password != "initial-secret-password" {
+		t.Fatal("failed verification overwrote saved credential")
+	}
+	i.checkErr = nil
+	if w = request(h, "PUT", path+"/credential", update, cookie, csrf); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	j, err := s.Store.NextServerOperation()
-	if err != nil {
-		t.Fatal(err)
+	if password, err := s.Store.ServerPassword(v); err != nil || password != "provider-new-password" {
+		t.Fatal("verified credential not updated")
 	}
-	i.rotateErr = provision.ErrPasswordUncertain
-	s.runServerOperation(context.Background(), j)
-	ops, _ := s.Store.ServerOperations(v.ID)
-	if len(ops) != 1 || ops[0].State != "uncertain" {
-		t.Fatal("uncertain rotation was discarded")
+	if jobs, err := s.Store.ServerOperations(v.ID); err != nil || len(jobs) != 0 {
+		t.Fatal("credential update created a remote mutation job")
 	}
-	if w = request(h, "POST", "/api/v1/server-operations/"+j.ID+"/retry", map[string]any{}, cookie, csrf); w.Code != 202 {
-		t.Fatal(w.Body.String())
-	}
-	i.rotateErr = nil
-	j, err = s.Store.NextServerOperation()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.runServerOperation(context.Background(), j)
-	if password, err := s.Store.ServerPassword(v); err != nil || password != "new-secret-password" {
-		t.Fatal("verified password not saved")
-	}
+	var j store.ServerOperation
+	var err error
 	for _, failure := range []error{provision.ErrSSHAuthentication, errors.New("network unreachable")} {
 		i.checkErr = failure
 		if _, err = s.Store.QueueServerOperation(v.ID, "", "check", "", "", 0); err != nil {

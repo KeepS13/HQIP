@@ -12,7 +12,6 @@ import (
 )
 
 type serverOperator interface {
-	ChangeServerPassword(context.Context, model.Server, string, string, provision.PinFunc) error
 	AgentRelease() (provision.AgentRelease, error)
 	UpgradeAgent(context.Context, provision.Input, string, string, provision.LogFunc, provision.PinFunc) error
 }
@@ -125,41 +124,17 @@ func (s *Server) checkServerCredential(w http.ResponseWriter, r *http.Request) {
 	s.signal()
 	reply(w, 202, j)
 }
+
+// Retire the old endpoint explicitly, including requests from cached UIs.
 func (s *Server) changeServerPassword(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.runner.(serverOperator); !ok {
-		fail(w, 503, "当前部署组件不支持改密")
-		return
-	}
-	var body struct {
-		NewPassword      string `json:"newPassword"`
-		ExpectedRevision int64  `json:"expectedRevision"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	if len(body.NewPassword) < 12 {
-		fail(w, 400, "新密码至少需要 12 个字节")
-		return
-	}
-	j, e := s.Store.QueueServerOperation(r.PathValue("id"), "", "password", body.NewPassword, "", body.ExpectedRevision)
-	if e != nil {
-		managementError(w, e)
-		return
-	}
-	s.signal()
-	reply(w, 202, j)
+	fail(w, http.StatusGone, "远程改密已停用；请在厂商处修改密码后，更新后台保存的 SSH 密码")
 }
 func (s *Server) serverOperations(w http.ResponseWriter, r *http.Request) {
 	v, e := s.Store.ServerOperations(r.URL.Query().Get("serverId"))
 	result(w, v, e)
 }
 func (s *Server) retryServerOperation(w http.ResponseWriter, r *http.Request) {
-	if e := s.Store.RetryServerOperation(r.PathValue("id")); e != nil {
-		managementError(w, e)
-		return
-	}
-	s.signal()
-	reply(w, 202, map[string]bool{"queued": true})
+	fail(w, http.StatusGone, "远程改密任务已停用，请更新后台保存的 SSH 密码")
 }
 func (s *Server) agentRelease(w http.ResponseWriter, r *http.Request) {
 	runner, ok := s.runner.(serverOperator)
@@ -228,7 +203,13 @@ func (s *Server) queueAgentUpgrades(w http.ResponseWriter, r *http.Request) {
 	reply(w, 202, out)
 }
 func (s *Server) runServerOperation(parent context.Context, j store.ServerOperation) {
-	v, password, next, err := s.Store.OperationCredentials(j)
+	if j.Kind != "check" && j.Kind != "agent-upgrade" {
+		retryTaskState(parent, "关闭已停用的服务器任务", func() error {
+			return s.Store.FinishServerOperation(j, "failed", "远程改密已停用，请更新后台保存的 SSH 密码", "")
+		})
+		return
+	}
+	v, password, _, err := s.Store.OperationCredentials(j)
 	if err != nil {
 		retryTaskState(parent, "保存服务器任务结束状态", func() error {
 			return s.Store.FinishServerOperation(j, "failed", "服务器或凭据已变化，请重新发起任务", "")
@@ -261,19 +242,6 @@ func (s *Server) runServerOperation(parent context.Context, j store.ServerOperat
 				status = "identity-changed"
 			}
 		}
-	case "password":
-		runner, ok := s.runner.(serverOperator)
-		if !ok {
-			err = errors.New("不支持改密")
-		} else {
-			err = runner.ChangeServerPassword(ctx, v, password, next, pinnedServer(v))
-		}
-		if err != nil {
-			state = "uncertain"
-			message = "改密结果尚未确认，恢复凭据已保留，请重试核对"
-		} else {
-			message = "服务器密码已修改，新密码登录验证通过，托管凭据已更新"
-		}
 	case "agent-upgrade":
 		runner, ok := s.runner.(serverOperator)
 		if !ok {
@@ -291,15 +259,22 @@ func (s *Server) runServerOperation(parent context.Context, j store.ServerOperat
 		message = "Agent 升级成功，转发核心未重启"
 		if err != nil {
 			state = "failed"
-			message = "Agent 升级失败，请检查节点事件或 SSH 凭据后重试"
+			message = "Agent 升级失败，请检查节点状态、SSH 连接和发布产物后重试"
+			var upgradeError *provision.AgentUpgradeError
+			if errors.As(err, &upgradeError) {
+				message = upgradeError.Error()
+			}
 			if errors.Is(err, provision.ErrSSHAuthentication) || errors.Is(err, provision.ErrSSHIdentity) {
 				message = credentialMessage(err)
+			}
+			if parent.Err() == nil {
+				_ = s.Store.Event(j.NodeID, "upgrade-failed", message)
 			}
 		}
 	}
 	if parent.Err() != nil {
 		return
-	} // Recovery checks remote state before repeating a password change.
+	} // Interrupted upgrades resume from their durable remote receipt.
 	retryTaskState(parent, "保存服务器任务结束状态", func() error {
 		return s.Store.FinishServerOperation(j, state, message, status)
 	})
