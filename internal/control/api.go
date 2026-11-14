@@ -505,7 +505,7 @@ func (s *Server) agentReport(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &report) {
 		return
 	}
-	if err := s.Store.Report(id, report); err != nil {
+	if err := s.Store.ReportContext(r.Context(), id, report); err != nil {
 		fail(w, 400, "流量上报失败：记录数量、时间或计数不合法")
 		return
 	}

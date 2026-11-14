@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os/exec"
@@ -57,10 +58,13 @@ type liveState struct {
 }
 
 type Agent struct {
-	cfg               model.AgentConfig
-	log               *slog.Logger
-	ledger            *ledger
-	controlClient     *http.Client
+	cfg           model.AgentConfig
+	log           *slog.Logger
+	ledger        *ledger
+	controlClient *http.Client
+	// Owned by syncLoop; configuration/revocation work continues during backoff.
+	reportRetryAt     time.Time
+	reportBackoff     time.Duration
 	admissionMu       sync.Mutex
 	leaseReportMu     sync.RWMutex
 	statsClient       *http.Client
@@ -524,6 +528,9 @@ func (a *Agent) sync(ctx context.Context) error {
 		}
 		a.cacheMu.Unlock()
 	}
+	if a.now().Before(a.reportRetryAt) {
+		return errors.New("流量补报等待重试，本地计数继续保留")
+	}
 	batch, err := a.ledger.batch()
 	if err != nil {
 		return err
@@ -572,11 +579,14 @@ func (a *Agent) sync(ctx context.Context) error {
 	}
 	a.liveMu.RUnlock()
 	if err := a.controlJSON(ctx, http.MethodPost, "/api/v1/agents/report", report, &desired); err != nil {
+		a.deferReportRetry()
 		return err
 	}
 	if err := a.ledger.acknowledge(batch); err != nil {
+		a.deferReportRetry()
 		return err
 	}
+	a.reportBackoff, a.reportRetryAt = 0, time.Time{}
 	if err := a.applyDesired(desired); err != nil {
 		return err
 	}
@@ -587,6 +597,13 @@ func (a *Agent) sync(ctx context.Context) error {
 		return configErr
 	}
 	return queueErr
+}
+
+func (a *Agent) deferReportRetry() {
+	a.reportBackoff = min(30*time.Second, max(5*time.Second, a.reportBackoff*2))
+	// Spread reconnecting nodes over 80%-100% of the capped delay.
+	delay := a.reportBackoff*4/5 + time.Duration(rand.Int64N(int64(a.reportBackoff/5)+1))
+	a.reportRetryAt = a.now().Add(delay)
 }
 
 func (a *Agent) syncLoop(ctx context.Context) {

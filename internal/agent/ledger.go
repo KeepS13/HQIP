@@ -21,6 +21,8 @@ const (
 	// The bound deliberately exceeds the maximum serialized size of one bucket.
 	pendingRowBytes = 256
 	reportBatchSize = 4000
+	// Bound history pages while retaining the protocol's 4000-identity limit.
+	reportPageSize = 500
 )
 
 var shanghai = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -288,7 +290,12 @@ func (l *ledger) batch() (reportBatch, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	b := reportBatch{daily: []model.UsageBucket{}, minutes: []model.UsageBucket{}}
-	rows, err := l.db.Query("SELECT kind,start,device_id,upload,download FROM usage WHERE dirty=1 ORDER BY kind,start LIMIT ?", reportBatchSize)
+	// Keep the existing daily capacity and reserve a separate minute page. A
+	// large set of continuously dirty daily totals must not starve minute data.
+	rows, err := l.db.Query(`SELECT kind,start,device_id,upload,download FROM
+(SELECT kind,start,device_id,upload,download FROM usage WHERE dirty=1 AND kind='day' ORDER BY start,device_id LIMIT ?)
+UNION ALL SELECT kind,start,device_id,upload,download FROM
+(SELECT kind,start,device_id,upload,download FROM usage WHERE dirty=1 AND kind='minute' ORDER BY start,device_id LIMIT ?)`, reportBatchSize, reportPageSize)
 	if err != nil {
 		return b, err
 	}

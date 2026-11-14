@@ -254,7 +254,7 @@ func TestReportRetriesAreCumulativeAndFailedStatsStayUnknown(t *testing.T) {
 		t.Fatal("failed report response ignored")
 	}
 	traffic.Store(150)
-	now = now.Add(time.Second)
+	now = now.Add(6 * time.Second)
 	if err := a.sample(context.Background()); err != nil {
 		t.Fatal(err)
 	}

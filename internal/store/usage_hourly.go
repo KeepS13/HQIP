@@ -1,10 +1,10 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
@@ -47,19 +47,13 @@ func validateHourlyReport(r model.AgentReport, now time.Time) error {
 	return nil
 }
 
-func recordHourlyReport(tx *sql.Tx, node string, r model.AgentReport, valid map[string]bool, now time.Time) error {
+func recordHourlyReport(ctx context.Context, tx *sql.Tx, node string, r model.AgentReport, valid map[string]bool, now time.Time) error {
 	if r.HourlySince == nil {
 		return nil
 	}
 	cutoff := now.AddDate(0, -13, 0).Truncate(time.Hour).Unix()
-	for _, b := range r.Hours {
-		if !valid[b.DeviceID] || strings.HasPrefix(b.DeviceID, "__probe_") || b.Start < cutoff {
-			continue
-		}
-		if _, err := tx.Exec(`INSERT INTO native_hourly(node_id,device_id,start,upload,download,uncertain) VALUES(?,?,?,?,?,?)
-ON CONFLICT(node_id,device_id,start) DO UPDATE SET upload=MAX(upload,excluded.upload),download=MAX(download,excluded.download),uncertain=MAX(uncertain,excluded.uncertain)`, node, b.DeviceID, b.Start, b.Upload, b.Download, b.Uncertain); err != nil {
-			return err
-		}
+	if err := recordUsageBatch(ctx, tx, "native_hourly", node, r.Hours, valid, cutoff); err != nil {
+		return err
 	}
 	// Coverage is conservative across replay, backup restore and Agent retention.
 	// A later since can only narrow certainty; an old delayed report cannot undo it.

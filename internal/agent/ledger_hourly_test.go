@@ -156,13 +156,13 @@ func TestHourlyAckCASIncludesUncertaintyAndNewCounts(t *testing.T) {
 func TestHourlyBacklogDoesNotOverstateCoverageOrSendDailyAhead(t *testing.T) {
 	l := newHourlyLedger(t)
 	end := time.Now().UTC().Truncate(time.Hour)
-	start := end.Add(-time.Duration(reportBatchSize) * time.Hour)
+	start := end.Add(-time.Duration(reportPageSize) * time.Hour)
 	tx, _ := l.db.Begin()
 	if _, err := tx.Exec("INSERT INTO hourly_state(id,since,through,generation) VALUES(1,?,?,'core')", start.UnixNano(), end.Add(time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i <= reportBatchSize; i++ {
-		if _, err := tx.Exec("INSERT INTO native_hourly(start,device_id,upload,download,uncertain) VALUES(?,'account',1,2,?)", start.Add(time.Duration(i)*time.Hour).Unix(), i == reportBatchSize); err != nil {
+	for i := 0; i <= reportPageSize; i++ {
+		if _, err := tx.Exec("INSERT INTO native_hourly(start,device_id,upload,download,uncertain) VALUES(?,'account',1,2,?)", start.Add(time.Duration(i)*time.Hour).Unix(), i == reportPageSize); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,7 +175,7 @@ func TestHourlyBacklogDoesNotOverstateCoverageOrSendDailyAhead(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := l.batch()
-	if err != nil || len(b.hours) != reportBatchSize || !b.hourlyThrough.Equal(end) || len(b.daily) != 0 {
+	if err != nil || len(b.hours) != reportPageSize || !b.hourlyThrough.Equal(end) || len(b.daily) != 0 {
 		t.Fatalf("partial batch overstated coverage or sent its day early: hours=%d through=%v days=%d err=%v", len(b.hours), b.hourlyThrough, len(b.daily), err)
 	}
 	if err := l.acknowledge(b); err != nil {

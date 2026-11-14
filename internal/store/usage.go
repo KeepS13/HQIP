@@ -1,7 +1,7 @@
 package store
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -13,11 +13,17 @@ import (
 // Only positive daily differences contribute to lifetime totals; deleting old
 // daily detail therefore never changes lifetime usage or duplicates replayed data.
 func (s *Store) Report(nodeID string, r model.AgentReport) error {
+	return s.ReportContext(context.Background(), nodeID, r)
+}
+
+// ReportContext stops outstanding work when the submitting agent disconnects.
+// A lost commit acknowledgment remains safe to replay using cumulative maxima.
+func (s *Store) ReportContext(ctx context.Context, nodeID string, r model.AgentReport) error {
 	if len(r.Daily) > 4000 || len(r.Minutes) > 4000 || len(r.Hours) > 4000 || len(r.Online) > 4000 {
 		return errors.New("一次上报最多包含 4000 条记录")
 	}
 	var existingLifecycle, existingCertificateMode string
-	if err := s.DB.QueryRow("SELECT lifecycle,COALESCE(json_extract(config,'$.certificateMode'),'http') FROM nodes WHERE id=?", nodeID).Scan(&existingLifecycle, &existingCertificateMode); err != nil {
+	if err := s.DB.QueryRowContext(ctx, "SELECT lifecycle,COALESCE(json_extract(config,'$.certificateMode'),'http') FROM nodes WHERE id=?", nodeID).Scan(&existingLifecycle, &existingCertificateMode); err != nil {
 		return notFound(err)
 	}
 	if existingLifecycle == "active" {
@@ -46,13 +52,16 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 	}
 	var lifecycle string
 	err := retryDatabaseError(func() error {
-		tx, err := s.DB.Begin()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		tx, err := s.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 		var desired int64
-		if err = tx.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", nodeID).Scan(&desired, &lifecycle); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT desired_revision,lifecycle FROM nodes WHERE id=?", nodeID).Scan(&desired, &lifecycle); err != nil {
 			return notFound(err)
 		}
 		if r.Revision < 0 || r.Revision > desired {
@@ -61,7 +70,7 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 		// Portal lease identities remain valid for historical ledger reports after
 		// credential rotation or expiry. Quota is settled only by lease reports;
 		// these buckets feed node/server traffic graphs and never charge it again.
-		rows, err := tx.Query("SELECT c.device_id FROM credentials c JOIN devices d ON d.id=c.device_id WHERE c.node_id=? UNION SELECT accounting_id FROM node_accounting_identities WHERE node_id=?", nodeID, nodeID)
+		rows, err := tx.QueryContext(ctx, "SELECT c.device_id FROM credentials c JOIN devices d ON d.id=c.device_id WHERE c.node_id=? UNION SELECT accounting_id FROM node_accounting_identities WHERE node_id=?", nodeID, nodeID)
 		if err != nil {
 			return err
 		}
@@ -88,35 +97,13 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 				online[id] = count
 			}
 		}
-		for _, b := range r.Daily {
-			if !valid[b.DeviceID] || b.Start < dailyCutoff {
-				continue
-			}
-			up, down, e := upsertBucket(tx, "daily", nodeID, b)
-			if e != nil {
-				return e
-			}
-			if up > 0 || down > 0 {
-				if _, err = tx.Exec("INSERT INTO lifetime(node_id,device_id,upload,download) VALUES(?,?,?,?) ON CONFLICT(node_id,device_id) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download", nodeID, b.DeviceID, up, down); err != nil {
-					return err
-				}
-			}
+		if err = recordUsageBatch(ctx, tx, "daily", nodeID, r.Daily, valid, dailyCutoff); err != nil {
+			return err
 		}
-		for _, b := range r.Minutes {
-			if !valid[b.DeviceID] || b.Start < minuteCutoff {
-				continue
-			}
-			up, down, e := upsertBucket(tx, "minute", nodeID, b)
-			if e != nil {
-				return e
-			}
-			if up > 0 || down > 0 {
-				if _, err = tx.Exec("INSERT INTO hourly(node_id,device_id,start,upload,download) VALUES(?,?,?,?,?) ON CONFLICT(node_id,device_id,start) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download", nodeID, b.DeviceID, b.Start/3600*3600, up, down); err != nil {
-					return err
-				}
-			}
+		if err = recordUsageBatch(ctx, tx, "minute", nodeID, r.Minutes, valid, minuteCutoff); err != nil {
+			return err
 		}
-		if err = recordHourlyReport(tx, nodeID, r, valid, now); err != nil {
+		if err = recordHourlyReport(ctx, tx, nodeID, r, valid, now); err != nil {
 			return err
 		}
 		if _, err = tx.Exec("UPDATE nodes SET managed=1,applied_revision=?,last_seen=?,metrics=?,online=?,core_healthy=? WHERE id=?", r.Revision, now.Unix(), jsonString(r.Metrics), jsonString(online), r.CoreHealthy, nodeID); err != nil {
@@ -152,20 +139,6 @@ func (s *Store) Report(nodeID string, r model.AgentReport) error {
 		return s.RecordCertificateStatus(nodeID, *r.Certificate)
 	}
 	return nil
-}
-
-func upsertBucket(tx *sql.Tx, table, nodeID string, b model.UsageBucket) (int64, int64, error) {
-	var up, down int64
-	err := tx.QueryRow("SELECT upload,download FROM "+table+" WHERE node_id=? AND device_id=? AND start=?", nodeID, b.DeviceID, b.Start).Scan(&up, &down)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, 0, err
-	}
-	newUp, newDown := max(up, b.Upload), max(down, b.Download)
-	if newUp == up && newDown == down && !errors.Is(err, sql.ErrNoRows) {
-		return 0, 0, nil
-	}
-	_, err = tx.Exec("INSERT INTO "+table+"(node_id,device_id,start,upload,download) VALUES(?,?,?,?,?) ON CONFLICT(node_id,device_id,start) DO UPDATE SET upload=MAX(upload,excluded.upload),download=MAX(download,excluded.download)", nodeID, b.DeviceID, b.Start, newUp, newDown)
-	return newUp - up, newDown - down, err
 }
 
 func (s *Store) Traffic(nodeID, deviceID, period string) ([]model.TrafficPoint, error) {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 )
@@ -112,6 +113,8 @@ func TestRetirementLostHTTPAckDoesNotCleanupAgent(t *testing.T) {
 		t.Fatal("Agent cleaned up before acknowledgement")
 	}
 	ack = true
+	retryTime := time.Now().Add(6 * time.Second)
+	a.now = func() time.Time { return retryTime }
 	if err := a.sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -224,7 +224,7 @@ func (l *ledger) hourlyBatch(b *reportBatch) error {
 	if err != nil {
 		return err
 	}
-	rows, err := l.db.Query("SELECT start,device_id,upload,download,uncertain FROM native_hourly WHERE dirty=1 ORDER BY start,device_id LIMIT ?", reportBatchSize+1)
+	rows, err := l.db.Query("SELECT start,device_id,upload,download,uncertain FROM native_hourly WHERE dirty=1 ORDER BY start,device_id LIMIT ?", reportPageSize+1)
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func (l *ledger) hourlyBatch(b *reportBatch) error {
 		if err := rows.Scan(&bucket.Start, &bucket.DeviceID, &bucket.Upload, &bucket.Download, &bucket.Uncertain); err != nil {
 			return err
 		}
-		if len(b.hours) == reportBatchSize {
+		if len(b.hours) == reportPageSize {
 			through = max(since, min(through, time.Unix(bucket.Start, 0).UnixNano()))
 			// Daily totals must not arrive before the corresponding uncertainty
 			// markers. Hold the unfinished day (and all later days) for another
