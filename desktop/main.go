@@ -26,11 +26,14 @@ type Desktop struct {
 }
 type DesktopView struct {
 	client.View
-	Updates client.UpdateView `json:"updates"`
+	Updates        client.UpdateView `json:"updates"`
+	AutoStart      AutoStartState    `json:"autoStart"`
+	ConnectionIcon ConnectionIcon    `json:"connectionIcon"`
 }
 
 func (d *Desktop) State() DesktopView {
-	return DesktopView{View: d.controller.View(), Updates: d.updates.View()}
+	view := d.controller.View()
+	return DesktopView{View: view, Updates: d.updates.View(), AutoStart: readAutoStartState(), ConnectionIcon: connectionIcon(view)}
 }
 func (d *Desktop) CheckUpdates()       { _ = d.updates.Check(true) }
 func (d *Desktop) SnoozeUpdate() error { return d.updates.Snooze() }

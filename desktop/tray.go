@@ -79,6 +79,7 @@ func setupTray(app *application.App, window *application.WebviewWindow, controll
 		})
 	})
 	tray.OnClick(show)
+	setupStatusIcons(app, window, tray, controller)
 }
 
 // Clear nested item registrations as well as the root. Clear leaves callbacks
