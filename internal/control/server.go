@@ -33,14 +33,16 @@ type Options struct {
 	Installer                                       Installer
 }
 type Server struct {
-	Store     *store.Store
-	opts      Options
-	runner    Installer
-	mu        sync.Mutex
-	attempts  map[string][]time.Time
-	authSlots chan struct{}
-	wake      chan struct{}
-	initErr   error
+	Store           *store.Store
+	opts            Options
+	runner          Installer
+	mu              sync.Mutex
+	attempts        map[string][]time.Time
+	authSlots       chan struct{}
+	wake            chan struct{}
+	initErr         error
+	operations      operationRuntime
+	adminLoginLocal adminLoginProtection
 }
 
 func New(s *store.Store, opts Options) *Server {
@@ -94,9 +96,10 @@ func (s *Server) AdminHandler() http.Handler {
 	s.registerPortalAdmin(m)
 	s.registerNotificationRoutes(m)
 	s.registerNetworkQualityRoutes(m)
+	s.registerOperationLogs(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
-	return s.headers(m, s.opts.AdminOrigin)
+	return s.operationRequests(m, s.headers(m, s.opts.AdminOrigin), true)
 }
 
 // PublicHandler deliberately has no administrator route or SPA fallback.
@@ -118,7 +121,7 @@ func (s *Server) PublicHandler() http.Handler {
 	m.Handle("/api/v1/client/", s.legacyClientGate(legacy))
 	s.registerPortalPublic(m)
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
-	return s.headers(m, s.opts.UserOrigin)
+	return s.operationRequests(m, s.headers(m, s.opts.UserOrigin), false)
 }
 
 func (s *Server) legacyClientGate(next http.Handler) http.Handler {
@@ -288,16 +291,17 @@ func (s *Server) auth(next http.Handler, allowInitial bool) http.Handler {
 			fail(w, 401, "登录已过期，请重新登录")
 			return
 		}
+		username, _, must, err := s.Store.Admin()
+		if err != nil {
+			fail(w, 503, "管理员尚未初始化")
+			return
+		}
+		setOperationActor(r, "admin", "1", username, "session")
 		if r.Method != "GET" && r.Method != "HEAD" {
 			if !s.sameOrigin(r) || !secure.Equal(csrf, r.Header.Get("X-CSRF-Token")) {
 				fail(w, 403, "安全校验失败，请刷新页面后重试")
 				return
 			}
-		}
-		_, _, must, err := s.Store.Admin()
-		if err != nil {
-			fail(w, 503, "管理员尚未初始化")
-			return
 		}
 		if must && !allowInitial {
 			fail(w, 403, "首次登录请先修改初始密码")
@@ -385,14 +389,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "不允许跨站登录")
 		return
 	}
+	guard, allowed := s.beginAdminLogin(w, r)
+	if !allowed {
+		return
+	}
+	// Bound login parsing before the general JSON decoder's larger API budget.
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if !readJSON(w, r, &body) {
-		return
-	}
-	if !s.allowLogin(w, r, clientIP(r)) {
 		return
 	}
 	if len(body.Username) > 80 || len(body.Password) > 1024 {
@@ -414,6 +421,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	valid := secure.CheckPassword(hash, body.Password)
 	if !secure.Equal(username, body.Username) || !valid {
+		if !recordAdminLoginFailure(w, r, guard) {
+			return
+		}
 		s.Store.Audit("login.failed", clientIP(r))
 		fail(w, 401, "账号或密码错误")
 		return
@@ -427,9 +437,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "无法创建登录会话")
 		return
 	}
-	s.mu.Lock()
-	delete(s.attempts, clientIP(r))
-	s.mu.Unlock()
+	if !recordAdminLoginSuccess(w, r, guard) {
+		s.Store.DeleteSession(token)
+		return
+	}
+	setOperationActor(r, "admin", "1", username, "password")
 	s.setCookie(w, token, 43200)
 	s.Store.Audit("login.success", username)
 	reply(w, 200, map[string]any{"authenticated": true, "username": username, "csrfToken": csrf, "mustChangePassword": must})

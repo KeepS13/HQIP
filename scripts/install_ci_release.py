@@ -127,7 +127,13 @@ def main():
         staging.rename(release)
         state = '/root/backups/hqip-ci-' + sha + '-' + run_id
         subprocess.run(['python3', '-B', str(release / 'scripts/upgrade_domains.py'),
-                        'upgrade', '--release', str(release), '--state', state], check=True)
+                        'upgrade', '--release', str(release), '--state', state, '--defer-protection'], check=True)
+    # The backup runner also acquires deploy.lock. Acceptance must run after
+    # releasing it; waiting for a backup while holding it would deadlock.
+    manifest = json.loads((release / 'release.json').read_text())
+    if manifest.get('commercialProtectionVersion') == 1:
+        subprocess.run(['python3', '-B', str(release / 'scripts/upgrade_domains.py'),
+                        'complete', '--state', state], check=True, timeout=2250)
 
 
 if __name__ == '__main__':

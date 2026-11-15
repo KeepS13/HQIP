@@ -503,6 +503,7 @@ func (s *Server) retireNode(w http.ResponseWriter, r *http.Request) {
 		managementError(w, err)
 		return
 	}
+	s.linkNodeOperationJob(r, n.ID, n.QueuedJobID)
 	s.signal()
 	reply(w, 202, n)
 }

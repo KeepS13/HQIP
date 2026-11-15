@@ -11,12 +11,17 @@ NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
                'hysteria-linux-amd64', 'hysteria-linux-arm64', 'caddy-linux-amd64')
 RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py',
                    'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py',
-                   'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py')
+                   'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py',
+                   'automatic_backup.py', 'commercial_protection.py', 'render_domains.py')
+PROTECTION_FILES = {'scripts/automatic_backup.py', 'scripts/commercial_protection.py', 'scripts/render_domains.py',
+                    'deploy/hqip-backup.service', 'deploy/hqip-backup.timer',
+                    'deploy/hqip-backup-retry.service', 'deploy/hqip-backup-retry.timer'}
 REQUIRED = {'hqip', 'artifacts/manifest.json', 'artifacts/HQIP-Windows-x64.zip',
             'artifacts/desktop-manifest.json', 'admin-web/index.html', 'user-web/index.html',
             'deploy/hqip-control.service', 'deploy/hqip-storage.service', 'deploy/nginx-hqip.conf',
             'deploy/hqip-journal-limits.conf', 'deploy/hqip-nginx-logrotate.conf',
             'deploy/storage/compose.yaml', 'deploy/storage/init-roles.sql', 'deploy/storage/redis.conf',
+            *PROTECTION_FILES,
             *(f'artifacts/{name}' for name in NODE_ASSETS),
             *(f'scripts/{name}' for name in RELEASE_SCRIPTS)}
 DESKTOP_BINARIES = {'HQIP.exe', 'hqip-helper.exe', 'sing-box.exe', 'libcronet.dll'}
@@ -52,6 +57,14 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
+    protection = manifest.get('commercialProtectionVersion', 0)
+    logs = manifest.get('operationLogsVersion', 0)
+    if type(protection) is not int or protection not in ((0, 1) if allow_legacy else (1,)):
+        raise ValueError('New releases require commercialProtectionVersion 1')
+    if type(logs) is not int or logs not in ((0, 1) if allow_legacy else (1,)):
+        raise ValueError('New releases require operationLogsVersion 1')
+    if protection == 0:
+        required = required - PROTECTION_FILES
     operations = manifest.get('operationsVersion', 0)
     if type(operations) is not int or operations not in (0, 1):
         raise ValueError('Unsupported operations schema capability')

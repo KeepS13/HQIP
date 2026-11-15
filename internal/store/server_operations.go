@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -235,6 +236,12 @@ func (s *Store) FinishServerOperation(j ServerOperation, state, message, credent
 	if current != "running" {
 		return ErrConflict
 	}
+	previousCredentialStatus := ""
+	if j.Kind == "check" {
+		if err = tx.QueryRow("SELECT status FROM server_credentials WHERE server_id=?", j.ServerID).Scan(&previousCredentialStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	if credentialStatus != "" && j.Kind == "check" {
 		if _, err = tx.Exec("UPDATE server_credentials SET status=?,message=?,last_checked=?,next_check=? WHERE server_id=? AND revision=? AND binding=?", credentialStatus, message, s.Now().Unix(), s.Now().Add(time.Hour).Unix(), j.ServerID, j.CredentialRevision, j.Binding); err != nil {
 			return err
@@ -244,6 +251,25 @@ func (s *Store) FinishServerOperation(j ServerOperation, state, message, credent
 		return err
 	}
 	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,?,?)", s.Now().Unix(), "server."+j.Kind+"."+state, j.ServerID+"/"+j.ID); err != nil {
+		return err
+	}
+	if err = s.bestEffortOperationLog(tx, func(ctx context.Context) error {
+		var manual int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM operation_job_context WHERE job_id=?", j.ID).Scan(&manual); err != nil {
+			return err
+		}
+		// Routine healthy credential checks are noise. Manual checks and changes
+		// of health retain both the operator and the terminal result.
+		record := j.Kind != "check" || manual != 0 || (state == "failed" && previousCredentialStatus != credentialStatus) || (state == "succeeded" && previousCredentialStatus != "" && previousCredentialStatus != "unchecked" && previousCredentialStatus != "healthy")
+		if !record {
+			return nil
+		}
+		result := "success"
+		if state == "failed" {
+			result = "failure"
+		}
+		return jobOperationLog(ctx, tx, model.OperationLog{ID: "server-finished:" + j.ID, At: s.Now(), Category: "operations", Action: "server." + j.Kind + "." + state, ResourceType: "server", ResourceID: j.ServerID, JobID: j.ID, Result: result, DurationMS: max(0, s.Now().Unix()-j.StartedAt) * 1000, Details: map[string]any{"nodeId": j.NodeID, "status": credentialStatus}}, s.Now())
+	}); err != nil {
 		return err
 	}
 	return tx.Commit()

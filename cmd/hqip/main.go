@@ -55,6 +55,8 @@ func run(args []string) error {
 		return migrateSubscriptionAllocations(args[1:])
 	case "migrate-operations":
 		return migrateOperations(args[1:])
+	case "migrate-operation-logs":
+		return migrateOperationLogs(args[1:])
 	default:
 		return errors.New("未知命令；可用命令：serve、init-admin、backup、restore、storage-info、migrate-payments、migrate-subscription-allocations")
 	}
@@ -431,6 +433,12 @@ func restore(args []string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if err = pgstore.Restore(ctx, os.Getenv("HQIP_DATABASE_URL"), filepath.Join(temp, "hqip.pg.dump")); err != nil {
+			return err
+		}
+		// Disaster recovery already runs with the migration identity against an
+		// empty target. Upgrade this additive capability before runtime checks so
+		// pre-operation-log backups remain recoverable by the current release.
+		if err = store.MigratePostgresOperationLogs(ctx, os.Getenv("HQIP_DATABASE_URL")); err != nil {
 			return err
 		}
 	}

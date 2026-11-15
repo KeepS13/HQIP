@@ -81,14 +81,14 @@ func (s *Store) ProcessPaymentNotify(values url.Values) error {
 		if r.Order.PlatformOrderNo != "" && proof.PlatformOrderNo != r.Order.PlatformOrderNo {
 			return ErrPaymentNotify
 		}
-		if err = recordVerifiedPayment(tx, r, proof, signedVersion, s.Now(), false); err != nil {
+		if err = recordVerifiedPayment(s, tx, r, proof, signedVersion, s.Now(), false); err != nil {
 			return err
 		}
 		return tx.Commit()
 	})
 }
 
-func recordVerifiedPayment(tx *sql.Tx, r paymentOrderRecord, p payment.NotifyProof, signatureVersion int64, now time.Time, queried bool) error {
+func recordVerifiedPayment(s *Store, tx *sql.Tx, r paymentOrderRecord, p payment.NotifyProof, signatureVersion int64, now time.Time, queried bool) error {
 	if r.Order.PaymentState == "paid" {
 		_, err := tx.Exec("UPDATE payment_orders SET last_notify_at=? WHERE id=?", now.Unix(), r.Order.ID)
 		return err
@@ -111,7 +111,12 @@ func recordVerifiedPayment(tx *sql.Tx, r paymentOrderRecord, p payment.NotifyPro
 		message = "支付平台查单确认已付款，等待开通订阅"
 	}
 	_, err := tx.Exec("INSERT INTO payment_activities(id,order_id,at,kind,message,signature_version,reported_platform_order_no,actual_amount,reported_paid_at) VALUES(?,?,?,?,?,?,?,?,?)", NewID(), r.Order.ID, now.Unix(), kind, message, signatureVersion, p.PlatformOrderNo, p.ActualAmountCents, p.ReportedPaidAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.bestEffortOperationLog(tx, func(ctx context.Context) error {
+		return appendOperationLog(ctx, tx, model.OperationLog{ID: "payment-paid:" + r.Order.ID, At: now, Category: "payment", Action: "payment." + kind, ActorType: "system", ActorName: "系统", AuthType: "payment-signature", ResourceType: "order", ResourceID: r.Order.ID, Result: "success"}, now, false)
+	})
 }
 
 func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
@@ -195,6 +200,11 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 			return false, err
 		}
 		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'payment.fulfilled',?)", now.Unix(), id+":"+e.ID); err != nil {
+			return false, err
+		}
+		if err = s.bestEffortOperationLog(tx, func(ctx context.Context) error {
+			return appendOperationLog(ctx, tx, model.OperationLog{ID: "payment-fulfilled:" + id, At: now, Category: "payment", Action: "payment.fulfilled", ActorType: "system", ActorName: "系统", AuthType: "system", ResourceType: "order", ResourceID: id, Result: "success", Details: map[string]any{"subscriptionId": e.ID}}, now, false)
+		}); err != nil {
 			return false, err
 		}
 		return true, tx.Commit()
@@ -401,7 +411,7 @@ func (s *Store) ReconcilePaymentOrder(ctx context.Context, id string, expected i
 		}
 		if result.State == "4" {
 			proof := payment.NotifyProof{MerchantNum: result.MerchantNum, OrderNo: result.OrderNo, PlatformOrderNo: result.PlatformOrderNo, PayType: result.PayType, AmountCents: result.AmountCents, ActualAmountCents: result.ActualAmountCents, ReportedPaidAt: result.ReportedPaidAt}
-			if e = recordVerifiedPayment(tx, r, proof, 0, s.Now(), true); e != nil {
+			if e = recordVerifiedPayment(s, tx, r, proof, 0, s.Now(), true); e != nil {
 				return e
 			}
 		} else if result.State == "7" && r.Order.PaymentState == "unpaid" {

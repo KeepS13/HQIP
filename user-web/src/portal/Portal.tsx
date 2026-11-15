@@ -650,7 +650,7 @@ export default function Portal() {
     { to: "/", name: "账户概览", icon: <LayoutDashboard size={19} /> },
     { to: "/catalog", name: "订阅商城", icon: <Globe2 size={19} /> },
     { to: "/subscriptions", name: "我的订阅", icon: <Link2 size={19} /> },
-    { to: "/imports", name: "订阅导入导出", icon: <FileDown size={19} /> },
+    { to: "/imports", name: "复制订阅链接", icon: <FileDown size={19} /> },
     { to: "/orders", name: "我的订单", icon: <ReceiptText size={19} /> },
     { to: "/downloads", name: "客户端下载", icon: <Download size={19} /> },
     { to: "/account", name: "账户设置", icon: <UserRound size={19} /> },

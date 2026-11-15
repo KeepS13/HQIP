@@ -1,0 +1,21 @@
+[Unit]
+Description=Retry a failed HQIP scheduled backup
+After=network-online.target hqip-storage.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -B /opt/hqip-control/current/scripts/automatic_backup.py --retry
+ExecStopPost=/usr/bin/python3 -B /opt/hqip-control/current/scripts/automatic_backup.py --record-abnormal
+TimeoutStartSec=35min
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hqip-control /var/backups/hqip-control /opt/hqip-control/deploy.lock
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+LogNamespace=hqip-control

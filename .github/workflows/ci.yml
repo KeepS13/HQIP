@@ -104,7 +104,7 @@ jobs:
           HQIP_TEST_POSTGRES_APP_URL="$HQIP_DATABASE_URL"
           HQIP_TEST_REDIS_ACL_URL="$HQIP_REDIS_URL"
           set +a
-          go test -race ./internal/store ./internal/ratelimit -run 'TestPostgresApplicationRole|TestRealRedisRestrictedACL' -count=1
+          go test -race ./internal/store ./internal/ratelimit -run 'TestPostgresApplicationRole|TestRealRedisRestrictedACL|TestRealRedisAdminProtectionOriginalRestrictedACL' -count=1
       - name: Remove isolated storage stack
         if: always()
         run: |

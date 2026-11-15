@@ -35,6 +35,8 @@ AND NOT EXISTS(SELECT 1 FROM removal_participants r WHERE r.session_id=client_se
 		{"daily", "start<?", DayStart(now.AddDate(0, -13, 0))},
 		{"events", "created_at<?", now.AddDate(0, 0, -30).Unix()},
 		{"audit", "at<?", now.AddDate(0, -13, 0).Unix()},
+		{"operation_logs", "last_at_ms<?", now.AddDate(0, -13, 0).UnixMilli()},
+		{"operation_job_context", "created_at<?", now.AddDate(0, -13, 0).Unix()},
 		{"jobs", "state IN ('done','error','cancelled') AND created_at<?", now.AddDate(0, 0, -30).Unix()},
 		{"server_operations", "state IN ('succeeded','failed') AND finished_at<?", now.AddDate(0, 0, -90).Unix()},
 	} {
