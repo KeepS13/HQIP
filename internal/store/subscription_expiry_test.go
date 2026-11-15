@@ -120,7 +120,7 @@ func TestSubscriptionExpiryPreservesGrantAndOtherCopies(t *testing.T) {
 }
 
 func TestSubscriptionExpiryRejectsInvalidStateAndStaleWrites(t *testing.T) {
-	for _, scenario := range []string{"past", "now", "expired", "disabled-expired", "revoked", "stale", "foreign", "expires-during-save", "target-expires-during-save", "audit-failure"} {
+	for _, scenario := range []string{"past", "now", "expired", "disabled-expired", "revoked", "stale", "foreign", "expires-during-update", "expires-during-save", "target-expires-during-save", "audit-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, now, user, _, _, _ := portalFixture(t, 1, nil)
 			sub := user.Subscriptions[0]
@@ -145,8 +145,12 @@ func TestSubscriptionExpiryRejectsInvalidStateAndStaleWrites(t *testing.T) {
 			case "foreign":
 				owner = "another-user"
 				want = ErrNotFound
-			case "expires-during-save", "target-expires-during-save":
+			case "expires-during-update", "expires-during-save", "target-expires-during-save":
 				calls := 0
+				deadlineCall := 6
+				if scenario == "expires-during-update" {
+					deadlineCall = 3
+				}
 				boundary := sub.ExpiresAt
 				want = ErrSubscriptionExpired
 				if scenario == "target-expires-during-save" {
@@ -157,7 +161,7 @@ func TestSubscriptionExpiryRejectsInvalidStateAndStaleWrites(t *testing.T) {
 				clock := *now
 				s.Now = func() time.Time {
 					calls++
-					if calls >= 6 {
+					if calls >= deadlineCall {
 						return boundary
 					}
 					return clock

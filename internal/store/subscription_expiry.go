@@ -62,6 +62,9 @@ WHERE id=? AND user_id=? AND revision=? AND revoked=0 AND expires>?`, expires.Un
 		if count, err := result.RowsAffected(); err != nil {
 			return empty, err
 		} else if count != 1 {
+			if err = validate(); err != nil {
+				return empty, err
+			}
 			return empty, ErrConflict
 		}
 		if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id=?", user); err != nil {
