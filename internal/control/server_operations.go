@@ -121,6 +121,7 @@ func (s *Server) checkServerCredential(w http.ResponseWriter, r *http.Request) {
 		managementError(w, e)
 		return
 	}
+	s.linkOperationJob(r, j.ID)
 	s.signal()
 	reply(w, 202, j)
 }
@@ -181,6 +182,8 @@ func (s *Server) queueAgentUpgrades(w http.ResponseWriter, r *http.Request) {
 		Error  string                 `json:"error,omitempty"`
 	}
 	out := []entry{}
+	accepted, failed := 0, 0
+	jobIDs := []string{}
 	seen := map[string]bool{}
 	for _, id := range body.NodeIDs {
 		if seen[id] {
@@ -190,15 +193,28 @@ func (s *Server) queueAgentUpgrades(w http.ResponseWriter, r *http.Request) {
 		n, e := s.Store.Node(id)
 		if e != nil {
 			out = append(out, entry{NodeID: id, Error: "节点不存在"})
+			failed++
 			continue
 		}
 		j, e := s.Store.QueueServerOperation(n.ServerID, id, "agent-upgrade", "", release.SourceSHA, 0)
 		if e != nil {
 			out = append(out, entry{NodeID: id, Error: e.Error()})
+			failed++
 		} else {
 			out = append(out, entry{NodeID: id, Job: &j})
+			accepted++
+			jobIDs = append(jobIDs, j.ID)
+			s.linkOperationJob(r, j.ID)
 		}
 	}
+	result := "accepted"
+	if failed > 0 {
+		result = "partial"
+		if accepted == 0 {
+			result = "failure"
+		}
+	}
+	setOperationOutcome(r, "agent.upgrade.queued", result, map[string]any{"acceptedCount": accepted, "failedCount": failed, "totalCount": accepted + failed, "jobIds": jobIDs})
 	s.signal()
 	reply(w, 202, out)
 }

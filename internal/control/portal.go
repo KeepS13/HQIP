@@ -108,6 +108,13 @@ func (s *Server) portalAuth(kind string, next portalHandler) http.Handler {
 			}
 			return
 		}
+		name := user
+		if _, ok := r.Context().Value(operationContextKey{}).(*operationContext); ok {
+			if profile, e := s.Store.PortalUser(user); e == nil {
+				name = profile.Email
+			}
+			setOperationActor(r, "user", user, name, kind)
+		}
 		if kind == "browser" && r.Method != "GET" && r.Method != "HEAD" && (!s.portalOrigin(r) || !secure.Equal(csrf, r.Header.Get("X-CSRF-Token"))) {
 			fail(w, 403, "安全校验失败")
 			return
@@ -286,7 +293,7 @@ func (s *Server) portalRegister(w http.ResponseWriter, r *http.Request) {
 		portalResult(w, nil, err)
 		return
 	}
-	s.finishPortalLogin(w, b)
+	s.finishPortalLogin(w, r, b)
 }
 func (s *Server) portalLogin(w http.ResponseWriter, r *http.Request) {
 	b, ok := s.portalLoginAttempt(w, r, "login")
@@ -300,15 +307,16 @@ func (s *Server) portalLogin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "请求繁忙")
 		return
 	}
-	s.finishPortalLogin(w, b)
+	s.finishPortalLogin(w, r, b)
 }
-func (s *Server) finishPortalLogin(w http.ResponseWriter, b portalLoginBody) {
+func (s *Server) finishPortalLogin(w http.ResponseWriter, r *http.Request, b portalLoginBody) {
 	t, csrf, err := s.Store.PortalLogin(b.Email, b.Password)
 	if err != nil {
 		portalResult(w, nil, err)
 		return
 	}
 	s.setPortalCookie(w, t.AccessToken, 86400)
+	setOperationActor(r, "user", t.User.ID, t.User.Email, "password")
 	reply(w, 200, map[string]any{"authenticated": true, "user": t.User, "csrfToken": csrf})
 }
 func (s *Server) portalSession(w http.ResponseWriter, r *http.Request) {
@@ -465,6 +473,9 @@ func (s *Server) nativeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, e := s.Store.ExchangePortalCode(b.Code, b.CodeVerifier, b.RedirectURI, b.InstallationID)
+	if e == nil {
+		setOperationActor(r, "user", t.User.ID, t.User.Email, "native")
+	}
 	portalResult(w, t, e)
 }
 func (s *Server) nativeRefresh(w http.ResponseWriter, r *http.Request) {

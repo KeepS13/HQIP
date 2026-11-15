@@ -14,6 +14,7 @@ type Metrics struct {
 
 type Node struct {
 	ID                  string             `json:"id"`
+	QueuedJobID         int64              `json:"-"`
 	ServerID            string             `json:"serverId"`
 	AddressID           string             `json:"addressId"`
 	MachineID           string             `json:"machineId"`

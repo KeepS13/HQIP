@@ -184,14 +184,18 @@ def rollback(state):
  shutil.copyfile(state/'unit.before.service',UNIT);UNIT.chmod(0o644)
  if info.get('prepareTarget') and not PREP.exists():PREP.symlink_to(info['prepareTarget'])
  control.point_current(Path(info['previous']))
+ from commercial_protection import rollback as rollback_protection
+ rollback_protection(state,control.run)
  control.run('nginx','-t');control.run('systemctl','daemon-reload');control.run('systemctl','start',control.SERVICE);control.healthy();control.run('systemctl','reload','nginx')
  info['phase']='rolled-back-data-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
 
-def upgrade(release,state):
+def upgrade(release,state,defer_protection=False):
  check_state(state);release,manifest,previous=verify(release)
  migration_env=allocation_migration_environment(manifest)
  from operations_deployment import prepare as prepare_operations, migrate as migrate_operations
  operations_env=prepare_operations(sys.modules[__name__],manifest)
+ from commercial_protection import prepare_operation_logs, migrate_operation_logs, prepare as prepare_protection, install as install_protection, defer_origin
+ logs_env=prepare_operation_logs(sys.modules[__name__],manifest)
  if SITE.is_symlink() or UNIT.is_symlink():raise ValueError('Unexpected configuration symlink')
  state.mkdir(mode=0o700,exist_ok=False)
  shutil.copyfile(SITE,state/'nginx.before.conf');shutil.copyfile(UNIT,state/'unit.before.service')
@@ -199,6 +203,8 @@ def upgrade(release,state):
  if PREP.is_symlink():info['prepareTarget']=str(PREP.resolve(strict=True))
  elif PREP.exists():raise ValueError('Unexpected preparation site')
  (state/'domains-state.json').write_text(json.dumps(info,indent=2))
+ protection=prepare_protection(release,manifest,state)
+ origin_pending=defer_origin(release,manifest,state,SITE)
  # pg_dump takes a transactionally consistent online snapshot. Back up and
  # prepare additive schema while APIs still serve lease renewals; rollback
  # always keeps the live database rather than restoring this older snapshot.
@@ -211,6 +217,13 @@ def upgrade(release,state):
   for p in state.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
   require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
   migrate_operations(release,operations_env)
+  if logs_env is not None:
+   info['operationLogsMigrationAttempted']=True
+   (state/'domains-state.json').write_text(json.dumps(info,indent=2))
+  migrate_operation_logs(release,logs_env)
+  if logs_env is not None:
+   info['operationLogsMigrationCompleted']=True
+   (state/'domains-state.json').write_text(json.dumps(info,indent=2))
   from fresh_deploy import install_log_limits
   install_log_limits(release)
  except Exception:
@@ -231,9 +244,11 @@ def upgrade(release,state):
   migrate_allocations(release,migration_env,state,info)
   control.point_current(release)
   shutil.copyfile(release/'deploy/hqip-control.service',UNIT);UNIT.chmod(0o644)
-  shutil.copyfile(release/'deploy/nginx-hqip.conf',SITE);SITE.chmod(0o644)
+  if not origin_pending:
+   shutil.copyfile(release/'deploy/nginx-hqip.conf',SITE);SITE.chmod(0o644)
   if info.get('prepareTarget'):PREP.unlink()
   control.run('nginx','-t');control.run('systemctl','daemon-reload');control.run('systemctl','start',control.SERVICE);control.healthy();control.run('systemctl','reload','nginx')
+  if protection:install_protection(release,control.run,control.DATA)
   if data_identity()!=info['masterSHA256']:raise ValueError('Live data identity changed')
  except Exception:
   if info.get('allocationMigrationAttempted'):
@@ -243,13 +258,34 @@ def upgrade(release,state):
    info['phase']='failed-schema-advanced-data-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
    raise RuntimeError('Schema migration completed; refusing incompatible old binary. Fix forward with this data or deploy a compatible v5 release.')
   rollback(state);raise
+ info['phase']='active-awaiting-protection' if origin_pending else 'active';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
+ if protection and not defer_protection:complete_protection(state)
+ print(json.dumps({'backup':str(state),'sourceSHA':manifest['sourceSHA'],'phase':json.loads((state/'domains-state.json').read_text())['phase']}))
+
+
+def complete_protection(state):
+ check_state(state,True)
+ info=json.loads((state/'domains-state.json').read_text())
+ release=Path(info['release'])
+ if (control.BASE/'current').resolve(strict=True)!=release or info['phase'] not in ('active','active-awaiting-protection'):
+  raise ValueError('Active release changed; protection acceptance refused')
+ control.verify_release(release)
+ from commercial_protection import complete_release
+ complete_release(release,state,control.run,site=SITE,base=control.BASE,data=control.DATA)
  info['phase']='active';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
- print(json.dumps({'backup':str(state),'sourceSHA':manifest['sourceSHA'],'phase':'active'}))
 
 if __name__=='__main__':
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('action',choices=['verify','upgrade','rollback']);p.add_argument('--release',type=Path);p.add_argument('--state',type=Path);a=p.parse_args()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('action',choices=['verify','upgrade','rollback','complete']);p.add_argument('--release',type=Path);p.add_argument('--state',type=Path);p.add_argument('--defer-protection',action='store_true');a=p.parse_args()
  if a.action=='verify':print(verify(a.release)[1]['sourceSHA'])
  else:
   if os.geteuid()!=0:raise PermissionError('Root required')
-  if a.action=='upgrade':upgrade(a.release,a.state)
-  else:rollback(a.state)
+  if a.action=='upgrade':
+   if a.defer_protection:upgrade(a.release,a.state,True)
+   else:
+    from automatic_backup import deployment_lock
+    with deployment_lock(control.BASE):upgrade(a.release,a.state,True)
+    complete_protection(a.state)
+  elif a.action=='complete':complete_protection(a.state)
+  else:
+   from automatic_backup import deployment_lock
+   with deployment_lock(control.BASE):rollback(a.state)

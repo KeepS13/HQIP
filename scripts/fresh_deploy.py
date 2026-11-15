@@ -290,7 +290,10 @@ def activate(state, receipt):
     if record['phase'] != 'prepared':
         raise ValueError('Only a verified prepared station can be activated once')
     release = Path(record['release'])
-    verify_full_release(release)
+    manifest = verify_full_release(release)
+    from commercial_protection import verify_cloudflare, install as install_protection, defer_origin
+    if manifest.get('commercialProtectionVersion') == 1:
+        verify_cloudflare()
     require_free_space(release, STAGE, state, DATA, STORAGE)
     assert_empty(empty_inventory())
     ready((18190, 18191))
@@ -324,6 +327,7 @@ def activate(state, receipt):
             shutil.copyfile(path, state / name)
             (state / name).chmod(0o600)
     record['previousRelease'] = str(previous)
+    origin_pending = defer_origin(release, manifest, state, SITE)
     record['finalArchiveVerifiedReceipt'] = str(receipt)
     record['phase'] = 'activating'
     save(state, record)
@@ -337,7 +341,8 @@ def activate(state, receipt):
     shutil.copyfile(STORAGE / 'storage.env', CONFIG / 'storage.env')
     (CONFIG / 'storage.env').chmod(0o600)
     shutil.copyfile(release / 'deploy/hqip-control.service', UNIT)
-    shutil.copyfile(release / 'deploy/nginx-hqip.conf', SITE)
+    if not origin_pending:
+        shutil.copyfile(release / 'deploy/nginx-hqip.conf', SITE)
     UNIT.chmod(0o644)
     SITE.chmod(0o644)
     install_log_limits(release)
@@ -350,6 +355,8 @@ def activate(state, receipt):
     run('systemctl', 'enable', '--now', 'hqip-control.service')
     ready((18090, 18091))
     run('systemctl', 'reload', 'nginx')
+    if manifest.get('commercialProtectionVersion') == 1:
+        install_protection(release, run, DATA)
     record['phase'] = 'active'
     save(state, record)
     return record
@@ -375,6 +382,9 @@ def verify(state, public=False):
     if public:
         if not active:
             raise ValueError('Public verification requires activation')
+        pending = state / 'origin-pending.json'
+        if pending.exists() and json.loads(pending.read_text()).get('pending'):
+            raise ValueError('Complete the initial backup and origin protection before public acceptance')
         for url in ('https://' + DOMAINS[0] + '/', 'https://' + DOMAINS[1] + '/',
                     'https://' + DOMAINS[2] + '/healthz',
                     'https://' + DOMAINS[2] + '/readyz'):
@@ -402,7 +412,7 @@ def finalize(state):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('verify-release', 'inventory', 'prepare', 'activate', 'verify', 'finalize'))
+    parser.add_argument('action', choices=('verify-release', 'inventory', 'prepare', 'activate', 'complete', 'verify', 'finalize'))
     parser.add_argument('--release', type=Path)
     parser.add_argument('--state', type=Path)
     parser.add_argument('--rules', type=Path)
@@ -432,8 +442,13 @@ def main():
             result = activate(args.state, args.retirement_receipt)
         elif args.action == 'verify':
             result = verify(args.state, args.public)
+        elif args.action == 'complete':
+            result = verify(args.state)
         else:
             result = finalize(args.state)
+    if args.action in ('activate', 'complete'):
+        from commercial_protection import complete_release
+        complete_release(Path(result['release']), args.state, run, site=SITE, base=BASE, data=DATA)
     print(json.dumps({key: result[key] for key in ('phase', 'sourceSHA')}))
 
 

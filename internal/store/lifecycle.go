@@ -393,7 +393,8 @@ func (s *Store) queueWithOptions(id, kind, password string, options Job) (model.
 	if cancelling > 0 {
 		return n, errors.New("旧部署任务正在停止，请稍后重试")
 	}
-	if _, err = tx.Exec("INSERT INTO jobs(node_id,kind,created_at,options) VALUES(?,?,?,?)", id, kind, s.Now().Unix(), jsonString(options)); err != nil {
+	var queuedJobID int64
+	if err = tx.QueryRow("INSERT INTO jobs(node_id,kind,created_at,options) VALUES(?,?,?,?) RETURNING id", id, kind, s.Now().Unix(), jsonString(options)).Scan(&queuedJobID); err != nil {
 		return n, errors.New("节点已有任务，请等待当前任务完成")
 	}
 	if kind != "retire" {
@@ -409,7 +410,9 @@ func (s *Store) queueWithOptions(id, kind, password string, options Job) (model.
 		return n, err
 	}
 	s.Audit("node."+kind, id)
-	return s.Node(id)
+	n, err = s.Node(id)
+	n.QueuedJobID = queuedJobID
+	return n, err
 }
 
 func (s *Store) CommitNodeCertificateMode(id string, jobID int64, mode, zoneID string) error {

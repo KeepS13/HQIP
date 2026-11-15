@@ -173,6 +173,7 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "创建节点失败，域名或服务器端口可能已存在")
 		return
 	}
+	s.linkNodeOperationJob(r, n.ID, n.QueuedJobID)
 	s.signal()
 	reply(w, 202, n)
 }
@@ -330,6 +331,7 @@ func (s *Server) retryNode(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, err.Error())
 		return
 	}
+	s.linkNodeOperationJob(r, n.ID, n.QueuedJobID)
 	s.signal()
 	reply(w, 202, n)
 }
@@ -339,6 +341,7 @@ func (s *Server) verifyNode(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, err.Error())
 		return
 	}
+	s.linkNodeOperationJob(r, n.ID, n.QueuedJobID)
 	s.signal()
 	reply(w, 202, n)
 }

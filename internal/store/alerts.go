@@ -107,7 +107,7 @@ func EnsureNotificationSchema(db *sql.DB) error {
 
 func alertPath(path string) string {
 	path = strings.TrimPrefix(path, "/admin")
-	if path == "/domains" || path == "/notifications" {
+	if path == "/domains" || path == "/notifications" || path == "/operation-logs" {
 		return path
 	}
 	for _, prefix := range []string{"/nodes/", "/servers/", "/users/"} {

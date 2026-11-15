@@ -44,6 +44,7 @@ import { SubscriptionRequests } from "./pages/SubscriptionRequests";
 import { Servers, ServerPage } from "./pages/Servers";
 import { Domains } from "./pages/Domains";
 import { Notifications } from "./pages/Notifications";
+import { OperationLogs } from "./pages/OperationLogs";
 import { Payments } from "./pages/Payments";
 import { Orders, OrderDetail } from "./pages/Orders";
 import { HostResources } from "./HostResources";
@@ -361,6 +362,7 @@ export default function App() {
     "/payments": "支付设置",
     "/turnstile": "注册与安全验证",
     "/notifications": "预警中心",
+    "/operation-logs": "操作日志",
     "/guide": "使用指南",
   };
   const title =
@@ -415,6 +417,7 @@ export default function App() {
                 <span>订阅管理</span>
               </NavLink>
               <NavLink to="/orders"><ReceiptText size={19} /><span>订单管理</span></NavLink>
+              <NavLink to="/operation-logs"><ShieldCheck size={19}/><span>操作日志</span></NavLink>
               <NavLink to="/notifications" className="notification-nav">
                 <BellRing size={19} />
                 <span>预警中心</span>
@@ -471,7 +474,7 @@ export default function App() {
             </div>
             <div className="topbar-right">
               <span className="update-label">
-                <Activity size={13} /> 每 5 秒刷新
+                <Activity size={13} /> {location.pathname === "/operation-logs" ? "手动刷新" : "每 5 秒刷新"}
               </span>
               <span className="topbar-divider" />
               <button
@@ -524,6 +527,7 @@ export default function App() {
               <Route path="/payments" element={<Payments />} />
               <Route path="/turnstile" element={<TurnstileSettingsPage />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/operation-logs" element={<OperationLogs />} />
               <Route path="/devices/*" element={<Navigate to="/users" replace />} />
               <Route path="/guide" element={<Guide />} />
               <Route path="*" element={<NotFound />} />

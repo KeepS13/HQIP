@@ -66,6 +66,7 @@ func (s *Server) queueNetworkQuality(w http.ResponseWriter, r *http.Request) {
 		managementError(w, err)
 		return
 	}
+	s.linkNodeOperationJob(r, r.PathValue("id"), v.JobID)
 	s.signal()
 	reply(w, http.StatusAccepted, v)
 }

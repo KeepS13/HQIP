@@ -42,6 +42,7 @@ def package_release(root, sha, previous_sha=None):
         inputs['scripts/' + name] = root / 'scripts' / name
     for name in ('nginx-hqip.conf', 'hqip-control.service', 'hqip-storage.service',
                  'hqip-journal-limits.conf', 'hqip-nginx-logrotate.conf',
+                 'hqip-backup.service', 'hqip-backup.timer', 'hqip-backup-retry.service', 'hqip-backup-retry.timer',
                  'storage/compose.yaml', 'storage/init-roles.sql', 'storage/redis.conf'):
         inputs['deploy/' + name] = root / 'deploy' / name
     for app in ('admin-web', 'user-web'):
@@ -68,6 +69,7 @@ def package_release(root, sha, previous_sha=None):
     manifest = {'sourceSHA': sha, 'releaseKind': 'full', 'upgradeKind': 'full-release',
                 'schemaVersion': 5, 'postgresSchemaVersion': 1, 'paymentsVersion': 1, 'postgresRecoveryVersion': 1, 'subscriptionAllocationsVersion': 1,
                 'clientApiVersion': 3, 'serverBillingVersion': 2, 'agentTelemetryVersion': 1, 'operationsVersion': 1,
+                'operationLogsVersion': 1, 'commercialProtectionVersion': 1,
                 'desktopVersion': versions[0], 'desktopIconSHA256': digest(root / 'desktop/assets/hqip.ico'),
                 'sha256': hashes}
     if previous_sha:

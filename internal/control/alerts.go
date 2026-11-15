@@ -86,6 +86,7 @@ func (s *Server) RunNotifications(ctx context.Context) error {
 		}
 		conditions, err := s.Store.CollectNotificationConditions()
 		if err == nil {
+			conditions = append(conditions, s.operationHealthConditions(ctx)...)
 			err = s.Store.EvaluateAlerts(conditions)
 		}
 		if err != nil {

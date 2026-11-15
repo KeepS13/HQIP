@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 	_ "time/tzdata"
 
@@ -22,12 +23,13 @@ var Shanghai, _ = time.LoadLocation("Asia/Shanghai")
 var ErrNotFound = errors.New("记录不存在")
 
 type Store struct {
-	postgresDSN string
-	DB          *sql.DB
-	Vault       *secure.Vault
-	BaseURL     string
-	DataDir     string
-	Now         func() time.Time
+	operationLogFailure atomic.Bool
+	postgresDSN         string
+	DB                  *sql.DB
+	Vault               *secure.Vault
+	BaseURL             string
+	DataDir             string
+	Now                 func() time.Time
 }
 
 const schema = `
@@ -111,6 +113,10 @@ func Open(dataDir, baseURL string) (*Store, error) {
 		return nil, err
 	}
 	if err = EnsureOperationsSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = EnsureOperationLogsSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}

@@ -1,0 +1,7 @@
+[Unit]
+Description=Retry HQIP backup after ten minutes
+
+[Timer]
+OnActiveSec=10min
+AccuracySec=10s
+Unit=hqip-backup-retry.service

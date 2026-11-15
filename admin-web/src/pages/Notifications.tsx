@@ -13,7 +13,7 @@ type Page = { items:Alert[];total:number;page:number;pageSize:number };
 const categories:Record<string,string>={system:"系统与部署",capacity:"容量与流量",certificate:"域名与证书",recovery:"历史恢复"};
 const statuses:Record<string,string>={active:"进行中",unknown:"待核实",resolved:"已恢复",ended:"已结束"};
 function tone(a:Alert){return a.status==="resolved"?"success":a.status==="ended"?"muted":a.status==="unknown"?"info":a.condition.level}
-function detailLink(path:string){return /^\/(nodes|servers|users)\/[A-Za-z0-9_-]+$/.test(path)||["/domains","/notifications"].includes(path)?path:"/notifications"}
+export function detailLink(path:string){return /^\/(nodes|servers|users)\/[A-Za-z0-9_-]+$/.test(path)||["/domains","/notifications","/operation-logs"].includes(path)?path:"/notifications"}
 function requiresAcknowledgement(a:Alert){return a.acknowledgementRequired??a.condition.kind!=="job.install"}
 
 function AlertDetail({id,onClose,onChange}:{id:string;onClose:()=>void;onChange:()=>void}){

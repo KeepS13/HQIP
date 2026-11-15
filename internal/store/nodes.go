@@ -73,7 +73,7 @@ func (s *Store) CreateNode(n model.Node, password string) (model.Node, error) {
 			return n, err
 		}
 	}
-	if _, err = tx.Exec("INSERT INTO jobs(node_id,kind,created_at) VALUES(?,'install',?)", n.ID, s.Now().Unix()); err != nil {
+	if err = tx.QueryRow("INSERT INTO jobs(node_id,kind,created_at) VALUES(?,'install',?) RETURNING id", n.ID, s.Now().Unix()).Scan(&n.QueuedJobID); err != nil {
 		return n, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -410,11 +410,37 @@ func (s *Store) FinishJob(j Job, success bool) error {
 	}
 	defer tx.Rollback()
 	err = tx.QueryRow("UPDATE jobs SET state=CASE WHEN state='cancelling' THEN 'cancelled' ELSE ? END WHERE id=? AND state IN ('running','cancelling') RETURNING state", state, j.ID).Scan(&state)
+	changed := err == nil
 	if err == nil && state == "error" {
 		err = recordJobNotification(tx, j.ID, s.Now().Unix())
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
+	}
+	if changed {
+		if err = s.bestEffortOperationLog(tx, func(ctx context.Context) error {
+			result := "failure"
+			if state == "done" {
+				result = "success"
+			}
+			logState := state
+			if j.Kind == "quality" {
+				var qualityState string
+				if err := tx.QueryRowContext(ctx, "SELECT status FROM node_network_quality WHERE node_id=? AND job_id=?", j.NodeID, j.ID).Scan(&qualityState); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if qualityState != "complete" {
+					result = "failure"
+				}
+				if qualityState != "" {
+					logState = qualityState
+				}
+			}
+			jobID := nodeOperationJobID(j.ID)
+			return jobOperationLog(ctx, tx, model.OperationLog{ID: "job-finished:" + jobID, At: s.Now(), Category: "operations", Action: "node." + j.Kind + "." + logState, ResourceType: "node", ResourceID: j.NodeID, JobID: jobID, Result: result, Details: map[string]any{"status": logState}}, s.Now())
+		}); err != nil {
+			return err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return err

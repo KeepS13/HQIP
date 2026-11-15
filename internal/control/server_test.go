@@ -148,7 +148,7 @@ func TestLoginPasswordChangeAndCSRF(t *testing.T) {
 
 func TestLoginRateLimitAndAgentIsolation(t *testing.T) {
 	s, h := newServer(t)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
 		w := request(h, "POST", "/api/v1/login", map[string]string{"username": "admin", "password": "incorrect"}, "", "")
 		if w.Code != 401 {
 			t.Fatalf("attempt %d: %d", i, w.Code)
@@ -181,32 +181,33 @@ func TestLoginRateLimitAndAgentIsolation(t *testing.T) {
 
 func TestSuccessfulLoginResetsOnlyItsOwnFailureBudget(t *testing.T) {
 	s, h := newServer(t)
-	s.attempts["198.51.100.99"] = []time.Time{s.Store.Now()}
+	guard, err := s.adminLoginProtector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = guard.AdminFailure(context.Background(), "198.51.100.99"); err != nil {
+		t.Fatal(err)
+	}
 	valid := map[string]string{"username": "admin", "password": "initial-password-123"}
 	invalid := map[string]string{"username": "admin", "password": "incorrect"}
-	for i := 0; i < 12; i++ {
+	for cycle := 0; cycle < 2; cycle++ {
+		for i := 0; i < 4; i++ {
+			if w := request(h, "POST", "/api/v1/login", invalid, "", ""); w.Code != 401 {
+				t.Fatalf("cycle %d failed attempt %d: %d", cycle, i, w.Code)
+			}
+		}
 		if w := request(h, "POST", "/api/v1/login", valid, "", ""); w.Code != 200 {
-			t.Fatalf("successful login %d consumed failure budget: %d", i, w.Code)
+			t.Fatalf("valid login after four failures: %d", w.Code)
 		}
 	}
-	for i := 0; i < 9; i++ {
-		if w := request(h, "POST", "/api/v1/login", invalid, "", ""); w.Code != 401 {
-			t.Fatalf("failed attempt %d: %d", i, w.Code)
-		}
+	if w := request(h, "POST", "/api/v1/login", valid, "", ""); w.Code != 429 {
+		t.Fatal("successful login erased the separate request budget")
 	}
-	if w := request(h, "POST", "/api/v1/login", valid, "", ""); w.Code != 200 {
-		t.Fatalf("valid login at budget boundary: %d", w.Code)
+	if decision, err := guard.AdminFailure(context.Background(), "198.51.100.12"); err != nil || decision.Failures != 1 {
+		t.Fatal("current source failures were not reset", decision, err)
 	}
-	if len(s.attempts["198.51.100.12"]) != 0 || len(s.attempts["198.51.100.99"]) != 1 {
-		t.Fatal("success did not reset exactly the current IP budget")
-	}
-	for i := 0; i < 10; i++ {
-		if w := request(h, "POST", "/api/v1/login", invalid, "", ""); w.Code != 401 {
-			t.Fatalf("failure budget was not reset at attempt %d: %d", i, w.Code)
-		}
-	}
-	if w := request(h, "POST", "/api/v1/login", invalid, "", ""); w.Code != 429 {
-		t.Fatal("consecutive failures were not limited")
+	if decision, err := guard.AdminFailure(context.Background(), "198.51.100.99"); err != nil || decision.Failures != 2 {
+		t.Fatal("unrelated source failures were reset", decision, err)
 	}
 }
 

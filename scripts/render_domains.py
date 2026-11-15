@@ -14,8 +14,8 @@ def http_host(host):
  server_name {host};
  access_log /var/log/nginx/hqip-control/access.log hqip_control_safe;
  error_log /dev/null crit;
- location ^~ /.well-known/acme-challenge/ {{ root /var/www/letsencrypt; try_files $uri =404; }}
- location / {{ return 301 https://{host}$request_uri; }}
+ location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{{1,128}}$" {{ root /var/www/letsencrypt; try_files $uri =404; }}
+ location / {{ if ($hqip_cloudflare_peer = 0) {{ return 403; }} return 301 https://{host}$request_uri; }}
 }}
 '''
 
@@ -26,6 +26,7 @@ def tls_host(host):
  ssl_certificate /etc/letsencrypt/live/{host}/fullchain.pem;
  ssl_certificate_key /etc/letsencrypt/live/{host}/privkey.pem;
  ssl_protocols TLSv1.2 TLSv1.3;
+ if ($hqip_cloudflare_peer = 0) {{ return 403; }}
  access_log /var/log/nginx/hqip-control/access.log hqip_control_safe;
  error_log /dev/null crit;
  add_header Strict-Transport-Security "max-age=31536000" always;
@@ -39,6 +40,10 @@ def render():
 log_format hqip_control_safe '$remote_addr [$time_local] $request_method $status $body_bytes_sent $request_time';
 limit_conn_zone $binary_remote_addr zone=hqip_api_connections:10m;
 '''
+ # realip_remote_addr retains the socket peer before CF-Connecting-IP rewriting.
+ # Client supplied forwarding headers can never grant origin access.
+ text+='geo $realip_remote_addr $hqip_cloudflare_peer {\n default 0;\n'
+ text+=''.join(' '+cidr+' 1;\n' for cidr in CF_RANGES)+'}\n'
  text+=f'''map $request_uri $hqip_user_csp {{
  default "{BASE_CSP}";
  ~^/(login|register|authorize)(\\?|$) "{AUTH_CSP}";
