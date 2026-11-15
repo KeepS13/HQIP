@@ -813,3 +813,9 @@
     gap: 8px;
   }
 }
+.subscription-owned-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.subscription-owned-actions > small { width: 100%; color: var(--muted); font-size: 11px; }
+.subscription-expiry-preview { display: grid; gap: 12px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.subscription-expiry-preview > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.subscription-expiry-preview dt { color: var(--muted); }
+.subscription-expiry-preview dd { margin: 0; font-variant-numeric: tabular-nums; }

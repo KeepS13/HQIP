@@ -25,6 +25,7 @@ jobs:
       - run: npm --prefix admin-web ci
       - run: npm --prefix user-web ci
       - run: npm --prefix user-web test
+      - run: node --test admin-web/tests/*.test.mjs
       - run: npm --prefix admin-web run build
       - run: npm --prefix user-web run build
       - run: go vet ./...

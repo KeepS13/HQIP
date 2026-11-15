@@ -25,6 +25,7 @@ func (s *Server) registerPortalAdmin(m *http.ServeMux) {
 		"GET /api/v1/subscription-templates": s.subscriptionTemplates, "POST /api/v1/subscription-templates": s.saveSubscriptionTemplate, "PUT /api/v1/subscription-templates/{id}": s.saveSubscriptionTemplate, "POST /api/v1/subscription-templates/{id}/preview": s.previewSubscriptionTemplate,
 		"GET /api/v1/subscription-requests": s.adminSubscriptionRequests, "POST /api/v1/subscription-requests/{id}/approve": stoppedApplication, "POST /api/v1/subscription-requests/{id}/reject": stoppedApplication,
 		"GET /api/v1/users/{id}/subscriptions": s.adminUserSubscriptions, "POST /api/v1/users/{id}/subscriptions": s.adminAssignSubscription, "DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}": s.adminRemoveSubscription,
+		"PATCH /api/v1/users/{id}/subscriptions/{subscriptionId}/expiry": s.adminSubscriptionExpiry,
 		"GET /api/v1/users": s.portalUsers, "GET /api/v1/users/{id}": s.portalAdminUser, "PATCH /api/v1/users/{id}": s.portalAdminEnabled, "POST /api/v1/users/{id}/password": s.portalAdminPassword,
 		"POST /api/v1/users/{id}/sessions/{sessionId}/revoke": s.portalAdminRevokeSession, "POST /api/v1/users/{id}/connections/{leaseId}/revoke": s.portalAdminRevokeConnection,
 		"GET /api/v1/settings/turnstile": s.portalTurnstileSettings, "PUT /api/v1/settings/turnstile": s.portalTurnstileSettings, "GET /api/v1/settings/portal": s.portalSettings, "PUT /api/v1/settings/portal": s.portalSettings, "POST /api/v1/settings/portal/activate": s.portalActivate,

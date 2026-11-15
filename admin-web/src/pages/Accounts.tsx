@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
+  CalendarClock,
   KeyRound,
   Monitor,
   Package,
@@ -42,6 +43,8 @@ import {
   type UserSubscription,
 } from "../portal/types";
 import { TemplateFacts } from "./SubscriptionTemplates";
+import { SubscriptionExpiry } from "./SubscriptionExpiry";
+import { canAdjustSubscriptionExpiry } from "../subscription-expiry";
 import "./accounts.css";
 import "./subscriptions.css";
 
@@ -327,9 +330,11 @@ function GrantSubscription({
 function OwnedSubscription({
   value,
   onRemove,
+  onExpiry,
 }: {
   value: UserSubscription;
   onRemove: () => void;
+  onExpiry: () => void;
 }) {
   return (
     <article
@@ -382,9 +387,11 @@ function OwnedSubscription({
         <p>一次性上传＋下载 · 待结算预留 {bytes(value.reservedBytes)}</p>
       </div>
       {!["removed", "revoked"].includes(value.status) && (
-        <Button variant="danger" icon={Trash2} onClick={onRemove}>
-          移除这一份订阅
-        </Button>
+        <div className="subscription-owned-actions">
+          <Button variant="secondary" icon={CalendarClock} disabled={!canAdjustSubscriptionExpiry(value.status, value.expiresAt)} onClick={onExpiry}>调整到期时间</Button>
+          <Button variant="danger" icon={Trash2} onClick={onRemove}>移除这一份订阅</Button>
+          {!canAdjustSubscriptionExpiry(value.status, value.expiresAt) && <small>已到期订阅不能调整时间</small>}
+        </div>
       )}
     </article>
   );
@@ -466,6 +473,7 @@ export function UserPage() {
   const [grant, setGrant] = useState(false),
     [reset, setReset] = useState(false),
     [filter, setFilter] = useState("active");
+  const [expiry, setExpiry] = useState<UserSubscription | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     description: string;
@@ -533,6 +541,7 @@ export function UserPage() {
               <OwnedSubscription
                 key={s.id}
                 value={s}
+                onExpiry={() => setExpiry(s)}
                 onRemove={() =>
                   setConfirm({
                     title: "移除这一份订阅",
@@ -737,6 +746,7 @@ export function UserPage() {
         />
       )}
       {confirm && <Confirm {...confirm} onClose={() => setConfirm(null)} />}
+      {expiry && <SubscriptionExpiry key={expiry.id} userId={id!} value={expiry} onClose={() => setExpiry(null)} onSaved={async () => { await profile.refresh(); toast("这一份订阅的到期时间已更新"); }} />}
     </>
   );
 }
