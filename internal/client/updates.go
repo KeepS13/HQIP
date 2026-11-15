@@ -17,7 +17,7 @@ import (
 )
 
 // Official bundles inject the same version as their release manifest.
-var AppVersion = "4.4.0-dev"
+var AppVersion = "4.4.1-dev"
 
 type UpdateView struct {
 	CurrentVersion string     `json:"currentVersion"`
@@ -63,8 +63,7 @@ type UpdateChecker struct {
 
 func NewUpdateChecker(dir, version string, source func() string) *UpdateChecker {
 	ctx, cancel := context.WithCancel(context.Background())
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
+	transport := newDirectHTTPTransport()
 	u := &UpdateChecker{ctx: ctx, cancel: cancel, source: source, wake: make(chan struct{}, 1), reminderPath: filepath.Join(dir, "update-reminder.json"), view: UpdateView{CurrentVersion: version}, http: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if data, err := os.ReadFile(u.reminderPath); err == nil && len(data) <= 4096 {
 		_ = json.Unmarshal(data, &u.reminder)

@@ -36,8 +36,7 @@ func NewAPI(base string, tokens Tokens) (*API, error) {
 	if u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")) {
 		return nil, errors.New("远程服务必须使用 HTTPS")
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
+	transport := newDirectHTTPTransport()
 	return &API{base: u.String(), tokens: tokens, http: &http.Client{Transport: transport, Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 func (a *API) Tokens() Tokens { a.mu.Lock(); defer a.mu.Unlock(); return a.tokens }
