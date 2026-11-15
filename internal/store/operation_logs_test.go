@@ -318,9 +318,12 @@ func TestPostgresOperationLogsRestrictedRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	role := "audit_app_" + NewID()
+	password := "test-only-" + NewID()
 	u, _ := url.Parse(dsn)
 	schema := strings.Trim(u.Query().Get("search_path"), `"`)
-	if _, err = owner.Exec("CREATE ROLE " + quotedIdentifier(role) + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE"); err != nil {
+	// CI uses password authentication; this isolated role must authenticate
+	// independently of the schema owner's credentials.
+	if _, err = owner.Exec("CREATE ROLE " + quotedIdentifier(role) + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + strings.ReplaceAll(password, "'", "''") + "'"); err != nil {
 		owner.Close()
 		t.Fatal(err)
 	}
@@ -338,7 +341,7 @@ func TestPostgresOperationLogsRestrictedRole(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	u.User = url.User(role)
+	u.User = url.UserPassword(role, password)
 	app, err := pgstore.Open(u.String())
 	if err != nil {
 		t.Fatal(err)
