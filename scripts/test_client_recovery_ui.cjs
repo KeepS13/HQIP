@@ -33,11 +33,12 @@ async function load(source, directory, name) {
   const fixture = { loggedIn: true, subscription, subscriptions: [subscription], desiredNodeId: 'A', desiredSubscriptionId: 'sub-a', actualNodeId: '', actualSubscriptionId: '', nodes: [{ id: 'A', name: '日本-001', ready: true }], nodeChoices: [], runState: 'recovering', connectionIntent: true, lastError: '', syncError: '', metrics: { connectedAt: new Date().toISOString(), uploadBytes: 12345, downloadBytes: 67890, stale: true } };
   globalThis.__recoveryFixture = fixture;
   const recovering = renderToStaticMarkup(React.createElement(App));
-  assert.match(recovering, /<h2>连接恢复中<\/h2>/);
-  assert.match(recovering, /is-recovering/);
-  assert.match(recovering, /正在重新确认账户授权与节点连接/);
+  assert.match(recovering, /<h2>已连接<\/h2>/);
+  assert.match(recovering, /is-connected/);
+  assert.match(recovering, /status-dot green/);
+  assert.match(recovering, /TLS 验证已开启/);
   assert.match(recovering, /断开连接/);
-  assert.doesNotMatch(recovering, /role="alert"|<h2>已连接<\/h2>|TLS 验证已开启|status-dot green|power[^\"]*loading/);
+  assert.doesNotMatch(recovering, /role="alert"|恢复中|重新确认|is-recovering|status-dot amber|power[^\"]*loading/);
   globalThis.__recoveryFixture = {...fixture,runState:'connected',actualNodeId:'A'};
   const restored = renderToStaticMarkup(React.createElement(App));
   assert.match(restored, /<h2>已连接<\/h2>/);
@@ -55,5 +56,5 @@ async function load(source, directory, name) {
   assert.equal(sessionStatus({ runState: 'recovering', lastSeen: new Date().toISOString() }).label, '恢复中');
   assert.equal(sessionStatus({ runState: 'recovering', lastSeen: '2000-01-01' }).label, '心跳过期');
   delete globalThis.__recoveryFixture;
-  console.log('PASS desktop recovery/restored states, first failure, admin recovering/stale status');
+  console.log('PASS desktop silent recovery/restored states, first failure, admin recovering/stale status');
 })().catch(error => { console.error(error); process.exitCode = 1; });

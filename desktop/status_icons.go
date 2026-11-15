@@ -27,12 +27,11 @@ func connectionIcon(view client.View) ConnectionIcon {
 		return ConnectionIcon{"connecting", "正在切换连接"}
 	}
 	switch view.RunState {
-	case "connected":
+	case "connected", "recovering":
+		// Background recovery keeps the established connection presentation.
 		return ConnectionIcon{"connected", "已连接"}
 	case "connecting":
 		return ConnectionIcon{"connecting", "连接中"}
-	case "recovering":
-		return ConnectionIcon{"recovering", "连接恢复中"}
 	case "failed":
 		return ConnectionIcon{"failed", "连接失败"}
 	default:
