@@ -45,14 +45,36 @@ func (s *Store) PortalLogin(email, password string) (model.PortalTokens, string,
 	}
 	var id, hash string
 	var enabled bool
-	if err = s.DB.QueryRow("SELECT id,password,enabled FROM portal_users WHERE email=?", email).Scan(&id, &hash, &enabled); err != nil || !enabled || !secure.CheckPassword(hash, password) {
+	if err = s.DB.QueryRow("SELECT id,password,enabled FROM portal_users WHERE email=?", email).Scan(&id, &hash, &enabled); err != nil || !enabled {
 		return t, "", ErrUnauthorized
+	}
+	valid, upgrade := checkPortalPassword(hash, password)
+	if !valid {
+		return t, "", ErrUnauthorized
+	}
+	nextHash := ""
+	if upgrade {
+		nextHash = secure.HashPassword(password)
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return t, "", err
 	}
 	defer tx.Rollback()
+	if upgrade {
+		result, e := tx.Exec("UPDATE portal_users SET password=?,revision=revision+1 WHERE id=? AND enabled=1 AND password=?", nextHash, id, hash)
+		if e != nil {
+			return t, "", e
+		}
+		count, e := result.RowsAffected()
+		if e != nil {
+			return t, "", e
+		}
+		if count != 1 {
+			return t, "", ErrUnauthorized
+		}
+		hash = nextHash
+	}
 	var count int
 	if err = tx.QueryRow("SELECT COUNT(*) FROM portal_users WHERE id=? AND enabled=1 AND password=?", id, hash).Scan(&count); err != nil || count != 1 {
 		return t, "", ErrUnauthorized

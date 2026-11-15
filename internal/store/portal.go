@@ -169,8 +169,10 @@ func (s *Store) PortalPassword(id, current, next string, admin bool) error {
 	if err := s.DB.QueryRow("SELECT password FROM portal_users WHERE id=?", id).Scan(&old); err != nil {
 		return err
 	}
-	if !admin && !secure.CheckPassword(old, current) {
-		return ErrUnauthorized
+	if !admin {
+		if valid, _ := checkPortalPassword(old, current); !valid {
+			return ErrUnauthorized
+		}
 	}
 	hash := secure.HashPassword(next)
 	tx, err := s.DB.Begin()
