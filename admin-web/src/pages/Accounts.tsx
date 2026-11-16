@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   CalendarClock,
   KeyRound,
   Monitor,
+  Network,
   Package,
   Plus,
   Search,
@@ -44,6 +45,7 @@ import {
 } from "../portal/types";
 import { TemplateFacts } from "./SubscriptionTemplates";
 import { SubscriptionExpiry } from "./SubscriptionExpiry";
+import { SubscriptionNodes } from "./SubscriptionNodes";
 import { canAdjustSubscriptionExpiry } from "../subscription-expiry";
 import "./accounts.css";
 import "./subscriptions.css";
@@ -331,10 +333,12 @@ function OwnedSubscription({
   value,
   onRemove,
   onExpiry,
+  onNodes,
 }: {
   value: UserSubscription;
   onRemove: () => void;
   onExpiry: () => void;
+  onNodes: () => void;
 }) {
   return (
     <article
@@ -389,6 +393,7 @@ function OwnedSubscription({
       {!["removed", "revoked"].includes(value.status) && (
         <div className="subscription-owned-actions">
           <Button variant="secondary" icon={CalendarClock} disabled={!canAdjustSubscriptionExpiry(value.status, value.expiresAt)} onClick={onExpiry}>调整到期时间</Button>
+          <Button variant="secondary" icon={Network} disabled={!canAdjustSubscriptionExpiry(value.status, value.expiresAt)} onClick={onNodes}>修改节点</Button>
           <Button variant="danger" icon={Trash2} onClick={onRemove}>移除这一份订阅</Button>
           {!canAdjustSubscriptionExpiry(value.status, value.expiresAt) && <small>已到期订阅不能调整时间</small>}
         </div>
@@ -468,12 +473,23 @@ function ResetPassword({ id, onClose }: { id: string; onClose: () => void }) {
 
 export function UserPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const linkedSubscription = searchParams.get("subscription");
+  const openedLink = useRef("");
   const profile = usePolling<UserProfile>(`/users/${id}`),
     templates = usePolling<SubscriptionTemplate[]>("/subscription-templates");
   const [grant, setGrant] = useState(false),
     [reset, setReset] = useState(false),
     [filter, setFilter] = useState("active");
   const [expiry, setExpiry] = useState<UserSubscription | null>(null);
+  const [nodes, setNodes] = useState<UserSubscription | null>(null);
+  useEffect(() => {
+    const key = `${id}/${linkedSubscription}`;
+    const data = profile.data;
+    if (!linkedSubscription || !data || data.user.id !== id || openedLink.current === key) return;
+    const subscription = data.subscriptions?.find(value => value.id === linkedSubscription);
+    if (subscription) { openedLink.current = key; setFilter("all"); setNodes(subscription); }
+  }, [id, linkedSubscription, profile.data]);
   const [confirm, setConfirm] = useState<{
     title: string;
     description: string;
@@ -542,6 +558,7 @@ export function UserPage() {
                 key={s.id}
                 value={s}
                 onExpiry={() => setExpiry(s)}
+                onNodes={() => setNodes(s)}
                 onRemove={() =>
                   setConfirm({
                     title: "移除这一份订阅",
@@ -747,6 +764,7 @@ export function UserPage() {
       )}
       {confirm && <Confirm {...confirm} onClose={() => setConfirm(null)} />}
       {expiry && <SubscriptionExpiry key={expiry.id} userId={id!} value={expiry} onClose={() => setExpiry(null)} onSaved={async () => { await profile.refresh(); toast("这一份订阅的到期时间已更新"); }} />}
+      {nodes && <SubscriptionNodes key={`${id}/${nodes.id}`} userId={id!} value={nodes} onClose={() => setNodes(null)} onSaved={async () => { await profile.refresh(); toast("这一份订阅的节点已更新"); }} />}
     </>
   );
 }

@@ -46,6 +46,7 @@ interface DeletionPreview {
     enabled: boolean;
     listed: boolean;
   }[];
+  userSubscriptions: { id: string; userId: string; email: string; templateId: string; templateName: string }[];
 }
 export function DeleteNode({
   node,
@@ -70,8 +71,9 @@ export function DeleteNode({
       (d) => d.assignment.defaultNodeId === node.id && d.candidates.length > 0,
     ) || [];
   const references = data?.subscriptionTemplates || [];
+  const userReferences = data?.userSubscriptions || [];
   async function remove() {
-    if (!data || loading || loadError || references.length) return;
+    if (!data || loading || loadError || references.length || userReferences.length) return;
     setBusy(true);
     setError("");
     try {
@@ -153,6 +155,14 @@ export function DeleteNode({
                 ))}
               </section>
             )}
+            {!!userReferences.length && <section className="node-deletion-conflicts" aria-label="引用此节点的用户订阅">
+              <strong>请先解除 {userReferences.length} 份用户订阅的节点引用</strong>
+              <p>未到期的停用或流量耗尽订阅也保留节点。打开用户详情，修改对应订阅的节点后再删除。</p>
+              {userReferences.map(subscription => <div className="node-deletion-reference" key={subscription.id}>
+                <div><strong>{subscription.email}</strong><p>{subscription.templateName} · #{subscription.id.slice(-8)}</p></div>
+                <Link className="button button-secondary" to={`/users/${encodeURIComponent(subscription.userId)}?subscription=${encodeURIComponent(subscription.id)}#subscription-${encodeURIComponent(subscription.id)}`} onClick={onClose}>修改订阅节点</Link>
+              </div>)}
+            </section>}
             {data?.devices.length
               ? data.devices.map((d) => (
                   <div key={d.id}>
@@ -188,8 +198,8 @@ export function DeleteNode({
                     )}
                   </div>
                 ))
-              : !references.length && (
-                  <p className="muted">当前没有订阅模板引用此节点。</p>
+              : !references.length && !userReferences.length && (
+                  <p className="muted">当前没有订阅模板或用户订阅引用此节点。</p>
                 )}
           </>
         )}
@@ -206,6 +216,7 @@ export function DeleteNode({
               loading ||
               !!loadError ||
               references.length > 0 ||
+              userReferences.length > 0 ||
               needed.some((d) => !choices[d.id])
             }
             onClick={() => void remove()}

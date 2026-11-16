@@ -23,6 +23,7 @@ export interface SubscriptionTemplate {
   revision: number;
 }
 export interface UserSubscription {
+  nodesPerSubscription: number;
   id: string;
   userId: string;
   templateId: string;

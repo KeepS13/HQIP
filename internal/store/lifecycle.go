@@ -79,132 +79,138 @@ FROM device_config dc JOIN nodes n ON n.id=? WHERE dc.device_id=?`, NewID(), id,
 }
 
 func (s *Store) DeleteNode(id string, options model.NodeDeleteOptions) (model.Node, error) {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return model.Node{}, err
-	}
-	defer tx.Rollback()
-	var revision int64
-	var lifecycle string
-	var managed bool
-	if err = tx.QueryRow("SELECT revision,lifecycle,managed FROM nodes WHERE id=?", id).Scan(&revision, &lifecycle, &managed); err != nil {
-		return model.Node{}, notFound(err)
-	}
-	references, err := nodeSubscriptionReferences(tx, id)
-	if err != nil {
-		return model.Node{}, err
-	}
-	if len(references) > 0 {
-		return model.Node{}, &NodeSubscriptionConflict{Templates: references}
-	}
-	if lifecycle != "active" {
-		tx.Rollback()
-		return s.Node(id)
-	}
-	if options.ExpectedRevision != revision {
-		return model.Node{}, ErrConflict
-	}
-	type impacted struct {
-		id, defaultID string
-		revision      int64
-	}
-	rows, err := tx.Query("SELECT dc.device_id,dc.default_node_id,dc.revision FROM device_config dc JOIN assignments a ON a.device_id=dc.device_id WHERE a.node_id=?", id)
-	if err != nil {
-		return model.Node{}, err
-	}
-	devices := []impacted{}
-	for rows.Next() {
-		var d impacted
-		if err = rows.Scan(&d.id, &d.defaultID, &d.revision); err != nil {
-			rows.Close()
+	return retryDatabase(func() (model.Node, error) {
+		tx, err := s.DB.Begin()
+		if err != nil {
 			return model.Node{}, err
 		}
-		devices = append(devices, d)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return model.Node{}, err
-	}
-	for _, d := range devices {
-		replacement, provided := options.Replacements[d.id]
-		if !provided || replacement.ExpectedRevision != d.revision {
+		defer tx.Rollback()
+		var revision int64
+		var lifecycle string
+		var managed bool
+		if err = tx.QueryRow("SELECT revision,lifecycle,managed FROM nodes WHERE id=?", id).Scan(&revision, &lifecycle, &managed); err != nil {
+			return model.Node{}, notFound(err)
+		}
+		references, err := nodeSubscriptionReferences(tx, id)
+		if err != nil {
+			return model.Node{}, err
+		}
+		userReferences, err := nodeUserSubscriptionReferences(tx, id, s.Now())
+		if err != nil {
+			return model.Node{}, err
+		}
+		if len(references) > 0 || len(userReferences) > 0 {
+			return model.Node{}, &NodeSubscriptionConflict{Templates: references, UserSubscriptions: userReferences}
+		}
+		if lifecycle != "active" {
+			tx.Rollback()
+			return s.Node(id)
+		}
+		if options.ExpectedRevision != revision {
 			return model.Node{}, ErrConflict
 		}
-		newDefault := d.defaultID
-		if d.defaultID == id {
-			var remaining int
-			if err = tx.QueryRow("SELECT COUNT(*) FROM assignments a JOIN nodes n ON n.id=a.node_id WHERE a.device_id=? AND a.node_id!=? AND n.lifecycle='active'", d.id, id).Scan(&remaining); err != nil {
+		type impacted struct {
+			id, defaultID string
+			revision      int64
+		}
+		rows, err := tx.Query("SELECT dc.device_id,dc.default_node_id,dc.revision FROM device_config dc JOIN assignments a ON a.device_id=dc.device_id WHERE a.node_id=?", id)
+		if err != nil {
+			return model.Node{}, err
+		}
+		devices := []impacted{}
+		for rows.Next() {
+			var d impacted
+			if err = rows.Scan(&d.id, &d.defaultID, &d.revision); err != nil {
+				rows.Close()
 				return model.Node{}, err
 			}
-			if remaining == 0 {
-				newDefault = ""
-			} else {
-				r := replacement
-				var valid int
-				if err = tx.QueryRow("SELECT COUNT(*) FROM assignments a JOIN nodes n ON n.id=a.node_id WHERE a.device_id=? AND a.node_id=? AND a.node_id!=? AND n.lifecycle='active'", d.id, r.DefaultNodeID, id).Scan(&valid); err != nil {
+			devices = append(devices, d)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return model.Node{}, err
+		}
+		for _, d := range devices {
+			replacement, provided := options.Replacements[d.id]
+			if !provided || replacement.ExpectedRevision != d.revision {
+				return model.Node{}, ErrConflict
+			}
+			newDefault := d.defaultID
+			if d.defaultID == id {
+				var remaining int
+				if err = tx.QueryRow("SELECT COUNT(*) FROM assignments a JOIN nodes n ON n.id=a.node_id WHERE a.device_id=? AND a.node_id!=? AND n.lifecycle='active'", d.id, id).Scan(&remaining); err != nil {
 					return model.Node{}, err
 				}
-				if valid != 1 {
-					return model.Node{}, errors.New("替代默认节点必须属于设备剩余授权节点")
+				if remaining == 0 {
+					newDefault = ""
+				} else {
+					r := replacement
+					var valid int
+					if err = tx.QueryRow("SELECT COUNT(*) FROM assignments a JOIN nodes n ON n.id=a.node_id WHERE a.device_id=? AND a.node_id=? AND a.node_id!=? AND n.lifecycle='active'", d.id, r.DefaultNodeID, id).Scan(&valid); err != nil {
+						return model.Node{}, err
+					}
+					if valid != 1 {
+						return model.Node{}, errors.New("替代默认节点必须属于设备剩余授权节点")
+					}
+					newDefault = r.DefaultNodeID
 				}
-				newDefault = r.DefaultNodeID
+			}
+			if _, err = tx.Exec("DELETE FROM assignments WHERE device_id=? AND node_id=?", d.id, id); err != nil {
+				return model.Node{}, err
+			}
+			if _, err = tx.Exec("UPDATE device_config SET revision=revision+1,default_node_id=? WHERE device_id=?", newDefault, d.id); err != nil {
+				return model.Node{}, err
+			}
+			if _, err = tx.Exec("UPDATE removals SET status='cancelled',immediate=1 WHERE node_id=? AND device_id=? AND status NOT IN ('revoked','cancelled')", id, d.id); err != nil {
+				return model.Node{}, err
+			}
+			if _, err = tx.Exec("INSERT INTO removals(id,device_id,node_id,revision,created_at,immediate) VALUES(?,?,?,?,?,1)", NewID(), d.id, id, d.revision+1, s.Now().Unix()); err != nil {
+				return model.Node{}, err
 			}
 		}
-		if _, err = tx.Exec("DELETE FROM assignments WHERE device_id=? AND node_id=?", d.id, id); err != nil {
+		var running int
+		if err = tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE node_id=? AND state='running'", id).Scan(&running); err != nil {
 			return model.Node{}, err
 		}
-		if _, err = tx.Exec("UPDATE device_config SET revision=revision+1,default_node_id=? WHERE device_id=?", newDefault, d.id); err != nil {
+		// A running installer may already have written an owner. Retain the
+		// tombstone in 'retiring' until its cancellation and ownership are settled.
+		next := "retiring"
+		message := "等待节点停止并清理"
+		if !managed && running == 0 {
+			next = "deleted"
+			message = "未安装节点记录已删除"
+		}
+		if _, err = tx.Exec("UPDATE jobs SET state=CASE WHEN state='running' THEN 'cancelling' ELSE 'cancelled' END WHERE node_id=? AND state IN ('pending','running')", id); err != nil {
 			return model.Node{}, err
 		}
-		if _, err = tx.Exec("UPDATE removals SET status='cancelled',immediate=1 WHERE node_id=? AND device_id=? AND status NOT IN ('revoked','cancelled')", id, d.id); err != nil {
+		if _, err = tx.Exec("UPDATE nodes SET password='',password_expires=0 WHERE id=? AND EXISTS(SELECT 1 FROM node_network_quality q JOIN jobs j ON j.id=q.job_id WHERE q.node_id=? AND j.kind='quality' AND q.status IN ('queued','running'))", id, id); err != nil {
 			return model.Node{}, err
 		}
-		if _, err = tx.Exec("INSERT INTO removals(id,device_id,node_id,revision,created_at,immediate) VALUES(?,?,?,?,?,1)", NewID(), d.id, id, d.revision+1, s.Now().Unix()); err != nil {
+		if _, err = tx.Exec("UPDATE node_network_quality SET status='cancelled',finished_at=?,error='节点已删除，检测已取消' WHERE node_id=? AND status IN ('queued','running')", s.Now().Unix(), id); err != nil {
 			return model.Node{}, err
 		}
-	}
-	var running int
-	if err = tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE node_id=? AND state='running'", id).Scan(&running); err != nil {
-		return model.Node{}, err
-	}
-	// A running installer may already have written an owner. Retain the
-	// tombstone in 'retiring' until its cancellation and ownership are settled.
-	next := "retiring"
-	message := "等待节点停止并清理"
-	if !managed && running == 0 {
-		next = "deleted"
-		message = "未安装节点记录已删除"
-	}
-	if _, err = tx.Exec("UPDATE jobs SET state=CASE WHEN state='running' THEN 'cancelling' ELSE 'cancelled' END WHERE node_id=? AND state IN ('pending','running')", id); err != nil {
-		return model.Node{}, err
-	}
-	if _, err = tx.Exec("UPDATE nodes SET password='',password_expires=0 WHERE id=? AND EXISTS(SELECT 1 FROM node_network_quality q JOIN jobs j ON j.id=q.job_id WHERE q.node_id=? AND j.kind='quality' AND q.status IN ('queued','running'))", id, id); err != nil {
-		return model.Node{}, err
-	}
-	if _, err = tx.Exec("UPDATE node_network_quality SET status='cancelled',finished_at=?,error='节点已删除，检测已取消' WHERE node_id=? AND status IN ('queued','running')", s.Now().Unix(), id); err != nil {
-		return model.Node{}, err
-	}
-	if _, err = tx.Exec("UPDATE nodes SET lifecycle=?,deleted_at=?,revision=revision+1,desired_revision=desired_revision+1,config=json_set(config,'$.status',?,'$.message',?) WHERE id=?", next, s.Now().Unix(), next, message, id); err != nil {
-		return model.Node{}, err
-	}
-	if next == "retiring" {
-		if _, err = tx.Exec("INSERT INTO node_retirements(node_id,id,created_at) VALUES(?,?,?)", id, NewID(), s.Now().Unix()); err != nil {
+		if _, err = tx.Exec("UPDATE nodes SET lifecycle=?,deleted_at=?,revision=revision+1,desired_revision=desired_revision+1,config=json_set(config,'$.status',?,'$.message',?) WHERE id=?", next, s.Now().Unix(), next, message, id); err != nil {
 			return model.Node{}, err
 		}
-	} else {
-		if _, err = tx.Exec("UPDATE nodes SET password='',password_expires=0 WHERE id=?", id); err != nil {
+		if next == "retiring" {
+			if _, err = tx.Exec("INSERT INTO node_retirements(node_id,id,created_at) VALUES(?,?,?)", id, NewID(), s.Now().Unix()); err != nil {
+				return model.Node{}, err
+			}
+		} else {
+			if _, err = tx.Exec("UPDATE nodes SET password='',password_expires=0 WHERE id=?", id); err != nil {
+				return model.Node{}, err
+			}
+			if _, err = tx.Exec("UPDATE removals SET status='revoked',immediate=1 WHERE node_id=? AND status!='cancelled'", id); err != nil {
+				return model.Node{}, err
+			}
+		}
+		if err = tx.Commit(); err != nil {
 			return model.Node{}, err
 		}
-		if _, err = tx.Exec("UPDATE removals SET status='revoked',immediate=1 WHERE node_id=? AND status!='cancelled'", id); err != nil {
-			return model.Node{}, err
-		}
-	}
-	if err = tx.Commit(); err != nil {
-		return model.Node{}, err
-	}
-	s.Audit("node.delete", id)
-	return s.Node(id)
+		s.Audit("node.delete", id)
+		return s.Node(id)
+	})
 }
 
 // MarkInstalled must be called whenever an installer has created our owner,
