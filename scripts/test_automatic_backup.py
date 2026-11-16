@@ -36,9 +36,82 @@ class AutomaticBackupTests(unittest.TestCase):
         run = at.strftime('%Y%m%dT%H%M%SZ') + '-' + suffix
         path = self.root / ('hqip-' + run)
         path.mkdir(parents=True)
-        (path / 'archive.tar.gz').write_bytes(b'fixture')
-        (path / 'metadata.json').write_text(json.dumps({'version': 1, 'runId': run, 'createdAt': backup.stamp(at)}))
+        archive = path / 'archive.tar.gz'
+        with tarfile.open(archive, 'w:gz') as out:
+            for name, raw in {'hqip.pg.dump': b'PGDMPfixture', 'master.key': b'k' * 32,
+                              'manifest.json': b'{"version":1,"backend":"postgresql","containsSecrets":true}'}.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(raw)
+                out.addfile(member, io.BytesIO(raw))
+        (path / 'metadata.json').write_text(json.dumps({'version': 1, 'runId': run, 'createdAt': backup.stamp(at),
+                                                      'sizeBytes': archive.stat().st_size, 'sha256': backup.checksum(archive)}))
         return path
+
+    def test_low_space_removes_oldest_only_then_starts_backup(self):
+        oldest = self.fixture(self.now - timedelta(hours=3))
+        middle = self.fixture(self.now - timedelta(hours=2))
+        newest = self.fixture(self.now - timedelta(hours=1))
+        manual = self.root / 'manual'
+        manual.mkdir()
+        (manual / 'precious').write_text('keep')
+        required = backup.SPACE_RESERVE + 4 * max((path / 'archive.tar.gz').stat().st_size for path in (oldest, middle, newest))
+        def space(_):
+            return SimpleNamespace(free=required - 1 if oldest.exists() else required)
+        def write(*_):
+            self.assertFalse(oldest.exists(), 'cleanup must finish before the dump')
+            self.assertTrue(middle.exists())
+            self.assertTrue(newest.exists())
+            return 123, 'a' * 64
+        with patch.object(backup.shutil, 'disk_usage', side_effect=space):
+            result, state = self.run_backup(write)
+        self.assertEqual(result, 0)
+        self.assertEqual(state['lastRun']['deletedCount'], 1)
+        self.assertEqual(state['lastRun']['retainedCount'], 2)
+        self.assertEqual((manual / 'precious').read_text(), 'keep')
+        events = [json.loads(path.read_text()) for path in (self.data / 'backup-events').glob('*.json')]
+        self.assertEqual([event['deletedCount'] for event in events if event['action'] == 'backup.pruned'], [1])
+
+    def test_persistent_low_space_preserves_newest_and_reports_cleanup(self):
+        oldest = self.fixture(self.now - timedelta(hours=3))
+        middle = self.fixture(self.now - timedelta(hours=2))
+        newest = self.fixture(self.now - timedelta(hours=1))
+        with patch.object(backup.shutil, 'disk_usage', return_value=SimpleNamespace(free=100)):
+            result, state = self.run_backup(lambda *_: self.fail('space still insufficient'))
+        self.assertEqual(result, 1)
+        self.assertEqual(state['lastRun']['errorCode'], 'insufficient_backup_space')
+        self.assertEqual(state['lastRun']['deletedCount'], 2)
+        self.assertFalse(oldest.exists())
+        self.assertFalse(middle.exists())
+        self.assertTrue(newest.exists())
+        backup.validate_archive(newest / 'archive.tar.gz')
+
+    def test_expired_last_backup_survives_failed_replacement(self):
+        newest = self.fixture(self.now - timedelta(days=15))
+        def fail(*_):
+            raise RuntimeError('backup_command_failed')
+        result, state = self.run_backup(fail)
+        self.assertEqual(result, 1)
+        self.assertEqual(state['lastRun']['errorCode'], 'backup_command_failed')
+        self.assertTrue(newest.exists())
+        self.assertEqual(backup.inventory(self.root, self.now, prune=False), (1, 0))
+
+    def test_corrupt_newest_does_not_allow_old_backup_deletion(self):
+        oldest = self.fixture(self.now - timedelta(hours=2))
+        newest = self.fixture(self.now - timedelta(hours=1))
+        (newest / 'archive.tar.gz').write_bytes(b'corrupt')
+        with patch.object(backup.shutil, 'disk_usage', return_value=SimpleNamespace(free=100)):
+            result, state = self.run_backup(lambda *_: self.fail('no verified recovery point'))
+        self.assertEqual(result, 1)
+        self.assertEqual(state['lastRun']['errorCode'], 'backup_failed')
+        self.assertTrue(oldest.exists())
+        self.assertTrue(newest.exists())
+
+    def test_small_backup_succeeds_with_less_than_release_space_gate(self):
+        self.fixture(self.now - timedelta(hours=1))
+        with patch.object(backup.shutil, 'disk_usage', return_value=SimpleNamespace(free=512 * 1024 ** 2)):
+            result, state = self.run_backup(lambda *_: (123, 'a' * 64))
+        self.assertEqual(result, 0)
+        self.assertEqual(state['lastRun']['deletedCount'], 0)
 
     def test_schedule_is_beijing_and_retention_is_exact_time(self):
         self.assertEqual(backup.next_run(self.now), '2026-11-15T10:00:00Z')

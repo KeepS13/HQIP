@@ -84,7 +84,15 @@ func TestSubscriptionAllocationCatalogAndExports(t *testing.T) {
 			}
 			for _, id := range ids {
 				allocated := id == e.NodeIDs[0] || id == e.NodeIDs[1]
-				if strings.Contains(text, id) != allocated {
+				marker := id
+				if format == "v2ray" {
+					node, err := s.Store.Node(id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					marker = node.Domain
+				}
+				if strings.Contains(text, marker) != allocated {
 					t.Fatal("export allocation mismatch", format, id, allocated)
 				}
 			}

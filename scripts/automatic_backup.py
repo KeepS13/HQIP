@@ -26,6 +26,7 @@ ENVIRONMENT = Path('/etc/hqip-control/storage.env')
 NAME = re.compile(r'hqip-(\d{8}T\d{6}Z)-([a-f0-9]{16})')
 RUN_ID = re.compile(r'\d{8}T\d{6}Z-[a-f0-9]{16}')
 BEIJING = timezone(timedelta(hours=8))
+SPACE_RESERVE = 256 * 1024 ** 2
 
 
 def utc(value=None):
@@ -202,9 +203,9 @@ def validate_archive(path):
                     pass
 
 
-def inventory(root, now, prune=True):
+def owned_backups(root):
     directory(root)
-    retained, deleted = 0, 0
+    entries = []
     for folder in sorted(root.iterdir()):
         match = NAME.fullmatch(folder.name)
         if not match:
@@ -213,20 +214,73 @@ def inventory(root, now, prune=True):
         if {p.name for p in folder.iterdir()} != {'archive.tar.gz', 'metadata.json'}:
             raise ValueError('Invalid owned backup contents')
         metadata = read_json(folder / 'metadata.json')
-        regular(folder / 'archive.tar.gz')
+        size = regular(folder / 'archive.tar.gz').st_size
         created = parse_time(metadata['createdAt'])
         if metadata.get('version') != 1 or metadata.get('runId') != folder.name.removeprefix('hqip-') or created.strftime('%Y%m%dT%H%M%SZ') != match[1]:
             raise ValueError('Invalid owned backup metadata')
-        if created <= now - timedelta(days=14):
-            if prune:
-                # Only these two validated regular files in this exact owned folder.
-                (folder / 'archive.tar.gz').unlink()
-                (folder / 'metadata.json').unlink()
-                folder.rmdir()
-                deleted += 1
-        else:
-            retained += 1
-    return retained, deleted
+        entries.append((created, folder, size, metadata))
+    return sorted(entries, key=lambda entry: (entry[0], entry[1].name))
+
+
+def verify_saved_backup(entry):
+    _, folder, size, metadata = entry
+    archive = folder / 'archive.tar.gz'
+    validate_archive(archive)
+    if metadata.get('sizeBytes') != size or metadata.get('sha256') != checksum(archive):
+        raise ValueError('Saved backup checksum mismatch')
+
+
+def delete_saved_backup(root, entry):
+    _, folder, _, metadata = entry
+    if folder.parent != root or not NAME.fullmatch(folder.name):
+        raise ValueError('Invalid owned backup path')
+    directory(folder)
+    if {path.name for path in folder.iterdir()} != {'archive.tar.gz', 'metadata.json'} or read_json(folder / 'metadata.json') != metadata:
+        raise ValueError('Owned backup changed before cleanup')
+    regular(folder / 'archive.tar.gz')
+    # Only these two validated regular files in this exact owned folder.
+    (folder / 'archive.tar.gz').unlink()
+    (folder / 'metadata.json').unlink()
+    folder.rmdir()
+    sync_directory(root)
+
+
+def inventory(root, now, prune=True):
+    entries = owned_backups(root)
+    expired = [entry for entry in entries[:-1] if entry[0] <= now - timedelta(days=14)]
+    if not prune or not expired:
+        return len(entries), 0
+    # Keep a verified recovery point even when every archive has expired.
+    verify_saved_backup(entries[-1])
+    for entry in expired:
+        delete_saved_backup(root, entry)
+    return len(entries) - len(expired), len(expired)
+
+
+def reclaim_backup_space(root, data):
+    entries = owned_backups(root)
+    # Budget for the dump, the final archive, growth and a fixed safety reserve.
+    # Release installation keeps its separate, larger disk-space gate.
+    required = SPACE_RESERVE + 4 * max((entry[2] for entry in entries), default=0)
+
+    def enough():
+        return shutil.disk_usage(root).free >= required and shutil.disk_usage(data).free >= required
+
+    if enough():
+        return 0, True
+    # Removing archives cannot free space on a separate, full data filesystem.
+    if root.stat().st_dev != data.stat().st_dev and shutil.disk_usage(data).free < required:
+        return 0, False
+    if not entries:
+        return 0, False
+    verify_saved_backup(entries[-1])
+    deleted = 0
+    for entry in entries[:-1]:
+        delete_saved_backup(root, entry)
+        deleted += 1
+        if enough():
+            return deleted, True
+    return deleted, enough()
 
 
 def discard_partial(root, folder):
@@ -379,13 +433,16 @@ def run_backup(retry=False, *, root=ROOT, base=BASE, data=DATA, now=None,
     publish_json(status_path, state, shared=True)
     try:
         with lock(base):
-            # Retention is time based even if the following dump fails.
+            # Expiry and low-space cleanup always preserve the newest backup.
             retained, deleted = inventory(root, now)
             prune_incomplete(root, now)
             prune_events(events, now)
+            reclaimed, enough = reclaim_backup_space(root, data)
+            deleted += reclaimed
+            attempt['deletedCount'] = deleted
             if deleted:
                 event(events, attempt, 'backup.pruned', now, deletedCount=deleted)
-            if shutil.disk_usage(root).free < 3 * 1024 ** 3 or shutil.disk_usage(data).free < 3 * 1024 ** 3:
+            if not enough:
                 raise RuntimeError('insufficient_backup_space')
             size, digest = archive_writer(root, base, data, attempt)
             finished = utc(fixed_now)
