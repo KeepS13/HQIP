@@ -73,8 +73,9 @@ func (s *Server) AdminHandler() http.Handler {
 	m.Handle("POST /api/v1/logout", s.auth(http.HandlerFunc(s.logout), true))
 	m.Handle("POST /api/v1/password", s.auth(http.HandlerFunc(s.password), true))
 	for pattern, handler := range map[string]http.HandlerFunc{
-		"GET /api/v1/overview": s.overview,
-		"GET /api/v1/nodes":    s.listNodes, "POST /api/v1/nodes": s.createNode,
+		"GET /api/v1/overview":          s.overview,
+		"GET /api/v1/traffic/analytics": s.trafficAnalytics,
+		"GET /api/v1/nodes":             s.listNodes, "POST /api/v1/nodes": s.createNode,
 		"GET /api/v1/nodes/{id}": s.nodeDetail, "PATCH /api/v1/nodes/{id}": s.updateNode,
 		"POST /api/v1/nodes/{id}/retry": s.retryNode, "POST /api/v1/nodes/{id}/verify": s.verifyNode,
 		"POST /api/v1/nodes/{id}/external-verification": s.externalVerification,

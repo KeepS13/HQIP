@@ -19,7 +19,9 @@ import {
   Wifi,
 } from "lucide-react";
 import { usePolling } from "../api";
-import { expectsNodeReport, hasNodeReport } from "../monitoring";
+import { hasNodeReport } from "../monitoring";
+import TrafficAnalyticsPanel from "../TrafficAnalyticsPanel";
+import RuntimeCards from "../RuntimeCards";
 import { billingFor, billingTotal } from "../billing";
 import {
   Empty,
@@ -32,7 +34,6 @@ import {
   Rate,
   RefreshButton,
   StatCard,
-  TrafficChart,
   bytes,
   fresh,
   onlineKnown,
@@ -40,28 +41,18 @@ import {
 import type { Overview } from "../types";
 
 export function Dashboard() {
-  const [period, setPeriod] = useState<"24h" | "7d">("24h");
-  const { data, error, loading, refresh } = usePolling<Overview>(`/overview?period=${period}`);
+  const [trafficRevision, setTrafficRevision] = useState(0);
+  const { data, error, loading, refresh } = usePolling<Overview>("/overview");
   if (loading) return <Loading />;
   if (!data)
     return <ErrorNotice message={error} retry={() => void refresh()} />;
   const nodes = data.nodes || [],
-    devices = data.devices || [],
-    expected = nodes.filter(expectsNodeReport),
-    live = expected.filter(hasNodeReport),
     ready = nodes.filter(
       (n) => n.status === "ready" && fresh(n) && n.coreHealthy,
     ),
-    upload = live.reduce((v, n) => v + n.metrics.uploadRate, 0),
-    download = live.reduce((v, n) => v + n.metrics.downloadRate, 0),
     monthUpload = data.usage.monthUpload,
     monthDownload = data.usage.monthDownload,
-    month = monthUpload + monthDownload,
-    online = devices.filter((d) => d.enabled && d.online).length,
-    unknown = !!error || nodes.some((n) => !onlineKnown(n)),
-    rateUnknown = !!error || live.length === 0,
-    ratePartial = live.length > 0 && live.length < expected.length,
-    instances = live.filter(onlineKnown).reduce((v, n) => v + n.instances, 0);
+    month = monthUpload + monthDownload;
   return (
     <>
       <PageHeader
@@ -70,7 +61,7 @@ export function Dashboard() {
         description="每一个节点，每一次连接，尽在掌握。"
         actions={
           <>
-            <RefreshButton refresh={refresh} />
+            <RefreshButton refresh={async () => { setTrafficRevision(value => value + 1); await refresh(); }} />
             <Link className="button button-primary" to="/nodes?add=1">
               <Plus size={16} />
               添加节点
@@ -128,35 +119,10 @@ export function Dashboard() {
             </>
           }
         />
-        <StatCard
-          label="在线凭据身份"
-          value={unknown ? "—" : online}
-          unit={`/ ${devices.length}`}
-          icon={Monitor}
-          color="green"
-          hint={
-            unknown
-              ? "存在状态异常节点，在线总数未知"
-              : `${instances} 个客户端连接实例`
-          }
-        />
-        <StatCard
-          label="实时下载速率（含探测）"
-          value={rateUnknown ? "—" : `${ratePartial ? "≥ " : ""}${(download * 8 / 1e6).toFixed(2)}`}
-          unit="Mbps"
-          icon={ArrowDown}
-          color="amber"
-          hint={
-            <>
-              <ArrowUp size={12} />
-              {rateUnknown ? "当前速率未知" : `上传 ${(upload * 8 / 1e6).toFixed(2)} Mbps${ratePartial ? " · 仅已知节点下限" : ""}`}
-            </>
-          }
-        />
+        <RuntimeCards runtime={data.runtime} serverTime={data.serverTime} stale={!!error} />
       </div>
-      <div className="overview-middle">
-        <TrafficChart points={data.traffic} subtitle="上传 + 下载 · 保留已删除节点历史 · 不含探测" period={period} onPeriodChange={setPeriod} error={error} />
-        <Panel title="网络概况" subtitle="当前连接状态">
+      <TrafficAnalyticsPanel refreshVersion={trafficRevision} />
+        <Panel className="traffic-network-summary" title="网络概况" subtitle="当前连接状态">
           <div className="health-visual">
             <div className={`health-ring ${ready.length ? "is-live" : ""}`}>
               <Wifi size={27} />
@@ -186,16 +152,15 @@ export function Dashboard() {
             <div>
               <span>
                 <span className="status-dot purple" />
-                历史凭据身份
+                客户端连接实例
               </span>
-              <strong>{devices.length}</strong>
+              <strong>{!data.runtime || data.runtime.onlineStatus === "unknown" || error ? "—" : `${data.runtime.onlineStatus === "partial" ? "≥ " : ""}${data.runtime.instances}`}</strong>
             </div>
           </div>
           <Link to="/users" className="panel-bottom-link">
             管理用户订阅 <ArrowRight size={15} />
           </Link>
         </Panel>
-      </div>
       <Panel
         title="节点概览"
         subtitle="查看健康状态、实时速率与实际代理用量"

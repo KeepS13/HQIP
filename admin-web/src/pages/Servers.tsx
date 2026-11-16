@@ -2,13 +2,14 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowDown, ArrowRight, ArrowUp, CalendarClock, Clock3, Globe2, Plus, Search, Server, Settings2, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { api, usePolling } from "../api";
-import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, TrafficChart, bytes, date, useToast } from "../components";
+import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, bytes, date, useToast } from "../components";
+import TrafficAnalyticsPanel from "../TrafficAnalyticsPanel";
 import QuotaFields from "../QuotaFields";
 import { hasNodeReport } from "../monitoring";
 import { compareResourceNames } from "../resource-order";
 import { billingExpiry, billingFor, billingTotal, billingUsageLabel, defaultServerExpiry, parseBeijingExpiry } from "../billing";
 import { BillingSummary, ExpiryFields, ServerBillingSettings } from "./ServerBilling";
-import type { ManagedServer, ServerAddress, Node, TrafficPoint } from "../types";
+import type { ManagedServer, ServerAddress, Node } from "../types";
 import { AgentUpgradeDialog, OperationHistory, ServerCredentialPanel } from "./ServerOperations";
 
 function useQuotaValues(server?: ManagedServer) {
@@ -144,8 +145,7 @@ export function ServerPage() {
 	const [upgrade,setUpgrade]=useState(false);
   const { id } = useParams(); const navigate = useNavigate(); const toast = useToast();
   const { data, error, loading, refresh } = usePolling<{ server: ManagedServer; addresses: ServerAddress[]; nodes: Node[]; nodeUsage: Node[] }>(`/servers/${id}`);
-  const [period, setPeriod] = useState<"24h" | "7d">("24h");
-  const traffic = usePolling<TrafficPoint[]>(`/servers/${id}/traffic?period=${period}`);
+  const [trafficRevision, setTrafficRevision] = useState(0);
   const [edit, setEdit] = useState(false), [settings, setSettings] = useState(false), [add, setAdd] = useState(false), [ip, setIP] = useState(""), [busy, setBusy] = useState(false), [actionError, setActionError] = useState("");
   const [remove, setRemove] = useState<ServerAddress | "server" | null>(null);
   if (loading) return <Loading />;
@@ -169,7 +169,7 @@ export function ServerPage() {
   }
   return <>
     <Breadcrumb to="/servers" label="服务器" current={server.name} />
-    <PageHeader title={server.name} eyebrow="SERVER DETAILS" description={`${server.sshUser}@${server.sshHost}:${server.sshPort} · ${server.platform || "待验证"}`} actions={<><RefreshButton refresh={async () => { await Promise.all([refresh(), traffic.refresh()]); }} /><Button variant="secondary" icon={Upload} onClick={()=>setUpgrade(true)}>升级 Agent</Button><Button variant="secondary" icon={Settings2} onClick={() => setSettings(true)}>额度与续期</Button><Button variant="secondary" onClick={() => setEdit(true)}>编辑连接</Button><Button variant="danger" icon={Trash2} onClick={() => { setActionError(""); setRemove("server"); }}>删除服务器</Button></>} />
+    <PageHeader title={server.name} eyebrow="SERVER DETAILS" description={`${server.sshUser}@${server.sshHost}:${server.sshPort} · ${server.platform || "待验证"}`} actions={<><RefreshButton refresh={async () => { setTrafficRevision(value => value + 1); await refresh(); }} /><Button variant="secondary" icon={Upload} onClick={()=>setUpgrade(true)}>升级 Agent</Button><Button variant="secondary" icon={Settings2} onClick={() => setSettings(true)}>额度与续期</Button><Button variant="secondary" onClick={() => setEdit(true)}>编辑连接</Button><Button variant="danger" icon={Trash2} onClick={() => { setActionError(""); setRemove("server"); }}>删除服务器</Button></>} />
     <ErrorNotice message={error ? `${error}；以下为上次成功数据，当前状态未知。` : ""} retry={() => void refresh()} />
     <div className="server-detail-summary"><Badge tone={health.tone}>{health.label}</Badge><span><ShieldCheck size={14} />{server.machineId ? "主机身份已验证" : "主机身份待验证"}</span><span>{server.nodeCount} 个节点 / {server.ipCount} 个 IP</span><span>带宽容量：{server.bandwidthMbps == null ? "不限量" : `${server.bandwidthMbps} Mbps`}</span></div>
     <div className="two-column server-detail-metrics">
@@ -183,7 +183,7 @@ export function ServerPage() {
     </div>
     <div className="server-management-grid"><BillingSummary resource={server} /><ServerCredentialPanel server={server} /></div>
     <OperationHistory serverId={server.id} />
-    <TrafficChart points={traffic.data || []} title="服务器代理流量" subtitle="所有节点合计 · 包含已删除节点历史 · 不含探测 · 北京时间" period={period} onPeriodChange={setPeriod} loading={traffic.loading} error={traffic.error} />
+    <TrafficAnalyticsPanel serverId={id} refreshVersion={trafficRevision} />
     <Panel title="节点流量贡献" subtitle="各节点实际上传与下载；实时速率含探测，代理用量不含探测">
       {activeUsage.length ? <div className="table-scroll"><table><thead><tr><th>节点 / 公网 IP / 域名</th><th>状态</th><th>实时速率</th><th>代理用量</th><th>本月上传 / 下载</th><th>累计代理流量</th></tr></thead><tbody>{activeUsage.map(node => <tr key={node.id}>
         <td><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small mono">{node.publicIp}</div><div className="table-small mono">{node.domain}</div></td>

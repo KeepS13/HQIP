@@ -1,3 +1,5 @@
+import type { RuntimeOverview } from "./traffic-types";
+
 export interface Session {
   authenticated: boolean;
   username?: string;
@@ -173,6 +175,7 @@ export interface TaskEvent {
   createdAt: string;
 }
 export interface Overview {
+  runtime?: RuntimeOverview;
   nodes: Node[];
   devices: Device[];
   traffic: TrafficPoint[];

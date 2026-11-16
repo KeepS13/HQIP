@@ -42,30 +42,35 @@ func (s *Store) UpdateServerSettings(id, name string, bandwidth *float64, quota 
 		return model.Server{}, err
 	}
 	name = strings.TrimSpace(name)
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return model.Server{}, err
-	}
-	defer tx.Rollback()
-	var revision int64
-	if err = tx.QueryRow("SELECT revision FROM servers WHERE id=? AND deleted_at=0", id).Scan(&revision); err != nil {
-		return model.Server{}, notFound(err)
-	}
-	if revision != expected {
-		return model.Server{}, ErrConflict
-	}
-	if len(setup) > 0 && setup[0].ExpiresAt != nil {
-		if err = setupServerBilling(tx, id, *setup[0].ExpiresAt, revision+1, billingActor([]string{setup[0].Actor}), s.Now()); err != nil {
-			return model.Server{}, err
+	// Retry the entire rolled-back transaction so concurrent settings changes
+	// recheck the administrator's revision instead of exposing a database error.
+	err := retryDatabaseError(func() error {
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
 		}
-	}
-	if _, err = tx.Exec("UPDATE servers SET config=json_set(config,'$.name',?,'$.bandwidthMbps',?,'$.monthlyQuotaBytes',?,'$.revision',?),revision=revision+1 WHERE id=?", name, bandwidth, quota, revision+1, id); err != nil {
-		return model.Server{}, err
-	}
-	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'server.settings',?)", s.Now().Unix(), id); err != nil {
-		return model.Server{}, err
-	}
-	if err = tx.Commit(); err != nil {
+		defer tx.Rollback()
+		var revision int64
+		if err = tx.QueryRow("SELECT revision FROM servers WHERE id=? AND deleted_at=0", id).Scan(&revision); err != nil {
+			return notFound(err)
+		}
+		if revision != expected {
+			return ErrConflict
+		}
+		if len(setup) > 0 && setup[0].ExpiresAt != nil {
+			if err = setupServerBilling(tx, id, *setup[0].ExpiresAt, revision+1, billingActor([]string{setup[0].Actor}), s.Now()); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec("UPDATE servers SET config=json_set(config,'$.name',?,'$.bandwidthMbps',?,'$.monthlyQuotaBytes',?,'$.revision',?),revision=revision+1 WHERE id=?", name, bandwidth, quota, revision+1, id); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'server.settings',?)", s.Now().Unix(), id); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+	if err != nil {
 		return model.Server{}, err
 	}
 	return s.Server(id)

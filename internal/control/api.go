@@ -41,8 +41,13 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		result(w, nil, err)
 		return
 	}
+	runtime, err := s.Store.RuntimeOverview(r.Context())
+	if err != nil {
+		result(w, nil, err)
+		return
+	}
 	alerts := append(s.Store.ServerAlerts(servers), s.Store.Alerts(nodes)...)
-	reply(w, 200, map[string]any{"nodes": nodes, "devices": devices, "traffic": traffic, "usage": usage, "alerts": alerts, "serverTime": s.Store.Now().UTC().Format(time.RFC3339)})
+	reply(w, 200, map[string]any{"nodes": nodes, "devices": devices, "traffic": traffic, "usage": usage, "runtime": runtime, "alerts": alerts, "serverTime": s.Store.Now().UTC().Format(time.RFC3339)})
 }
 func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 	v, e := s.Store.NodesWithAudience()
