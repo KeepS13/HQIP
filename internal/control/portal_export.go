@@ -50,7 +50,7 @@ func portalV2RaySubscription(profile model.ClientProfile) ([]byte, error) {
 			Host:     net.JoinHostPort(node.Server, strconv.Itoa(node.Port)),
 			Path:     "/",
 			RawQuery: url.Values{"sni": {node.SNI}, "insecure": {"0"}}.Encode(),
-			Fragment: node.Name + " · " + node.ID,
+			Fragment: node.Name,
 		}
 		if node.ID == profile.DefaultNodeID {
 			links = append([]string{link.String()}, links...)

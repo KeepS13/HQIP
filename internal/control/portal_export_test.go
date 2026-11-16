@@ -36,7 +36,7 @@ func TestPortalV2RaySubscriptionURIEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Scheme != "hysteria2" || first.Hostname() != "2001:db8::8" || first.Port() != "8443" || first.User.Username() != password || first.Fragment != "香港 #2\n测试 · ipv6" {
+	if first.Scheme != "hysteria2" || first.Hostname() != "2001:db8::8" || first.Port() != "8443" || first.User.Username() != password || first.Fragment != "香港 #2\n测试" {
 		t.Fatal("URI failed to preserve the default node, IPv6, authentication or name")
 	}
 	if _, separatePassword := first.User.Password(); separatePassword {
