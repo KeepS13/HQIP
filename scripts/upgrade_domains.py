@@ -119,12 +119,15 @@ def verify_agent_assets(release,old,manifest):
 def require_billing_compatible(manifest):
  if postgres_enabled():
   if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
+  if manifest.get('offlineAdmissionVersion',0)<postgres_info().get('offlineAdmissionVersion',0):raise ValueError('Offline grants require a compatible release; reservations and unsettled usage are preserved')
   if manifest.get('serverBillingVersion',0)<2:raise ValueError('PostgreSQL requires serverBillingVersion 2')
   if manifest.get('subscriptionAllocationsVersion',0)<postgres_info().get('subscriptionAllocationsVersion',0):raise ValueError('Subscription allocations require a compatible release; node grants and reservations are preserved')
   if manifest.get('paymentsVersion',0)<1 and postgres_info().get('paymentsRequired',False):raise ValueError('Payment orders require a payment-compatible release; live orders are preserved')
   return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
   has_metadata=db.execute("SELECT 1 FROM sqlite_master WHERE name='metadata'").fetchone()
+  offline_version=db.execute("SELECT value FROM metadata WHERE key='offline_admission_version'").fetchone() if has_metadata else None
+  if offline_version and manifest.get('offlineAdmissionVersion',0)<int(offline_version[0]):raise ValueError('Offline grants require a compatible release; reservations and unsettled usage are preserved')
   allocation_version=db.execute("SELECT value FROM metadata WHERE key='subscription_allocations_version'").fetchone() if has_metadata else None
   if allocation_version and manifest.get('subscriptionAllocationsVersion',0)<int(allocation_version[0]):raise ValueError('Subscription allocations require a compatible release; node grants and reservations are preserved')
   payment_table=db.execute("SELECT 1 FROM sqlite_master WHERE name='payment_orders'").fetchone()
@@ -196,6 +199,8 @@ def upgrade(release,state,defer_protection=False):
  operations_env=prepare_operations(sys.modules[__name__],manifest)
  from commercial_protection import prepare_operation_logs, migrate_operation_logs, prepare as prepare_protection, install as install_protection, defer_origin
  logs_env=prepare_operation_logs(sys.modules[__name__],manifest)
+ from offline_deployment import prepare as prepare_offline, migrate as migrate_offline
+ offline_env=prepare_offline(sys.modules[__name__],manifest)
  if SITE.is_symlink() or UNIT.is_symlink():raise ValueError('Unexpected configuration symlink')
  state.mkdir(mode=0o700,exist_ok=False)
  shutil.copyfile(SITE,state/'nginx.before.conf');shutil.copyfile(UNIT,state/'unit.before.service')
@@ -216,6 +221,7 @@ def upgrade(release,state,defer_protection=False):
    info['backupMode']='online-consistent-snapshot'
   for p in state.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
   require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
+  migrate_offline(release,offline_env)
   migrate_operations(release,operations_env)
   if logs_env is not None:
    info['operationLogsMigrationAttempted']=True

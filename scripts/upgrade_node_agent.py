@@ -9,10 +9,40 @@ from pathlib import Path
 import platform
 import shutil
 import sqlite3
+import shlex
 import tempfile
 import time
 
 import upgrade_node_admission as node_ops
+
+
+def require_offline_compatible(ledger, version):
+    if version == 1:
+        return
+    with closing(sqlite3.connect(ledger.as_uri() + '?mode=ro', uri=True)) as db:
+        for table in ('offline_grants', 'offline_requests'):
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                if db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone():
+                    raise ValueError('Offline grants require a compatible Agent; preserve the live ledger and fix forward')
+
+
+def previous_offline_version(override):
+    if not override.exists():
+        return 0
+    for line in override.read_text().splitlines():
+        if not line.startswith('ExecStart=') or line == 'ExecStart=':
+            continue
+        args = shlex.split(line[len('ExecStart='):])
+        binary = Path(args[0])
+        if binary.is_symlink() or not binary.is_file() or not binary.resolve().is_relative_to(node_ops.RELEASE_ROOT):
+            return 0
+        marker = binary.parent / 'offline-capability.json'
+        if marker.is_symlink() or not marker.is_file():
+            return 0
+        record = json.loads(marker.read_text())
+        if record.get('sha256') == node_ops.digest(binary) and record.get('version') == 1:
+            return 1
+    return 0
 
 
 def override_path(units):
@@ -69,6 +99,7 @@ def upgrade(node, artifacts):
     manifest = json.loads(node_ops.regular(artifacts / 'manifest.json').read_text())
     if manifest.get('agentTelemetryVersion') != 1:
         raise ValueError('Native hourly Agent release required')
+    require_offline_compatible(ledger, manifest.get('offlineAdmissionVersion', 0))
     source = node_ops.regular(artifacts / ('agent-linux-' + arch))
     expected = manifest['sha256'].get(source.name)
     if not expected or node_ops.digest(source) != expected:
@@ -83,6 +114,11 @@ def upgrade(node, artifacts):
     else:
         shutil.copyfile(source, target)
     target.chmod(0o755)
+    capability_path = target.parent / 'offline-capability.json'
+    if capability_path.is_symlink():
+        raise ValueError('Unsafe Agent capability marker')
+    capability_path.write_text(json.dumps({'sha256': expected, 'version': manifest.get('offlineAdmissionVersion', 0)}))
+    capability_path.chmod(0o644)
     override = override_path(units)
     if override.is_symlink() or override.parent.is_symlink():
         raise ValueError('Unsafe Agent override')
@@ -93,7 +129,7 @@ def upgrade(node, artifacts):
     text = '[Service]\nExecStart=\nExecStart=' + str(target) + ' --config ' + str(config / 'agent.json') + '\n'
     info = {'nodeId': node, 'override': str(override), 'before': override.read_text() if override.exists() else None,
             'installed': text, 'agentSHA256': expected, 'sourceSHA': manifest.get('agentSourceSHA'),
-            'coreInvocation': invocation, 'phase': 'prepared'}
+            'coreInvocation': invocation, 'beforeOfflineAdmissionVersion': previous_offline_version(override), 'phase': 'prepared'}
     save_state(backup, info)
     # Only the Agent stops. The core keeps forwarding on its existing leases.
     node_ops.command('systemctl', 'stop', units['agent'])
@@ -104,6 +140,7 @@ def upgrade(node, artifacts):
                 src.backup(dest)
         for path in backup.rglob('*'):
             path.chmod(0o700 if path.is_dir() else 0o600)
+        require_offline_compatible(ledger, manifest.get('offlineAdmissionVersion', 0))
         atomic_override(override, text)
         node_ops.command('systemctl', 'daemon-reload')
         node_ops.command('systemctl', 'start', units['agent'])
@@ -131,7 +168,8 @@ def rollback(backup):
     if backup.is_symlink() or backup.resolve().parent != node_ops.BACKUP_ROOT:
         raise ValueError('Unsafe backup location')
     info = json.loads(node_ops.regular(backup / 'state.json').read_text())
-    config, _, _ = node_ops.owned_paths(info['nodeId'])
+    config, _, cfg = node_ops.owned_paths(info['nodeId'])
+    require_offline_compatible(Path(cfg['statePath']), info.get('beforeOfflineAdmissionVersion', 0))
     units = node_ops.node_units(info['nodeId'])
     node_ops.verify_units(info['nodeId'], config, units, check_effective=False)
     override = override_path(units)
@@ -141,6 +179,11 @@ def rollback(backup):
     if current not in (info['installed'], info['before']):
         raise ValueError('Refusing to overwrite a newer Agent override')
     node_ops.command('systemctl', 'stop', units['agent'])
+    try:
+        require_offline_compatible(Path(cfg['statePath']), info.get('beforeOfflineAdmissionVersion', 0))
+    except Exception:
+        node_ops.command('systemctl', 'start', units['agent'])
+        raise
     if info['before'] is None:
         override.unlink(missing_ok=True)
     else:

@@ -104,6 +104,9 @@ func TestPostgresPaymentsExplicitMigrationFromLegacySchemaIsIdempotent(t *testin
 	if e = MigratePostgresOperationLogs(context.Background(), dsn); e != nil {
 		t.Fatal(e)
 	}
+	if e = MigratePostgresOffline(context.Background(), dsn); e != nil {
+		t.Fatal(e)
+	}
 	s, e := OpenPostgres(dir, "https://api.example.com", dsn)
 	if e != nil {
 		t.Fatal(e)

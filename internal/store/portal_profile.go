@@ -253,7 +253,11 @@ func (s *Store) PortalClientProfile(user, scope, subscriptionID string) (model.C
 		if err != nil {
 			return p, e, err
 		}
-		p.Nodes = append(p.Nodes, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.PublicIP, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && s.nodeAdmissionCapable(id)})
+		clientNode := model.ClientNode{ID: n.ID, Name: n.Name, Server: n.PublicIP, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && s.nodeAdmissionCapable(id)}
+		if err = s.clientOfflinePolicy(&clientNode, subscriptionID, scope); err != nil {
+			return p, e, err
+		}
+		p.Nodes = append(p.Nodes, clientNode)
 	}
 	// The wire field is retained for existing clients. It is a live suggestion,
 	// never a template setting or a reason to replace a still-authorized choice.

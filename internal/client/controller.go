@@ -70,10 +70,13 @@ func New(dir string, platform Platform, engine Engine) (*Controller, error) {
 	}
 	previousServerURL := c.saved.ServerURL
 	c.saved.ServerURL = migrateOfficialServerURL(c.saved.ServerURL)
-	c.view = View{ServerURL: c.saved.ServerURL, Status: Status{RunState: "disconnected", Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, CoreVersion: CoreVersion}}
+	c.view = View{LastSync: c.saved.LastSync, ServerURL: c.saved.ServerURL, Status: Status{RunState: "disconnected", Mode: c.saved.Mode, TUNEnabled: c.saved.TUN, CoreVersion: CoreVersion}}
 	if c.saved.AccountVersion != 3 {
 		c.saved.Tokens = Tokens{}
 		c.saved.Profile = Profile{}
+		c.saved.Offline = nil
+		c.view.OfflineUntil = nil
+		c.view.ControlUnavailable = false
 		c.saved.SelectedNodeID = ""
 		c.saved.SelectedSubscriptionID = ""
 		c.saved.Preferences = map[string]SelectionPreference{}
@@ -130,6 +133,7 @@ func (c *Controller) persistLocked() error {
 	if c.api != nil {
 		c.saved.Tokens = c.api.Tokens()
 	}
+	c.saved.LastSync = c.view.LastSync
 	b, e := json.Marshal(c.saved)
 	if e != nil {
 		return e
@@ -216,6 +220,9 @@ func (c *Controller) endSession(expected *API, expired bool) error {
 	c.api = nil
 	c.saved.Tokens = Tokens{}
 	c.saved.Profile = Profile{}
+	c.saved.Offline = nil
+	c.view.OfflineUntil = nil
+	c.view.ControlUnavailable = false
 	c.saved.SelectedNodeID = ""
 	c.saved.SelectedSubscriptionID = ""
 	c.cancelSelection = nil
@@ -281,6 +288,7 @@ func (c *Controller) Run(ctx context.Context) {
 			c.report()
 		}
 		c.checkAccountConnection(ctx)
+		c.checkOfflineForwarding(ctx)
 		timer.Reset(delay)
 	}
 }
@@ -320,8 +328,14 @@ func (c *Controller) Sync(ctx context.Context) error {
 		c.mu.Lock()
 		current := c.api == api && c.selectionGeneration == selection && c.generation == generation
 		if current {
+			if retryable(e) {
+				c.view.ControlUnavailable = true
+			}
 			if retryable(e) && c.recoveryReady {
-				c.startRecoveryLocked("account_unavailable")
+				c.view.ControlUnavailable = true
+				if !c.offlineValidLocked() {
+					c.startRecoveryLocked("account_unavailable")
+				}
 			} else {
 				c.view.SyncError = e.Error()
 			}
@@ -340,6 +354,8 @@ func (c *Controller) Sync(ctx context.Context) error {
 		}
 		now := c.clockNow()
 		c.view.LastSync = &now
+		c.view.ControlUnavailable = false
+		c.rememberOfflineLocked(false)
 		c.view.SyncError = ""
 		_ = c.persistLocked()
 		c.mu.Unlock()
@@ -380,7 +396,10 @@ func (c *Controller) Sync(ctx context.Context) error {
 			if retryable(e) {
 				c.mu.Lock()
 				if c.api == api && c.generation == generation {
-					c.startRecoveryLocked("rules_unavailable")
+					c.view.ControlUnavailable = true
+					if !c.offlineValidLocked() {
+						c.startRecoveryLocked("rules_unavailable")
+					}
 				}
 				c.mu.Unlock()
 				return e
@@ -442,6 +461,11 @@ func (c *Controller) Sync(ctx context.Context) error {
 			allowed = true
 		}
 	}
+	if !allowed && c.recoveryReady && c.saved.Offline != nil {
+		c.mu.Unlock()
+		c.failGeneration(generation, "原节点授权已移除，VPN 已关闭，请手动选择其他节点")
+		return nil
+	}
 	if !allowed {
 		c.saved.SelectedNodeID = automaticNode(p)
 	}
@@ -461,6 +485,8 @@ func (c *Controller) Sync(ctx context.Context) error {
 	}
 	now := c.clockNow()
 	c.view.LastSync = &now
+	c.view.ControlUnavailable = false
+	c.rememberOfflineLocked(false)
 	c.view.SyncError = ""
 	intent := c.view.ConnectionIntent
 	// Usage/lease updates also change the profile ETag. They must not cancel a
@@ -568,6 +594,10 @@ func (c *Controller) Connect() error {
 		c.mu.Unlock()
 		return errors.New("订阅尚未完整同步，请先刷新")
 	}
+	if c.saved.Offline != nil && !c.offlineValidLocked() {
+		c.saved.Offline = nil
+		c.view.OfflineUntil = nil
+	}
 	c.view.ConnectionIntent = true
 	c.view.LastError = ""
 	c.generation++
@@ -613,6 +643,9 @@ func (c *Controller) Disconnect() error {
 	return e
 }
 func (c *Controller) Select(id string) error {
+	if err := c.selectionAvailable("", id); err != nil {
+		return err
+	}
 	if !c.beginWork() {
 		return context.Canceled
 	}
@@ -702,6 +735,7 @@ func (c *Controller) applyLatest() {
 	tun := c.saved.TUN
 	server := c.saved.ServerURL
 	api := c.api
+	offlineReconnect := c.offlineValidLocked()
 	if c.view.SelectionPending || !usableSubscription(p) {
 		c.mu.Unlock()
 		return
@@ -716,10 +750,10 @@ func (c *Controller) applyLatest() {
 	if e == nil && id == "" {
 		e = errors.New("暂无可用节点，请稍后刷新或手动选择节点")
 	}
-	if e == nil {
+	if e == nil && !offlineReconnect {
 		e = api.Drain(ctx, p.SubscriptionID, p.SelectionRevision)
 	}
-	if e == nil {
+	if e == nil && !offlineReconnect {
 		e = api.WaitDrained(ctx, p.SubscriptionID, p.SelectionRevision)
 	}
 	if e == nil {
@@ -766,8 +800,16 @@ func (c *Controller) applyLatest() {
 		c.appliedGeneration = g
 		c.view.LastError = ""
 		c.beginMetricsLocked()
+		c.rememberOfflineLocked(true)
+		if err := c.persistLocked(); err != nil {
+			c.stopStateLocked("连接授权无法保存，请重试")
+			e = err
+		}
 	}
 	c.mu.Unlock()
+	if e != nil {
+		_ = c.engine.Stop()
+	}
 	c.report()
 }
 func (c *Controller) report() {

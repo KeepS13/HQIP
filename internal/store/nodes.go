@@ -294,6 +294,9 @@ func (s *Store) ResolveAgent(token string) (string, error) {
 func (s *Store) Desired(id string) (model.AgentDesired, error) {
 	var result model.AgentDesired
 	result.PortalEnabled = s.PortalEnabled()
+	if s.OfflineAdmissionEnabled(id) {
+		result.OfflineAdmissionVersion = model.OfflineAdmissionVersion
+	}
 	result.Devices = []model.AgentDevice{}
 	var lifecycle string
 	err := s.DB.QueryRow("SELECT desired_revision,lifecycle FROM nodes WHERE id=?", id).Scan(&result.Revision, &lifecycle)

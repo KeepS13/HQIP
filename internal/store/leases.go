@@ -87,9 +87,13 @@ func activeCredentialSession(tx *sql.Tx, user, subscription, scope string, now t
 	}
 	return n == 1, err
 }
-func (s *Store) AcquireLease(node, connection, password string) (model.ConnectionLease, error) {
+func (s *Store) AcquireLease(node, connection, password string, offline ...bool) (model.ConnectionLease, error) {
 	if len(connection) < 16 || len(connection) > 128 || strings.ContainsAny(connection, "\r\n\x00") || len(password) != 43 {
 		return model.ConnectionLease{}, ErrUnauthorized
+	}
+	withOffline := len(offline) == 1 && offline[0]
+	if withOffline && !s.OfflineAdmissionEnabled(node) {
+		return model.ConnectionLease{}, ErrEntitlement
 	}
 	return retryDatabase(func() (model.ConnectionLease, error) {
 		var empty model.ConnectionLease
@@ -162,6 +166,9 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 		budget := leaseWindow(rate)
 		if e.QuotaBytes != nil {
 			available := *e.QuotaBytes - e.UsedBytes - e.ReservedBytes
+			if withOffline {
+				budget = available / int64(max(1, e.MaxConnections-e.Occupied))
+			}
 			if available < budget {
 				budget = available
 			}
@@ -180,6 +187,9 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 		}
 		l := model.ConnectionLease{ID: NewID(), UserID: user, AccountingID: "subscription_" + subscription, SubscriptionID: subscription, SessionID: scope, NodeID: node, CreatedAt: now.UTC(), ExpiresAt: leaseExpiry(now, e), BandwidthBytesPerSecond: rate, BudgetBytes: budget, Revision: e.Revision, State: "active"}
 		l.LeaseID = l.ID
+		if withOffline {
+			l.ExpiresAt = offlineExpiry(now, e)
+		}
 		// An absent-key SELECT before this INSERT creates a Serializable gap
 		// predicate on the shared node/connection index. Let its unique constraint
 		// arbitrate replays without making unrelated new connections conflict.
@@ -194,8 +204,17 @@ func (s *Store) AcquireLease(node, connection, password string) (model.Connectio
 		if rows == 0 {
 			return existing()
 		}
-		if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", budget, subscription); err != nil {
+		reserve := budget
+		if withOffline && e.QuotaBytes == nil {
+			reserve = 0
+		}
+		if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", reserve, subscription); err != nil {
 			return empty, err
+		}
+		if withOffline {
+			if err = createOfflineGrant(tx, &l, e, secure.Hash(password), now); err != nil {
+				return empty, err
+			}
 		}
 		if _, err = tx.Exec("INSERT INTO portal_rates(lease_id) VALUES(?)", l.ID); err != nil {
 			return empty, err
@@ -237,6 +256,13 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 		}
 		if err != nil {
 			return empty, notFound(err)
+		}
+		var offlineCount int
+		if err = tx.QueryRow("SELECT COUNT(*) FROM portal_offline_grants WHERE lease_id=?", id).Scan(&offlineCount); err != nil {
+			return empty, err
+		}
+		if offlineCount != 0 {
+			return empty, ErrConflict
 		}
 		if u.UploadBytes < l.UploadBytes || u.DownloadBytes < l.DownloadBytes {
 			return empty, ErrConflict
@@ -447,7 +473,29 @@ func (s *Store) PortalConnections(user, session string, subscriptions ...string)
 		}
 		out = append(out, l.ConnectionLease)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for i := range out {
+		var last int64
+		err = s.DB.QueryRow("SELECT last_active FROM portal_offline_grants WHERE lease_id=?", out[i].ID).Scan(&last)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[i].OfflineReservation = true
+		if last != 0 {
+			stamp := time.Unix(last, 0).UTC()
+			out[i].LastForwardingReport = &stamp
+		}
+		if out[i].State == "active" && (last == 0 || last < s.Now().Add(-120*time.Second).Unix()) {
+			out[i].State = "reserved"
+		}
+	}
+	return out, nil
 }
 func (s *Store) RevokePortalConnection(user, id, session string, subscriptions ...string) error {
 	query := "UPDATE portal_leases SET revoked=1 WHERE user_id=?"

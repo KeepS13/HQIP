@@ -15,7 +15,7 @@ func TestConnectionIconsReflectActualVPNState(t *testing.T) {
 		{"idle", "disconnected", "disconnected", true, false, false},
 		{"starting", "connecting", "connecting", true, true, false},
 		{"online", "connected", "connected", true, true, false},
-		{"recovering", "recovering", "connected", true, true, false},
+		{"recovering", "recovering", "recovering", true, true, false},
 		{"failure", "failed", "failed", true, false, false},
 		{"online-switch", "connected", "connecting", true, true, true},
 		{"offline-switch", "disconnected", "disconnected", true, false, true},
@@ -28,7 +28,7 @@ func TestConnectionIconsReflectActualVPNState(t *testing.T) {
 			if got.Name != test.want || got.Label == "" {
 				t.Fatalf("wrong status icon: %+v, want %s", got, test.want)
 			}
-			if test.runState == "recovering" && got.Label != "已连接" {
+			if test.runState == "recovering" && got.Label != "恢复中" {
 				t.Fatalf("background recovery must keep the connected tooltip: %+v", got)
 			}
 			if _, err := statusIconAssets.ReadFile("assets/hqip-" + got.Name + ".ico"); err != nil {

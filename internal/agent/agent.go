@@ -36,17 +36,18 @@ type pendingRevocation struct {
 }
 
 type cachedState struct {
-	PortalEnabled   bool                         `json:"portalEnabled"`
-	Retirement      *cachedRetirement            `json:"retirement,omitempty"`
-	Certificate     *model.CertificateStatus     `json:"certificate,omitempty"`
-	DesiredRevision int64                        `json:"desiredRevision"`
-	AppliedRevision int64                        `json:"appliedRevision"`
-	Credentials     map[string]cachedCredential  `json:"credentials"`
-	Pending         map[string]pendingRevocation `json:"pending"`
-	Removals        map[string]cachedRemoval     `json:"removals"`
-	DeniedHashes    map[string]bool              `json:"deniedHashes"`
-	LastRestart     int64                        `json:"lastRestart"`
-	Warning         string                       `json:"warning,omitempty"`
+	OfflineAdmissionVersion int                          `json:"offlineAdmissionVersion"`
+	PortalEnabled           bool                         `json:"portalEnabled"`
+	Retirement              *cachedRetirement            `json:"retirement,omitempty"`
+	Certificate             *model.CertificateStatus     `json:"certificate,omitempty"`
+	DesiredRevision         int64                        `json:"desiredRevision"`
+	AppliedRevision         int64                        `json:"appliedRevision"`
+	Credentials             map[string]cachedCredential  `json:"credentials"`
+	Pending                 map[string]pendingRevocation `json:"pending"`
+	Removals                map[string]cachedRemoval     `json:"removals"`
+	DeniedHashes            map[string]bool              `json:"deniedHashes"`
+	LastRestart             int64                        `json:"lastRestart"`
+	Warning                 string                       `json:"warning,omitempty"`
 }
 
 type liveState struct {
@@ -65,6 +66,9 @@ type Agent struct {
 	// Owned by syncLoop; configuration/revocation work continues during backoff.
 	reportRetryAt     time.Time
 	reportBackoff     time.Duration
+	offlineMu         sync.Mutex
+	offlineBoot       time.Time
+	offlineIssued     map[string]time.Time
 	admissionMu       sync.Mutex
 	leaseReportMu     sync.RWMutex
 	statsClient       *http.Client
@@ -282,6 +286,7 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 	replay := desired.Revision-a.cache.DesiredRevision > 1
 	next := cloneCache(a.cache)
 	next.PortalEnabled = desired.PortalEnabled
+	next.OfflineAdmissionVersion = desired.OfflineAdmissionVersion
 	next.DesiredRevision, next.Credentials = desired.Revision, credentials
 	now := a.now()
 	for _, device := range desired.Devices {
@@ -510,6 +515,9 @@ func (a *Agent) controlJSON(ctx context.Context, method, path string, body any, 
 
 func (a *Agent) sync(ctx context.Context) error {
 	queueErr := a.replayLeaseFinals(ctx)
+	if err := a.syncOfflineGrants(ctx); err != nil {
+		queueErr = err
+	}
 	var desired model.AgentDesired
 	configErr := a.controlJSON(ctx, http.MethodGet, "/api/v1/agents/config", nil, &desired)
 	if configErr == nil {
@@ -539,7 +547,7 @@ func (a *Agent) sync(ctx context.Context) error {
 		At: a.now().UTC(), Daily: batch.daily, Minutes: batch.minutes,
 		Hours: batch.hours, HourlySince: batch.hourlySince, HourlyThrough: batch.hourlyThrough,
 		HistoryCompacted: batch.compacted,
-		Capabilities:     []string{"agent-v2", "hourly-usage-v1"},
+		Capabilities:     []string{"agent-v2", "hourly-usage-v1", "offline-admission-v1"},
 	}
 	if a.cfg.Managed {
 		report.Capabilities = append(report.Capabilities, "multi-ip-v2", "retirement-v1", "certificate-v1")

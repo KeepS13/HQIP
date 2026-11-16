@@ -151,6 +151,9 @@ func (a *Agent) progressRetirement(ctx context.Context) error {
 	if retirement.FinalizeRequested && !retirement.Final {
 		a.leaseReportMu.Lock()
 		defer a.leaseReportMu.Unlock()
+		if err := a.flushOfflineRetirement(ctx); err != nil {
+			return err
+		}
 		if err := a.flushRetirementLeases(ctx, retirement); err != nil {
 			return err
 		}

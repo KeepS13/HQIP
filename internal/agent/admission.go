@@ -73,6 +73,10 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "portal disabled", 403)
 		return
 	}
+	if a.offlineAllowed() || a.cachedOfflineCredential(body.Password) {
+		a.offlineAdmit(w, r, body.ConnectionID, body.Password)
+		return
+	}
 	a.forwardAdmission(w, r, "/api/v1/agents/admission", body)
 }
 
@@ -99,6 +103,10 @@ func (a *Agent) renewConnection(w http.ResponseWriter, r *http.Request) {
 	a.cacheMu.RUnlock()
 	if !allowed && !body.Closed {
 		http.Error(w, "node authorization ended", 403)
+		return
+	}
+	if isOfflineLease(id) {
+		a.offlineRenew(w, r, id, body)
 		return
 	}
 	pending, err := a.ledger.saveLeaseUsage(id, body, a.now())
@@ -209,7 +217,7 @@ func (a *Agent) requestAdmission(ctx context.Context, path string, body any) (in
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (16<<10)+1))
 	if err != nil || len(b) > 16<<10 || !json.Valid(b) {
-		return 502, nil, errors.New("invalid control response")
+		return 502, nil, &admissionProtocolError{}
 	}
 	return 200, b, nil
 }

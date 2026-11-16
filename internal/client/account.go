@@ -51,6 +51,8 @@ func connectionConfigurationChanged(old, next Profile, selected string) bool {
 	}
 	// Readiness is health telemetry, not a new transport configuration.
 	before.Ready, after.Ready = false, false
+	before.OfflineAdmissionVersion, after.OfflineAdmissionVersion = 0, 0
+	before.OfflineUntil, after.OfflineUntil = time.Time{}, time.Time{}
 	return after.ID == "" || before != after
 }
 
@@ -297,7 +299,10 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 	}
 	if err != nil {
 		if retryable(err) {
-			c.startRecoveryLocked("lease_query_unavailable")
+			c.view.ControlUnavailable = true
+			if !c.offlineValidLocked() {
+				c.startRecoveryLocked("lease_query_unavailable")
+			}
 		}
 		c.mu.Unlock()
 		if !retryable(err) && !errors.Is(err, context.Canceled) {
@@ -307,7 +312,7 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 	}
 	if state.SubscriptionID == c.saved.SelectedSubscriptionID && state.SelectionRevision == c.saved.Profile.SelectionRevision {
 		c.view.Connections = state
-		if connectionRunning(c.view.RunState) && !matchingLease(state, c.saved.SelectedSubscriptionID, c.saved.SelectedNodeID, c.clockNow()) {
+		if connectionRunning(c.view.RunState) && !c.offlineValidLocked() && !matchingLease(state, c.saved.SelectedSubscriptionID, c.saved.SelectedNodeID, c.clockNow()) {
 			c.startRecoveryLocked("lease_missing")
 		}
 	} else if connectionRunning(c.view.RunState) {
@@ -352,6 +357,20 @@ func (c *Controller) accountWatchdogTick(ctx context.Context) {
 	message := ""
 	if selected != nil && !selected.ExpiresAt.After(now) {
 		message = "当前订阅已到期，VPN 已关闭，请手动选择其他订阅"
+	}
+	if c.saved.Offline != nil && c.saved.Offline.SubscriptionID == c.saved.SelectedSubscriptionID && c.saved.Offline.NodeID == c.saved.SelectedNodeID {
+		if !c.offlineValidLocked() && (c.view.ControlUnavailable || now.Before(c.saved.Offline.LastWall) || !now.Before(c.saved.Offline.Until)) && message == "" {
+			message = "离线许可已到期或失效，VPN 已关闭，请恢复联网后重新连接"
+		}
+		if c.offlineValidLocked() && message == "" {
+			c.saved.Offline.LastWall = now
+			if err := c.persistLocked(); err != nil {
+				message = "离线授权无法保存，VPN 已关闭"
+			} else {
+				c.mu.Unlock()
+				return
+			}
+		}
 	}
 	stale := c.view.LastSync == nil || now.Sub(*c.view.LastSync) >= 120*time.Second
 	if stale && !c.recoveryReady && message == "" {

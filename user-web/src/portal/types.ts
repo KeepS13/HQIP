@@ -33,6 +33,9 @@ export interface UserSubscription {
   quotaBytes: number | null;
   usedBytes: number;
   reservedBytes: number;
+  emergencyUsedBytes?: number;
+  emergencyReservedBytes?: number;
+  offlineReservations?: number;
   bandwidthMbps: number | null;
   maxConnections: number;
   occupied: number;

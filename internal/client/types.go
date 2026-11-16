@@ -7,14 +7,16 @@ import "time"
 const CoreVersion = "1.14.4"
 
 type Node struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Server   string `json:"server"`
-	PublicIP string `json:"publicIp"`
-	Port     int    `json:"port"`
-	Password string `json:"password"`
-	SNI      string `json:"sni"`
-	Ready    bool   `json:"ready"`
+	ID                      string    `json:"id"`
+	Name                    string    `json:"name"`
+	Server                  string    `json:"server"`
+	PublicIP                string    `json:"publicIp"`
+	Port                    int       `json:"port"`
+	Password                string    `json:"password"`
+	SNI                     string    `json:"sni"`
+	Ready                   bool      `json:"ready"`
+	OfflineAdmissionVersion int       `json:"offlineAdmissionVersion,omitempty"`
+	OfflineUntil            time.Time `json:"offlineUntil,omitzero"`
 }
 type RulesRef struct {
 	Version int64  `json:"version"`
@@ -37,22 +39,25 @@ type Profile struct {
 }
 
 type Subscription struct {
-	ID             string    `json:"id"`
-	UserID         string    `json:"userId"`
-	TemplateID     string    `json:"templateId"`
-	TemplateName   string    `json:"templateName"`
-	CreatedAt      time.Time `json:"createdAt"`
-	Status         string    `json:"status"`
-	ExpiresAt      time.Time `json:"expiresAt"`
-	QuotaBytes     *int64    `json:"quotaBytes"`
-	UsedBytes      int64     `json:"usedBytes"`
-	ReservedBytes  int64     `json:"reservedBytes"`
-	BandwidthMbps  *float64  `json:"bandwidthMbps"`
-	MaxConnections int       `json:"maxConnections"`
-	Occupied       int       `json:"occupied"`
-	NodeIDs        []string  `json:"nodeIds"`
-	DefaultNodeID  string    `json:"defaultNodeId"`
-	Revision       int64     `json:"revision"`
+	EmergencyUsedBytes     int64     `json:"emergencyUsedBytes"`
+	EmergencyReservedBytes int64     `json:"emergencyReservedBytes"`
+	OfflineReservations    int       `json:"offlineReservations"`
+	ID                     string    `json:"id"`
+	UserID                 string    `json:"userId"`
+	TemplateID             string    `json:"templateId"`
+	TemplateName           string    `json:"templateName"`
+	CreatedAt              time.Time `json:"createdAt"`
+	Status                 string    `json:"status"`
+	ExpiresAt              time.Time `json:"expiresAt"`
+	QuotaBytes             *int64    `json:"quotaBytes"`
+	UsedBytes              int64     `json:"usedBytes"`
+	ReservedBytes          int64     `json:"reservedBytes"`
+	BandwidthMbps          *float64  `json:"bandwidthMbps"`
+	MaxConnections         int       `json:"maxConnections"`
+	Occupied               int       `json:"occupied"`
+	NodeIDs                []string  `json:"nodeIds"`
+	DefaultNodeID          string    `json:"defaultNodeId"`
+	Revision               int64     `json:"revision"`
 }
 type Tokens struct {
 	RefreshRequestID string    `json:"refreshRequestId,omitempty"`
@@ -86,27 +91,31 @@ type NodeView struct {
 	Ready bool   `json:"ready"`
 }
 type View struct {
-	LoggedIn          bool             `json:"loggedIn"`
-	ServerURL         string           `json:"serverUrl"`
-	DeviceName        string           `json:"deviceName"`
-	Nodes             []NodeView       `json:"nodes"`
-	NodeChoices       []NodeChoiceView `json:"nodeChoices"`
-	DefaultNodeID     string           `json:"defaultNodeId"`
-	Revision          int64            `json:"revision"`
-	RulesVersion      int64            `json:"rulesVersion"`
-	LastSync          *time.Time       `json:"lastSync"`
-	SyncError         string           `json:"syncError"`
-	Subscription      *Subscription    `json:"subscription"`
-	Subscriptions     []Subscription   `json:"subscriptions"`
-	SelectionRevision int64            `json:"selectionRevision"`
-	SelectionPending  bool             `json:"selectionPending"`
-	Metrics           Dashboard        `json:"metrics"`
-	LoginPending      bool             `json:"loginPending"`
-	Connections       Connections      `json:"connections"`
-	NodeTests         NodeTestView     `json:"nodeTests"`
+	ControlUnavailable bool             `json:"controlUnavailable"`
+	OfflineUntil       *time.Time       `json:"offlineUntil,omitempty"`
+	LoggedIn           bool             `json:"loggedIn"`
+	ServerURL          string           `json:"serverUrl"`
+	DeviceName         string           `json:"deviceName"`
+	Nodes              []NodeView       `json:"nodes"`
+	NodeChoices        []NodeChoiceView `json:"nodeChoices"`
+	DefaultNodeID      string           `json:"defaultNodeId"`
+	Revision           int64            `json:"revision"`
+	RulesVersion       int64            `json:"rulesVersion"`
+	LastSync           *time.Time       `json:"lastSync"`
+	SyncError          string           `json:"syncError"`
+	Subscription       *Subscription    `json:"subscription"`
+	Subscriptions      []Subscription   `json:"subscriptions"`
+	SelectionRevision  int64            `json:"selectionRevision"`
+	SelectionPending   bool             `json:"selectionPending"`
+	Metrics            Dashboard        `json:"metrics"`
+	LoginPending       bool             `json:"loginPending"`
+	Connections        Connections      `json:"connections"`
+	NodeTests          NodeTestView     `json:"nodeTests"`
 	Status
 }
 type persisted struct {
+	Offline                *offlineAuthorization          `json:"offline,omitempty"`
+	LastSync               *time.Time                     `json:"lastSync,omitempty"`
 	AccountVersion         int                            `json:"accountVersion"`
 	ServerURL              string                         `json:"serverUrl"`
 	InstallationID         string                         `json:"installationId"`

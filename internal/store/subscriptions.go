@@ -215,6 +215,12 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	if err = json.Unmarshal([]byte(allocated), &e.NodeIDs); err != nil {
 		return nil, err
 	}
+	if err = q.QueryRow("SELECT COALESCE(SUM(used),0),COALESCE(SUM(reserved),0) FROM portal_emergency_usage WHERE subscription_id=?", id).Scan(&e.EmergencyUsedBytes, &e.EmergencyReservedBytes); err != nil {
+		return nil, err
+	}
+	if err = q.QueryRow("SELECT COUNT(*) FROM portal_offline_grants o JOIN portal_leases l ON l.id=o.lease_id WHERE l.subscription_id=? AND l.closed=0 AND l.expires>?", id, now.Unix()).Scan(&e.OfflineReservations); err != nil {
+		return nil, err
+	}
 	e.Status = "active"
 	if e.NodeIDs == nil {
 		e.NodeIDs = []string{}

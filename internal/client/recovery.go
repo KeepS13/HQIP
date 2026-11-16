@@ -137,6 +137,12 @@ func (c *Controller) recoveryAttempt(r *recoveryRun) (bool, error) {
 	}
 	// Sync remains the authority for revocations, rules and credential changes.
 	if err := c.Sync(r.ctx); err != nil {
+		c.mu.Lock()
+		offline := c.offlineValidLocked()
+		c.mu.Unlock()
+		if retryable(err) && offline {
+			return c.recoverOffline(r)
+		}
 		return false, err
 	}
 	c.mu.Lock()
@@ -172,6 +178,12 @@ func (c *Controller) recoveryAttempt(r *recoveryRun) (bool, error) {
 	before, err := r.api.Connections(ctx)
 	cancel()
 	if err != nil {
+		c.mu.Lock()
+		offline := c.offlineValidLocked()
+		c.mu.Unlock()
+		if retryable(err) && offline {
+			return c.recoverOffline(r)
+		}
 		if errors.Is(err, ErrUnauthorized) {
 			_ = c.expireSession(r.api)
 		}
@@ -196,6 +208,12 @@ func (c *Controller) recoveryAttempt(r *recoveryRun) (bool, error) {
 	state, err := r.api.Connections(ctx)
 	cancel()
 	if err != nil {
+		c.mu.Lock()
+		offline := c.offlineValidLocked()
+		c.mu.Unlock()
+		if retryable(err) && offline {
+			return c.recoverOffline(r)
+		}
 		if errors.Is(err, ErrUnauthorized) {
 			_ = c.expireSession(r.api)
 		}
@@ -266,6 +284,15 @@ func (c *Controller) stopStateLocked(message string) {
 	c.view.ActualNodeID, c.view.ActualSubscriptionID = "", ""
 	c.view.RunState, c.view.LastError = "failed", message
 	c.view.SyncError = ""
+	// Terminal authorization/protocol failures must survive a restart. Manual
+	// Disconnect uses its own path and deliberately retains a valid permit.
+	if c.saved.Offline != nil {
+		c.saved.Offline = nil
+		c.view.OfflineUntil = nil
+		if err := c.persistLocked(); err != nil {
+			c.view.LastError += "；无法保存许可失效状态：" + err.Error()
+		}
+	}
 }
 
 // Every terminal asynchronous result must still belong to this connection.

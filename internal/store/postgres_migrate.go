@@ -117,7 +117,7 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	}
 	// pgx extended protocol parses one statement at a time; split the static
 	// schema script before executing it in the migration transaction.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.Exec(ctx, statement); err != nil {
 				return report, err
@@ -173,6 +173,9 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 		return report, err
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('operation_logs_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
+		return report, err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('offline_admission_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
 		return report, err
 	}
 	data, err := json.MarshalIndent(report, "", "  ")

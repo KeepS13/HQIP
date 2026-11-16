@@ -94,6 +94,9 @@ func (c *Controller) SelectSubscriptionNode(id, nodeID string) error {
 }
 
 func (c *Controller) selectSubscriptionNode(id, nodeID string) error {
+	if err := c.selectionAvailable(id, nodeID); err != nil {
+		return err
+	}
 	if !c.beginWork() {
 		return context.Canceled
 	}

@@ -44,14 +44,16 @@ type ClientStatus struct {
 	LastError               string `json:"lastError"`
 }
 type ClientNode struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Server   string `json:"server"`
-	PublicIP string `json:"publicIp"`
-	Port     int    `json:"port"`
-	Password string `json:"password"`
-	SNI      string `json:"sni"`
-	Ready    bool   `json:"ready"`
+	ID                      string    `json:"id"`
+	Name                    string    `json:"name"`
+	Server                  string    `json:"server"`
+	PublicIP                string    `json:"publicIp"`
+	Port                    int       `json:"port"`
+	Password                string    `json:"password"`
+	SNI                     string    `json:"sni"`
+	Ready                   bool      `json:"ready"`
+	OfflineAdmissionVersion int       `json:"offlineAdmissionVersion,omitempty"`
+	OfflineUntil            time.Time `json:"offlineUntil,omitzero"`
 }
 type RuleReference struct {
 	Version int64  `json:"version"`

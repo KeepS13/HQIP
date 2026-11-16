@@ -34,6 +34,9 @@ export interface UserSubscription {
   quotaBytes: number | null;
   usedBytes: number;
   reservedBytes: number;
+  emergencyUsedBytes?: number;
+  emergencyReservedBytes?: number;
+  offlineReservations?: number;
   bandwidthMbps: number | null;
   maxConnections: number;
   occupied: number;
@@ -127,6 +130,8 @@ export interface Connection {
   lastSeen?: string;
   state?: string;
   ratePending?: boolean;
+  offlineReservation?: boolean;
+  lastForwardingReport?: string;
   closed?: boolean;
 }
 export interface UserProfile {
@@ -158,6 +163,8 @@ export function connectionState(value: Connection) {
       ? "已过期"
       : value.state === "closing"
         ? "断开中"
+        : value.state === "reserved"
+          ? "离线许可预留（非实时在线）"
         : value.ratePending
           ? "等待带宽确认"
           : "已连接";

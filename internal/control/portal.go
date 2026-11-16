@@ -69,6 +69,8 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	} {
 		m.Handle(pattern, s.portalAuth("native", handler))
 	}
+	m.HandleFunc("POST /api/v1/agents/offline-grants", s.agentOfflineAdmission)
+	m.HandleFunc("POST /api/v1/agents/offline-grants/{id}/report", s.agentOfflineReport)
 	m.HandleFunc("POST /api/v1/agents/admission", s.agentAdmission)
 	m.HandleFunc("POST /api/v1/agents/leases/{id}/renew", s.agentLeaseRenew)
 }

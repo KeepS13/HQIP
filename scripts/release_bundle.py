@@ -12,7 +12,7 @@ NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
 RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py',
                    'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py',
                    'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py',
-                   'automatic_backup.py', 'commercial_protection.py', 'render_domains.py')
+                   'automatic_backup.py', 'commercial_protection.py', 'offline_deployment.py', 'render_domains.py')
 PROTECTION_FILES = {'scripts/automatic_backup.py', 'scripts/commercial_protection.py', 'scripts/render_domains.py',
                     'deploy/hqip-backup.service', 'deploy/hqip-backup.timer',
                     'deploy/hqip-backup-retry.service', 'deploy/hqip-backup-retry.timer'}
@@ -57,6 +57,11 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
+    offline = manifest.get('offlineAdmissionVersion', 0)
+    if type(offline) is not int or offline not in (0, 1):
+        raise ValueError('Unsupported offline admission capability')
+    if offline == 0:
+        required = required - {'scripts/offline_deployment.py'}
     protection = manifest.get('commercialProtectionVersion', 0)
     logs = manifest.get('operationLogsVersion', 0)
     if type(protection) is not int or protection not in ((0, 1) if allow_legacy else (1,)):

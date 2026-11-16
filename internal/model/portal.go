@@ -40,23 +40,26 @@ type PortalUser struct {
 	Subscriptions []UserSubscription `json:"subscriptions"`
 }
 type UserSubscription struct {
-	NodesPerSubscription int       `json:"nodesPerSubscription"`
-	ID                   string    `json:"id"`
-	UserID               string    `json:"userId"`
-	TemplateID           string    `json:"templateId"`
-	TemplateName         string    `json:"templateName"`
-	CreatedAt            time.Time `json:"createdAt"`
-	ExpiresAt            time.Time `json:"expiresAt"`
-	Status               string    `json:"status"`
-	QuotaBytes           *int64    `json:"quotaBytes"`
-	UsedBytes            int64     `json:"usedBytes"`
-	ReservedBytes        int64     `json:"reservedBytes"`
-	BandwidthMbps        *float64  `json:"bandwidthMbps"`
-	MaxConnections       int       `json:"maxConnections"`
-	Occupied             int       `json:"occupied"`
-	NodeIDs              []string  `json:"nodeIds"`
-	DefaultNodeID        string    `json:"defaultNodeId"`
-	Revision             int64     `json:"revision"`
+	EmergencyUsedBytes     int64     `json:"emergencyUsedBytes"`
+	EmergencyReservedBytes int64     `json:"emergencyReservedBytes"`
+	OfflineReservations    int       `json:"offlineReservations"`
+	NodesPerSubscription   int       `json:"nodesPerSubscription"`
+	ID                     string    `json:"id"`
+	UserID                 string    `json:"userId"`
+	TemplateID             string    `json:"templateId"`
+	TemplateName           string    `json:"templateName"`
+	CreatedAt              time.Time `json:"createdAt"`
+	ExpiresAt              time.Time `json:"expiresAt"`
+	Status                 string    `json:"status"`
+	QuotaBytes             *int64    `json:"quotaBytes"`
+	UsedBytes              int64     `json:"usedBytes"`
+	ReservedBytes          int64     `json:"reservedBytes"`
+	BandwidthMbps          *float64  `json:"bandwidthMbps"`
+	MaxConnections         int       `json:"maxConnections"`
+	Occupied               int       `json:"occupied"`
+	NodeIDs                []string  `json:"nodeIds"`
+	DefaultNodeID          string    `json:"defaultNodeId"`
+	Revision               int64     `json:"revision"`
 }
 type SubscriptionRequest struct {
 	ID             string     `json:"id"`
@@ -86,26 +89,28 @@ type PortalSession struct {
 	Current    bool      `json:"current"`
 }
 type ConnectionLease struct {
-	RateVersion             int64     `json:"rateVersion"`
-	RatePending             bool      `json:"ratePending"`
-	SessionID               string    `json:"sessionId,omitempty"`
-	State                   string    `json:"state"`
-	LastError               string    `json:"lastError"`
-	ID                      string    `json:"id"`
-	LeaseID                 string    `json:"leaseId"`
-	UserID                  string    `json:"userId"`
-	SubscriptionID          string    `json:"subscriptionId"`
-	AccountingID            string    `json:"accountingId"`
-	NodeID                  string    `json:"nodeId"`
-	CreatedAt               time.Time `json:"createdAt"`
-	ExpiresAt               time.Time `json:"expiresAt"`
-	BandwidthBytesPerSecond int64     `json:"bandwidthBytesPerSecond"`
-	BudgetBytes             int64     `json:"budgetBytes"`
-	ConsumedBytes           int64     `json:"consumedBytes"`
-	UploadBytes             int64     `json:"uploadBytes"`
-	DownloadBytes           int64     `json:"downloadBytes"`
-	Revision                int64     `json:"revision"`
-	Closed                  bool      `json:"closed"`
+	OfflineReservation      bool       `json:"offlineReservation,omitempty"`
+	LastForwardingReport    *time.Time `json:"lastForwardingReport,omitempty"`
+	RateVersion             int64      `json:"rateVersion"`
+	RatePending             bool       `json:"ratePending"`
+	SessionID               string     `json:"sessionId,omitempty"`
+	State                   string     `json:"state"`
+	LastError               string     `json:"lastError"`
+	ID                      string     `json:"id"`
+	LeaseID                 string     `json:"leaseId"`
+	UserID                  string     `json:"userId"`
+	SubscriptionID          string     `json:"subscriptionId"`
+	AccountingID            string     `json:"accountingId"`
+	NodeID                  string     `json:"nodeId"`
+	CreatedAt               time.Time  `json:"createdAt"`
+	ExpiresAt               time.Time  `json:"expiresAt"`
+	BandwidthBytesPerSecond int64      `json:"bandwidthBytesPerSecond"`
+	BudgetBytes             int64      `json:"budgetBytes"`
+	ConsumedBytes           int64      `json:"consumedBytes"`
+	UploadBytes             int64      `json:"uploadBytes"`
+	DownloadBytes           int64      `json:"downloadBytes"`
+	Revision                int64      `json:"revision"`
+	Closed                  bool       `json:"closed"`
 }
 type LeaseUsage struct {
 	AppliedRateVersion int64 `json:"appliedRateVersion"`

@@ -388,7 +388,7 @@ function OwnedSubscription({
           </small>
         </strong>
         <Meter value={value.usedBytes} max={value.quotaBytes} />
-        <p>一次性上传＋下载 · 待结算预留 {bytes(value.reservedBytes)}</p>
+        <p>一次性上传＋下载 · 待结算预留 {bytes(value.reservedBytes)}</p><p>离线许可预留 {value.offlineReservations || 0} 个名额 · 应急已用 {bytes(value.emergencyUsedBytes || 0)} / 1 GiB · 应急预留 {bytes(value.emergencyReservedBytes || 0)}</p>
       </div>
       {!["removed", "revoked"].includes(value.status) && (
         <div className="subscription-owned-actions">

@@ -1,0 +1,35 @@
+package control
+
+import (
+	"github.com/KeepS13/HQIP/internal/model"
+	"net/http"
+)
+
+func (s *Server) agentOfflineAdmission(w http.ResponseWriter, r *http.Request) {
+	node, ok := s.agentID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		ConnectionID string `json:"connectionId"`
+		Password     string `json:"password"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	grant, err := s.Store.AcquireOfflineGrant(node, body.ConnectionID, body.Password)
+	portalResult(w, grant, err)
+}
+
+func (s *Server) agentOfflineReport(w http.ResponseWriter, r *http.Request) {
+	node, ok := s.agentID(w, r)
+	if !ok {
+		return
+	}
+	var body model.OfflineUsage
+	if !readJSON(w, r, &body) {
+		return
+	}
+	grant, err := s.Store.ReportOfflineGrant(node, r.PathValue("id"), body)
+	portalResult(w, grant, err)
+}

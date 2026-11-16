@@ -41,15 +41,17 @@ func (e *AgentUpgradeError) Error() string {
 }
 
 type AgentRelease struct {
-	SourceSHA string            `json:"sourceSHA"`
-	SHA256    map[string]string `json:"sha256"`
+	OfflineAdmissionVersion int               `json:"offlineAdmissionVersion,omitempty"`
+	SourceSHA               string            `json:"sourceSHA"`
+	SHA256                  map[string]string `json:"sha256"`
 }
 
 func (r *Runner) AgentRelease() (AgentRelease, error) {
 	var raw struct {
-		SourceSHA      string            `json:"sourceSHA"`
-		AgentSourceSHA string            `json:"agentSourceSHA"`
-		SHA256         map[string]string `json:"sha256"`
+		OfflineAdmissionVersion int               `json:"offlineAdmissionVersion"`
+		SourceSHA               string            `json:"sourceSHA"`
+		AgentSourceSHA          string            `json:"agentSourceSHA"`
+		SHA256                  map[string]string `json:"sha256"`
 	}
 	data, err := os.ReadFile(filepath.Join(r.options.ArtifactDir, "manifest.json"))
 	if err != nil {
@@ -64,7 +66,7 @@ func (r *Runner) AgentRelease() (AgentRelease, error) {
 	if len(raw.SourceSHA) != 40 {
 		return AgentRelease{}, errors.New("Agent 发布版本无效")
 	}
-	return AgentRelease{raw.SourceSHA, raw.SHA256}, nil
+	return AgentRelease{SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion}, nil
 }
 
 //go:embed managed_agent_upgrade.py
@@ -114,7 +116,7 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 		}
 		files["scripts/"+name] = data
 	}
-	manifest, _ := json.Marshal(map[string]any{"agentTelemetryVersion": 1, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
+	manifest, _ := json.Marshal(map[string]any{"agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
 	files["artifacts/manifest.json"] = manifest
 	folder := "/var/lib/hqip-operations/" + operationID
 	unit := "hqip-agent-upgrade-" + operationID
