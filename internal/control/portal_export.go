@@ -44,10 +44,11 @@ func portalV2RaySubscription(profile model.ClientProfile) ([]byte, error) {
 		if node.Server == "" || node.SNI == "" || node.Password == "" || node.Port < 1 || node.Port > 65535 {
 			return nil, errors.New("invalid subscription node")
 		}
+		// Profiles carry the configured node domain in SNI and the public IP in Server.
 		link := url.URL{
 			Scheme:   "hysteria2",
 			User:     url.User(node.Password),
-			Host:     net.JoinHostPort(node.Server, strconv.Itoa(node.Port)),
+			Host:     net.JoinHostPort(node.SNI, strconv.Itoa(node.Port)),
 			Path:     "/",
 			RawQuery: url.Values{"sni": {node.SNI}, "insecure": {"0"}}.Encode(),
 			Fragment: node.Name,

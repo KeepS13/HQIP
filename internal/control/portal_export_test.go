@@ -36,8 +36,12 @@ func TestPortalV2RaySubscriptionURIEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Scheme != "hysteria2" || first.Hostname() != "2001:db8::8" || first.Port() != "8443" || first.User.Username() != password || first.Fragment != "香港 #2\n测试" {
-		t.Fatal("URI failed to preserve the default node, IPv6, authentication or name")
+	if first.Scheme != "hysteria2" || first.Hostname() != "tls.example.com" || first.Port() != "8443" || first.User.Username() != password || first.Fragment != "香港 #2\n测试" {
+		t.Fatal("URI failed to preserve the default node, domain, authentication or name")
+	}
+	second, err := url.Parse(links[1])
+	if err != nil || second.Hostname() != "first.example.com" || second.Query().Get("sni") != "first.example.com" {
+		t.Fatal("URI address must use each node's domain instead of its public IP")
 	}
 	if _, separatePassword := first.User.Password(); separatePassword {
 		t.Fatal("authentication token was split into user/password fields")
@@ -101,7 +105,7 @@ func portalExportFixture(t *testing.T) (*Server, model.PortalUser, model.UserSub
 }
 
 func TestPortalSubscriptionFormatsUseSameScopedCredentials(t *testing.T) {
-	s, _, sub, _, link := portalExportFixture(t)
+	s, _, sub, node, link := portalExportFixture(t)
 	h := s.PublicHandler()
 	for _, query := range []string{"?format=unsupported", "?format=v2ray&format=clash", "?format="} {
 		if w := request(h, "GET", link+query, nil, "", ""); w.Code != 400 {
@@ -136,7 +140,7 @@ func TestPortalSubscriptionFormatsUseSameScopedCredentials(t *testing.T) {
 		t.Fatal("invalid Base64 export", err)
 	}
 	uri, err := url.Parse(string(decoded))
-	if err != nil || uri.User.Username() != config.Proxies[0].Password || uri.Hostname() != config.Proxies[0].Server || uri.Query().Get("sni") != config.Proxies[0].SNI || config.Proxies[0].SkipVerify {
+	if err != nil || uri.User.Username() != config.Proxies[0].Password || uri.Hostname() != node.Domain || config.Proxies[0].Server != node.PublicIP || uri.Query().Get("sni") != config.Proxies[0].SNI || config.Proxies[0].SkipVerify {
 		t.Fatal("export formats changed credentials, endpoint or TLS verification")
 	}
 	var singConfig portalSingBoxTestConfig
