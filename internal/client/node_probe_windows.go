@@ -23,6 +23,35 @@ func directProbePacket(ctx context.Context, address *net.UDPAddr) (net.PacketCon
 	if address.IP.IsLoopback() {
 		return (&net.ListenConfig{}).ListenPacket(ctx, network, listen)
 	}
+	control, err := directProbeControl(family)
+	if err != nil {
+		return nil, err
+	}
+	packet, err := (&net.ListenConfig{Control: control}).ListenPacket(ctx, network, listen)
+	if err != nil {
+		return nil, errProbeDirect
+	}
+	return packet, nil
+}
+
+func directProbeTCP(ctx context.Context, address *net.TCPAddr) (net.Conn, error) {
+	if address.IP.IsLoopback() {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", address.String())
+	}
+	family := uint32(windows.AF_INET)
+	if address.IP.To4() == nil {
+		family = windows.AF_INET6
+	}
+	control, err := directProbeControl(family)
+	if err != nil {
+		return nil, err
+	}
+	return (&net.Dialer{Control: control}).DialContext(ctx, "tcp", address.String())
+}
+
+// Both transports bind the physical default-route interface, even while TUN
+// is active. The adapter policy is shared so protocol results are comparable.
+func directProbeControl(family uint32) (func(string, string, syscall.RawConn) error, error) {
 	size := uint32(15000)
 	var buffer []byte
 	loaded := false
@@ -90,7 +119,7 @@ func directProbePacket(ctx context.Context, address *net.UDPAddr) (net.PacketCon
 	if index == 0 {
 		return nil, errProbeDirect
 	}
-	config := net.ListenConfig{Control: func(_, _ string, raw syscall.RawConn) error {
+	return func(_, _ string, raw syscall.RawConn) error {
 		var optionErr error
 		err := raw.Control(func(fd uintptr) {
 			level, value := windows.IPPROTO_IPV6, int(index)
@@ -104,10 +133,5 @@ func directProbePacket(ctx context.Context, address *net.UDPAddr) (net.PacketCon
 			return err
 		}
 		return optionErr
-	}}
-	packet, err := config.ListenPacket(ctx, network, listen)
-	if err != nil {
-		return nil, errProbeDirect
-	}
-	return packet, nil
+	}, nil
 }

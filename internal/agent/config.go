@@ -41,6 +41,11 @@ func LoadConfig(path string) (model.AgentConfig, error) {
 }
 
 func normalizeConfig(cfg *model.AgentConfig) error {
+	if r := cfg.Reality; r != nil {
+		if r.Port < 1 || r.Port > 65535 || r.BackendPort < 1 || r.BackendPort > 65535 || net.ParseIP(cfg.PublicIP).To4() == nil || cfg.Domain == "" || r.ServerName == "" || strings.ContainsAny(r.ServerName, ":/\\ \t\r\n") {
+			return errors.New("Reality 配置无效")
+		}
+	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:18081"
 	}

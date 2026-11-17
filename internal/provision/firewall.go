@@ -18,8 +18,11 @@ type firewallRule struct {
 	Protocol string `json:"proto"`
 }
 
-func applyFirewall(ctx context.Context, rm *remote, n model.Node, acmeViaCaddy bool) ([]firewallRule, error) {
+func applyFirewall(ctx context.Context, rm *remote, n model.Node, acmeViaCaddy bool, realityPort int) ([]firewallRule, error) {
 	rules := []firewallRule{{IP: n.PublicIP, Port: n.Port, Protocol: "udp"}}
+	if realityPort > 0 {
+		rules = append(rules, firewallRule{IP: n.PublicIP, Port: realityPort, Protocol: "tcp"})
+	}
 	if n.CertificateMode != "cloudflare" && !acmeViaCaddy {
 		rules = append(rules, firewallRule{IP: n.PublicIP, Port: 80, Protocol: "tcp"})
 	}

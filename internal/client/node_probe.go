@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"github.com/KeepS13/HQIP/internal/reality"
 	"net"
 	"time"
 
@@ -18,6 +19,24 @@ func probeNodeHandshake(ctx context.Context, node Node) (int64, error) {
 	ip := net.ParseIP(node.Server)
 	if ip == nil || node.Port < 1 || node.Port > 65535 || node.SNI == "" {
 		return 0, errors.New("节点地址无效")
+	}
+	if node.Protocol == "vless" {
+		if node.Reality.Port != node.Port || node.Reality.ServerName != node.SNI {
+			return 0, errors.New("Reality 节点地址无效")
+		}
+		started := time.Now()
+		conn, err := directProbeTCP(ctx, &net.TCPAddr{IP: ip, Port: node.Port})
+		if err != nil {
+			return 0, err
+		}
+		defer conn.Close()
+		if _, err = reality.Handshake(ctx, conn, node.Reality); err != nil {
+			return 0, err
+		}
+		return max(1, time.Since(started).Milliseconds()), nil
+	}
+	if node.Protocol != "" && node.Protocol != "hysteria2" {
+		return 0, errors.New("节点协议不支持")
 	}
 	address := &net.UDPAddr{IP: ip, Port: node.Port}
 	packet, err := directProbePacket(ctx, address)

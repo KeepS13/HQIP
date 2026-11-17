@@ -35,7 +35,11 @@ if not shutil.which('ufw'):
 try: owned=json.loads(manifest.read_text())
 except FileNotFoundError: owned=[]
 existing=rules()
-if a['action']=='apply':
+if a['action']=='inspect':
+    # Used before a durable upgrade mutation. Any matching existing rule,
+    # regardless of owner, must be excluded from rollback's deletion intent.
+    print(json.dumps([spec for spec in a['rules'] if any(spec_equal(r,spec) for r in existing)]))
+elif a['action']=='apply':
     if not command('ufw','status').stdout.startswith('Status: active'):
         print(json.dumps({'added':[],'error':False}));raise SystemExit(0)
     added=[]

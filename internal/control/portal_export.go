@@ -33,8 +33,8 @@ func portalExportFormat(rawQuery string) (string, error) {
 	}
 }
 
-// v2rayN and v2rayNG accept a Base64-encoded list of standard Hysteria 2 URIs.
-// These are the same subscription-scoped credentials used by the Clash export.
+// Each physical node exports its ready protocol endpoints. Both formats share
+// the same subscription-scoped authorization and rotate together.
 func portalV2RaySubscription(profile model.ClientProfile) ([]byte, error) {
 	links := []string{}
 	for _, node := range profile.Nodes {
@@ -52,6 +52,13 @@ func portalV2RaySubscription(profile model.ClientProfile) ([]byte, error) {
 			Path:     "/",
 			RawQuery: url.Values{"sni": {node.SNI}, "insecure": {"0"}}.Encode(),
 			Fragment: node.Name,
+		}
+		if _, err := node.SingBoxOutbound(node.ID); err != nil {
+			return nil, err
+		}
+		if node.Protocol == "vless" {
+			link.Scheme, link.Host, link.Path = "vless", net.JoinHostPort(node.Server, strconv.Itoa(node.Port)), ""
+			link.RawQuery = url.Values{"encryption": {"none"}, "security": {"reality"}, "type": {"tcp"}, "sni": {node.SNI}, "fp": {"chrome"}, "pbk": {node.Reality.PublicKey}, "sid": {node.Reality.ShortID}}.Encode()
 		}
 		if node.ID == profile.DefaultNodeID {
 			links = append([]string{link.String()}, links...)

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 
+	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/rules"
 )
 
@@ -64,7 +65,12 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 			}
 			cidrs = append(cidrs, n.Server+suffix)
 		}
-		out = append(out, map[string]any{"type": "hysteria2", "tag": tag, "server": n.Server, "server_port": n.Port, "password": n.Password, "tls": map[string]any{"enabled": true, "server_name": n.SNI, "insecure": false}})
+		transport := model.ClientNode{Protocol: n.Protocol, Server: n.Server, Port: n.Port, Password: n.Password, SNI: n.SNI, Reality: &n.Reality}
+		outbound, err := transport.SingBoxOutbound(tag)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, outbound)
 	}
 	if !found {
 		return nil, errors.New("目标节点尚未完成授权同步或已不可用")

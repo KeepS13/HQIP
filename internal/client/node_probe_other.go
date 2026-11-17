@@ -7,6 +7,13 @@ import (
 	"net"
 )
 
+func directProbeTCP(ctx context.Context, address *net.TCPAddr) (net.Conn, error) {
+	if !address.IP.IsLoopback() {
+		return nil, errProbeDirect
+	}
+	return (&net.Dialer{}).DialContext(ctx, "tcp", address.String())
+}
+
 func directProbePacket(ctx context.Context, address *net.UDPAddr) (net.PacketConn, error) {
 	// The desktop transport is Windows-only. Other hosts may run loopback tests
 	// but must not report potentially VPN-routed probes as direct measurements.

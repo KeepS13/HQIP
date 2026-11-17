@@ -72,6 +72,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/agents/offline-grants", s.agentOfflineAdmission)
 	m.HandleFunc("POST /api/v1/agents/offline-grants/{id}/report", s.agentOfflineReport)
 	m.HandleFunc("POST /api/v1/agents/admission", s.agentAdmission)
+	m.HandleFunc("POST /api/v1/agents/reality-credential", s.agentRealityCredential)
 	m.HandleFunc("POST /api/v1/agents/leases/{id}/renew", s.agentLeaseRenew)
 }
 
@@ -521,6 +522,24 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 		portalResult(w, nil, err)
 		return
 	}
+	// Older native clients interpret every endpoint as HY2. Their existing
+	// sessions keep the old shape until the client advertises protocol support.
+	if r.URL.Query().Get("protocols") != model.RealityCapability {
+		filtered := p.Nodes[:0]
+		for _, n := range p.Nodes {
+			if n.Protocol != "vless" {
+				filtered = append(filtered, n)
+			}
+		}
+		p.Nodes = filtered
+		catalog := availableNodes[:0]
+		for _, n := range availableNodes {
+			if n.Protocol != "vless" {
+				catalog = append(catalog, n)
+			}
+		}
+		availableNodes = catalog
+	}
 	latestID, latestSelection, err := s.Store.SelectedSubscription(user, session)
 	if err != nil {
 		portalResult(w, nil, err)
@@ -616,7 +635,11 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := n.Name + " · " + n.ID
-		proxy := map[string]any{"name": name, "type": "hysteria2", "server": n.Server, "port": n.Port, "password": n.Password, "sni": n.SNI, "skip-cert-verify": false}
+		proxy, proxyErr := n.ClashProxy(name)
+		if proxyErr != nil {
+			portalResult(w, nil, proxyErr)
+			return
+		}
 		if n.ID == p.DefaultNodeID {
 			defaultReady = true
 			names = append([]string{name}, names...)

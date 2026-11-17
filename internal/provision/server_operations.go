@@ -22,17 +22,20 @@ type AgentUpgradeError struct{ Code string }
 
 func (e *AgentUpgradeError) Error() string {
 	reason := map[string]string{
-		"backup_directory":   "无法创建安全的备份目录，请检查路径和权限",
-		"host_lock":          "无法获取服务器运维锁",
-		"host_busy":          "服务器正在执行其他运维任务，请稍后重试",
-		"disk_full":          "服务器磁盘空间不足",
-		"permission_denied":  "服务器文件或目录权限不足",
-		"artifact_checksum":  "Agent 产物校验失败",
-		"agent_start_failed": "新 Agent 启动或初始化失败，已尝试恢复原版本",
-		"inactive_service":   "节点服务未运行，请先检查节点状态",
-		"core_changed":       "检测到转发核心发生重启，请检查服务器状态",
-		"rollback_failed":    "原 Agent 恢复失败，请立即检查节点服务和任务备份",
-		"interrupted":        "远端升级任务被中断，已尝试恢复原版本",
+		"backup_directory":        "无法创建安全的备份目录，请检查路径和权限",
+		"host_lock":               "无法获取服务器运维锁",
+		"host_busy":               "服务器正在执行其他运维任务，请稍后重试",
+		"disk_full":               "服务器磁盘空间不足",
+		"permission_denied":       "服务器文件或目录权限不足",
+		"artifact_checksum":       "Agent 产物校验失败",
+		"agent_start_failed":      "新 Agent 启动或初始化失败，已尝试恢复原版本",
+		"reality_start_failed":    "Reality 握手检查失败，已尝试恢复原 Agent；请检查目标域名连通性与 TCP 端口",
+		"reality_firewall_failed": "Reality 防火墙规则创建失败，已尝试恢复原 Agent",
+		"reality_port_busy":       "节点 IP 的 TCP 443 和 8443 均被占用，未停止原服务",
+		"inactive_service":        "节点服务未运行，请先检查节点状态",
+		"core_changed":            "检测到转发核心发生重启，请检查服务器状态",
+		"rollback_failed":         "原 Agent 恢复失败，请立即检查节点服务和任务备份",
+		"interrupted":             "远端升级任务被中断，已尝试恢复原版本",
 	}[e.Code]
 	if reason == "" {
 		reason = "远端升级执行失败，请检查节点服务和任务备份"
@@ -41,6 +44,7 @@ func (e *AgentUpgradeError) Error() string {
 }
 
 type AgentRelease struct {
+	VLESSRealityVersion     int               `json:"vlessRealityVersion,omitempty"`
 	OfflineAdmissionVersion int               `json:"offlineAdmissionVersion,omitempty"`
 	SourceSHA               string            `json:"sourceSHA"`
 	SHA256                  map[string]string `json:"sha256"`
@@ -48,6 +52,7 @@ type AgentRelease struct {
 
 func (r *Runner) AgentRelease() (AgentRelease, error) {
 	var raw struct {
+		VLESSRealityVersion     int               `json:"vlessRealityVersion"`
 		OfflineAdmissionVersion int               `json:"offlineAdmissionVersion"`
 		SourceSHA               string            `json:"sourceSHA"`
 		AgentSourceSHA          string            `json:"agentSourceSHA"`
@@ -66,7 +71,7 @@ func (r *Runner) AgentRelease() (AgentRelease, error) {
 	if len(raw.SourceSHA) != 40 {
 		return AgentRelease{}, errors.New("Agent 发布版本无效")
 	}
-	return AgentRelease{SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion}, nil
+	return AgentRelease{SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion}, nil
 }
 
 //go:embed managed_agent_upgrade.py
@@ -108,7 +113,7 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 	sum := sha256.Sum256(binary)
 	hash := hex.EncodeToString(sum[:])
 	// Use the same tested upgrade/rollback implementation as manual operations.
-	files := map[string][]byte{"artifacts/agent-linux-" + arch: binary}
+	files := map[string][]byte{"artifacts/agent-linux-" + arch: binary, "scripts/hqip_firewall.py": []byte(firewallScript)}
 	for _, name := range []string{"upgrade_node_agent.py", "upgrade_node_admission.py"} {
 		data, e := os.ReadFile(filepath.Join(r.options.ArtifactDir, "..", "scripts", name))
 		if e != nil {
@@ -116,7 +121,7 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 		}
 		files["scripts/"+name] = data
 	}
-	manifest, _ := json.Marshal(map[string]any{"agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
+	manifest, _ := json.Marshal(map[string]any{"agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
 	files["artifacts/manifest.json"] = manifest
 	folder := "/var/lib/hqip-operations/" + operationID
 	unit := "hqip-agent-upgrade-" + operationID
@@ -126,12 +131,13 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 			return "", nil
 		}
 		var receipt struct {
-			State       string `json:"state"`
-			NodeID      string `json:"nodeId"`
-			SourceSHA   string `json:"sourceSHA"`
-			AgentSHA256 string `json:"agentSHA256"`
-			Unchanged   bool   `json:"coreInvocationUnchanged"`
-			ErrorCode   string `json:"errorCode"`
+			VLESSRealityVersion int    `json:"vlessRealityVersion"`
+			State               string `json:"state"`
+			NodeID              string `json:"nodeId"`
+			SourceSHA           string `json:"sourceSHA"`
+			AgentSHA256         string `json:"agentSHA256"`
+			Unchanged           bool   `json:"coreInvocationUnchanged"`
+			ErrorCode           string `json:"errorCode"`
 		}
 		if e = json.Unmarshal([]byte(output), &receipt); e != nil {
 			return "", errors.New("升级任务回执损坏")
@@ -139,7 +145,7 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 		if receipt.NodeID != in.Node.ID || receipt.SourceSHA != target {
 			return "", errors.New("升级任务回执归属不匹配")
 		}
-		if receipt.State == "succeeded" && (receipt.AgentSHA256 != hash || !receipt.Unchanged) {
+		if receipt.State == "succeeded" && (receipt.AgentSHA256 != hash || !receipt.Unchanged || receipt.VLESSRealityVersion != release.VLESSRealityVersion) {
 			return "", errors.New("Agent 升级结果校验失败")
 		}
 		if receipt.State == "failed" {

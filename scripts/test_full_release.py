@@ -60,6 +60,9 @@ class FullReleaseTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(('payload:' + name).encode())
         (self.root / 'scripts/build_desktop.py').write_text('DESKTOP_VERSION=' + repr(self.version))
+        firewall = self.root / 'internal/agent/firewall.py'
+        firewall.parent.mkdir(parents=True)
+        firewall.write_text('owned firewall fixture')
         icon = self.root / 'desktop/assets/hqip.ico'
         icon.parent.mkdir(parents=True)
         icon.write_bytes(b'build-source-icon')
@@ -102,7 +105,7 @@ class FullReleaseTests(unittest.TestCase):
         archive = self.root / 'dist' / result['filename']
         materialize(archive, result['sha256'], self.sha, None, output)
         manifest = verify_full_release(output)
-        self.assertEqual(set(manifest['sha256']), REQUIRED)
+        self.assertEqual(set(manifest['sha256']), REQUIRED | {'scripts/hqip_firewall.py'})
         self.assertNotIn('previousSourceSHA', manifest)
 
     def test_stale_core_is_rejected_even_if_control_and_client_are_new(self):

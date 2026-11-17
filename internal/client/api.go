@@ -159,7 +159,7 @@ func (a *API) refresh(ctx context.Context) error {
 	return nil
 }
 func (a *API) Profile(ctx context.Context, etag string) (Profile, string, bool, error) {
-	b, t, s, e := a.auth(ctx, "GET", "/api/v3/client/profile", nil, etag)
+	b, t, s, e := a.auth(ctx, "GET", "/api/v3/client/profile?protocols=vless-reality-v1", nil, etag)
 	var p Profile
 	if e == nil && s != 304 {
 		e = json.Unmarshal(b, &p)
@@ -167,7 +167,7 @@ func (a *API) Profile(ctx context.Context, etag string) (Profile, string, bool, 
 	return p, t, s == 304, e
 }
 func (a *API) SelectSubscription(ctx context.Context, id string, revision int64) (Profile, error) {
-	b, _, _, err := a.auth(ctx, "POST", "/api/v3/client/subscription", map[string]any{"subscriptionId": id, "expectedRevision": revision}, "")
+	b, _, _, err := a.auth(ctx, "POST", "/api/v3/client/subscription?protocols=vless-reality-v1", map[string]any{"subscriptionId": id, "expectedRevision": revision}, "")
 	var p Profile
 	if err == nil {
 		err = json.Unmarshal(b, &p)

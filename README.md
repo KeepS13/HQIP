@@ -1,6 +1,6 @@
 # HQIP
 
-Go 控制服务、独立 React 用户端和管理端、基于 sing-box 的 Windows 客户端，以及受管 HY2 节点。
+Go 控制服务、独立 React 用户端和管理端、基于 sing-box 的 Windows 客户端，以及支持 Hysteria 2 与 VLESS + Reality 的受管节点。
 
 - 用户入口：https://hqip.sharevps.online
 - 管理入口：https://cms-hqip.sharevps.online
@@ -13,6 +13,8 @@ Go 控制服务、独立 React 用户端和管理端、基于 sing-box 的 Windo
 ## 开发与部署
 
 参阅 [订阅与准入](docs/portal.md)、[支付配置与订单](docs/payments.md)、[三域名部署与恢复](docs/domains.md)、[服务器与域名迁移](docs/server-migration-sharevps.md)、[客户端使用说明](docs/client.md)、[站内预警中心](docs/notifications.md) 和 [接口说明](docs/interfaces.md)。
+
+已有节点通过后台“升级 Agent”启用双协议，参阅 [VLESS + Reality 升级与验收](docs/reality.md)。
 
 ```powershell
 npm --prefix admin-web ci

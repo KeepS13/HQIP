@@ -33,5 +33,17 @@ func (s *Store) ClientNodeCatalog(subscriptions []model.UserSubscription) ([]mod
 			nodes = append(nodes, model.ClientNodeEndpoint{ID: node.ID, Name: node.Name, Server: node.PublicIP, PublicIP: node.PublicIP, Port: node.Port, SNI: node.Domain, Ready: node.Status == "ready" && s.nodeAdmissionCapable(id)})
 		}
 	}
+	profiles := make([]model.ClientNode, 0, len(nodes))
+	for _, n := range nodes {
+		profiles = append(profiles, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.Server, PublicIP: n.PublicIP, Port: n.Port, SNI: n.SNI, Ready: n.Ready})
+	}
+	profiles, err := s.expandProtocolNodes(profiles)
+	if err != nil {
+		return nil, err
+	}
+	nodes = make([]model.ClientNodeEndpoint, 0, len(profiles))
+	for _, n := range profiles {
+		nodes = append(nodes, model.ClientNodeEndpoint{ID: n.ID, Name: n.Name, Server: n.Server, PublicIP: n.PublicIP, Port: n.Port, SNI: n.SNI, Ready: n.Ready, Protocol: n.Protocol, NodeID: n.NodeID, Reality: n.Reality})
+	}
 	return nodes, nil
 }

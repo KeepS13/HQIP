@@ -120,12 +120,15 @@ def require_billing_compatible(manifest):
  if postgres_enabled():
   if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
   if manifest.get('offlineAdmissionVersion',0)<postgres_info().get('offlineAdmissionVersion',0):raise ValueError('Offline grants require a compatible release; reservations and unsettled usage are preserved')
+  if manifest.get('vlessRealityVersion',0)<postgres_info().get('vlessRealityVersion',0):raise ValueError('Reality nodes require a compatible controller; fix forward without changing live usage')
   if manifest.get('serverBillingVersion',0)<2:raise ValueError('PostgreSQL requires serverBillingVersion 2')
   if manifest.get('subscriptionAllocationsVersion',0)<postgres_info().get('subscriptionAllocationsVersion',0):raise ValueError('Subscription allocations require a compatible release; node grants and reservations are preserved')
   if manifest.get('paymentsVersion',0)<1 and postgres_info().get('paymentsRequired',False):raise ValueError('Payment orders require a payment-compatible release; live orders are preserved')
   return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
   has_metadata=db.execute("SELECT 1 FROM sqlite_master WHERE name='metadata'").fetchone()
+  reality_version=db.execute("SELECT value FROM metadata WHERE key='vless_reality_version'").fetchone() if has_metadata else None
+  if reality_version and manifest.get('vlessRealityVersion',0)<int(reality_version[0]):raise ValueError('Reality nodes require a compatible controller; fix forward without changing live usage')
   offline_version=db.execute("SELECT value FROM metadata WHERE key='offline_admission_version'").fetchone() if has_metadata else None
   if offline_version and manifest.get('offlineAdmissionVersion',0)<int(offline_version[0]):raise ValueError('Offline grants require a compatible release; reservations and unsettled usage are preserved')
   allocation_version=db.execute("SELECT value FROM metadata WHERE key='subscription_allocations_version'").fetchone() if has_metadata else None

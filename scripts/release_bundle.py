@@ -57,6 +57,11 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
+    reality = manifest.get('vlessRealityVersion', 0)
+    if type(reality) is not int or reality not in (0, 1):
+        raise ValueError('Unsupported Reality capability')
+    if reality == 1:
+        required = required | {'scripts/hqip_firewall.py'}
     offline = manifest.get('offlineAdmissionVersion', 0)
     if type(offline) is not int or offline not in (0, 1):
         raise ValueError('Unsupported offline admission capability')

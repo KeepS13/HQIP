@@ -35,6 +35,16 @@ func nodeChoices(profile Profile) ([]NodeChoiceView, []Node) {
 				ids = append(ids, node.ID)
 			}
 		}
+		// Subscription IDs authorize physical nodes. Protocol aliases are
+		// selectable only when the server's credential-free catalog advertises
+		// the matching endpoint; never infer a second authorization or allocation.
+		expanded := append([]string{}, ids...)
+		for _, id := range ids {
+			if endpoint, ok := byID[id+":vless"]; ok && endpoint.NodeID == id && endpoint.Protocol == "vless" {
+				expanded = append(expanded, endpoint.ID)
+			}
+		}
+		ids = expanded
 		seenInSubscription := map[string]bool{}
 		for _, id := range ids {
 			node, ok := byID[id]

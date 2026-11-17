@@ -89,6 +89,9 @@ def error_code(error, stage):
     known = {
         'Agent checksum mismatch': 'artifact_checksum',
         'Agent telemetry initialization failed': 'agent_start_failed',
+        'Reality ingress initialization failed': 'reality_start_failed',
+        'Reality firewall initialization failed': 'reality_firewall_failed',
+        'No free Reality TCP port': 'reality_port_busy',
         'Owned services must be running before Agent upgrade': 'inactive_service',
         'Core invocation changed during Agent-only upgrade': 'core_changed',
         'Upgrade interrupted': 'interrupted',

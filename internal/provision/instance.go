@@ -149,14 +149,31 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 		return
 	}
 	statsSecret := secret()
+	var realityConfig *model.AgentRealityConfig
 	if pre.ExistingManaged {
 		var previous model.AgentConfig
 		raw, _ := rm.run(ctx, "cat "+shellQuote(p.Config+"/agent.json"), nil)
 		if json.Unmarshal([]byte(raw), &previous) == nil && len(previous.StatsSecret) >= 24 {
 			statsSecret = previous.StatsSecret
+			realityConfig = previous.Reality
 		}
 	}
+	if realityConfig == nil {
+		// Each public IP gets its own TCP endpoint. Keep shared-host HTTPS on
+		// 443 intact by selecting 8443 only when the exact-IP bind is occupied.
+		raw, e := rm.run(ctx, pythonCommand(realityPortScript, map[string]any{"ip": in.Node.PublicIP}), nil)
+		if e != nil {
+			return res, errors.New("没有可用的 Reality TCP 端口")
+		}
+		port, e := strconv.Atoi(strings.TrimSpace(raw))
+		if e != nil || (port != 443 && port != 8443) {
+			return res, errors.New("Reality 端口检查失败")
+		}
+		realityConfig = &model.AgentRealityConfig{Port: port, ServerName: "www.cloudflare.com"}
+	}
+	realityConfig.BackendPort = in.Node.Port
 	ac := model.AgentConfig{ControlURL: strings.TrimRight(r.options.ControlURL, "/"), NodeID: in.Node.ID, Token: in.AgentToken, Listen: fmt.Sprintf("127.0.0.1:%d", res.AuthPort), StatePath: p.State + "/state.db", StatsURL: fmt.Sprintf("http://127.0.0.1:%d", res.StatsPort), StatsSecret: statsSecret, HysteriaService: p.CoreUnit, AgentService: p.AgentUnit, NodeDir: p.Config, Managed: true, ControllerID: r.controllerIdentity(), Domain: in.Node.Domain, PublicIP: in.Node.PublicIP, CertificateMode: in.Node.CertificateMode}
+	ac.Reality = realityConfig
 	agentJSON, _ := json.MarshalIndent(ac, "", "  ")
 	hyYAML, e := serverConfig(in.Node, res.ACMEViaCaddy, statsSecret)
 	if e != nil {
@@ -179,7 +196,7 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 	if err != nil {
 		return res, errors.New("启动独立节点服务失败")
 	}
-	addedFirewall, e = applyFirewall(ctx, rm, in.Node, res.ACMEViaCaddy)
+	addedFirewall, e = applyFirewall(ctx, rm, in.Node, res.ACMEViaCaddy, realityConfig.Port)
 	if e != nil {
 		return res, errors.New("管理节点自有 UFW 规则失败，请检查节点防火墙")
 	}

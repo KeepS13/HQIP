@@ -59,10 +59,12 @@ type liveState struct {
 }
 
 type Agent struct {
-	cfg           model.AgentConfig
-	log           *slog.Logger
-	ledger        *ledger
-	controlClient *http.Client
+	realityMu       sync.RWMutex
+	realityEndpoint *model.RealityEndpoint
+	cfg             model.AgentConfig
+	log             *slog.Logger
+	ledger          *ledger
+	controlClient   *http.Client
 	// Owned by syncLoop; configuration/revocation work continues during backoff.
 	reportRetryAt     time.Time
 	reportBackoff     time.Duration
@@ -150,7 +152,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.sampleLoop, a.syncLoop, a.revokeLoop, a.maintenanceLoop} {
+	for _, loop := range []func(context.Context){a.sampleLoop, a.syncLoop, a.revokeLoop, a.maintenanceLoop, a.realityLoop} {
 		wg.Add(1)
 		go func(loop func(context.Context)) { defer wg.Done(); loop(ctx) }(loop)
 	}
@@ -194,7 +196,7 @@ func (a *Agent) Handler() http.Handler {
 		healthy := a.live.Healthy && a.now().Sub(a.live.SampleAt) < 3*time.Second
 		a.liveMu.RUnlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]bool{"coreHealthy": healthy})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"coreHealthy": healthy, "realityReady": a.realityReport() != nil})
 	})
 	return mux
 }
@@ -558,6 +560,10 @@ func (a *Agent) sync(ctx context.Context) error {
 	}
 	if a.statsJSON(ctx, http.MethodGet, "/hqip/capabilities", nil, &coreCapabilities) == nil && coreCapabilities.Admission && coreCapabilities.Version == 1 {
 		report.Capabilities = append(report.Capabilities, "admission-v1")
+		if endpoint := a.realityReport(); endpoint != nil {
+			report.Reality = endpoint
+			report.Capabilities = append(report.Capabilities, model.RealityCapability)
+		}
 	}
 	a.cacheMu.RLock()
 	report.Revision = a.cache.AppliedRevision

@@ -115,6 +115,7 @@ type UsageBucket struct {
 }
 
 type AgentReport struct {
+	Reality          *RealityEndpoint     `json:"reality,omitempty"`
 	At               time.Time            `json:"at"`
 	Revision         int64                `json:"revision"`
 	Metrics          Metrics              `json:"metrics"`
@@ -134,21 +135,22 @@ type AgentReport struct {
 }
 
 type AgentConfig struct {
-	ControlURL      string `json:"controlUrl"`
-	NodeID          string `json:"nodeId"`
-	Token           string `json:"token"`
-	Listen          string `json:"listen"`
-	StatePath       string `json:"statePath"`
-	StatsURL        string `json:"statsUrl"`
-	StatsSecret     string `json:"statsSecret"`
-	HysteriaService string `json:"hysteriaService"`
-	NodeDir         string `json:"nodeDir"`
-	Managed         bool   `json:"managed"`
-	Domain          string `json:"domain"`
-	PublicIP        string `json:"publicIp"`
-	AgentService    string `json:"agentService"`
-	CertificateMode string `json:"certificateMode"`
-	ControllerID    string `json:"controllerId"`
+	Reality         *AgentRealityConfig `json:"reality,omitempty"`
+	ControlURL      string              `json:"controlUrl"`
+	NodeID          string              `json:"nodeId"`
+	Token           string              `json:"token"`
+	Listen          string              `json:"listen"`
+	StatePath       string              `json:"statePath"`
+	StatsURL        string              `json:"statsUrl"`
+	StatsSecret     string              `json:"statsSecret"`
+	HysteriaService string              `json:"hysteriaService"`
+	NodeDir         string              `json:"nodeDir"`
+	Managed         bool                `json:"managed"`
+	Domain          string              `json:"domain"`
+	PublicIP        string              `json:"publicIp"`
+	AgentService    string              `json:"agentService"`
+	CertificateMode string              `json:"certificateMode"`
+	ControllerID    string              `json:"controllerId"`
 }
 
 type TaskEvent struct {

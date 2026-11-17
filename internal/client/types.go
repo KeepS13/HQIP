@@ -2,21 +2,28 @@
 // of its Windows user interface. Secrets never appear in View.
 package client
 
-import "time"
+import (
+	"time"
+
+	"github.com/KeepS13/HQIP/internal/model"
+)
 
 const CoreVersion = "1.14.4"
 
 type Node struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	Server                  string    `json:"server"`
-	PublicIP                string    `json:"publicIp"`
-	Port                    int       `json:"port"`
-	Password                string    `json:"password"`
-	SNI                     string    `json:"sni"`
-	Ready                   bool      `json:"ready"`
-	OfflineAdmissionVersion int       `json:"offlineAdmissionVersion,omitempty"`
-	OfflineUntil            time.Time `json:"offlineUntil,omitzero"`
+	Protocol                string                `json:"protocol,omitempty"`
+	NodeID                  string                `json:"nodeId,omitempty"`
+	Reality                 model.RealityEndpoint `json:"reality,omitempty"`
+	ID                      string                `json:"id"`
+	Name                    string                `json:"name"`
+	Server                  string                `json:"server"`
+	PublicIP                string                `json:"publicIp"`
+	Port                    int                   `json:"port"`
+	Password                string                `json:"password"`
+	SNI                     string                `json:"sni"`
+	Ready                   bool                  `json:"ready"`
+	OfflineAdmissionVersion int                   `json:"offlineAdmissionVersion,omitempty"`
+	OfflineUntil            time.Time             `json:"offlineUntil,omitzero"`
 }
 type RulesRef struct {
 	Version int64  `json:"version"`

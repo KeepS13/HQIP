@@ -271,6 +271,10 @@ func (s *Store) PortalClientProfile(user, scope, subscriptionID string) (model.C
 	if err != nil {
 		return p, e, err
 	}
+	p.Nodes, err = s.expandProtocolNodes(p.Nodes)
+	if err != nil {
+		return p, e, err
+	}
 	var finalRevision int64
 	if err = s.DB.QueryRow("SELECT revision FROM portal_users WHERE id=?", user).Scan(&finalRevision); err != nil {
 		return p, e, err

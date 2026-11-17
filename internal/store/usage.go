@@ -115,6 +115,9 @@ func (s *Store) ReportContext(ctx context.Context, nodeID string, r model.AgentR
 		if err = s.recordLifecycle(tx, nodeID, r); err != nil {
 			return err
 		}
+		if err = recordReality(tx, nodeID, r, lifecycle == "active"); err != nil {
+			return err
+		}
 		if len(r.Warnings) > 0 {
 			// Agent messages can contain runtime diagnostics; persist a bounded,
 			// non-secret notice rather than arbitrary remote text in audit logs.

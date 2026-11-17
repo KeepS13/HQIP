@@ -312,7 +312,7 @@ func (c *Controller) checkAccountConnection(ctx context.Context) {
 	}
 	if state.SubscriptionID == c.saved.SelectedSubscriptionID && state.SelectionRevision == c.saved.Profile.SelectionRevision {
 		c.view.Connections = state
-		if connectionRunning(c.view.RunState) && !c.offlineValidLocked() && !matchingLease(state, c.saved.SelectedSubscriptionID, c.saved.SelectedNodeID, c.clockNow()) {
+		if connectionRunning(c.view.RunState) && !c.offlineValidLocked() && !idleProtocol(c.saved.Profile, c.saved.SelectedNodeID) && !matchingLease(state, c.saved.SelectedSubscriptionID, c.saved.SelectedNodeID, c.clockNow()) {
 			c.startRecoveryLocked("lease_missing")
 		}
 	} else if connectionRunning(c.view.RunState) {

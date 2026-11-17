@@ -40,6 +40,7 @@ def package_release(root, sha, previous_sha=None):
         inputs['artifacts/' + name] = source
     for name in RELEASE_SCRIPTS:
         inputs['scripts/' + name] = root / 'scripts' / name
+    inputs['scripts/hqip_firewall.py'] = root / 'internal/agent/firewall.py'
     for name in ('nginx-hqip.conf', 'hqip-control.service', 'hqip-storage.service',
                  'hqip-journal-limits.conf', 'hqip-nginx-logrotate.conf',
                  'hqip-backup.service', 'hqip-backup.timer', 'hqip-backup-retry.service', 'hqip-backup-retry.timer',
@@ -70,7 +71,7 @@ def package_release(root, sha, previous_sha=None):
     manifest = {'sourceSHA': sha, 'releaseKind': 'full', 'upgradeKind': 'full-release',
                 'schemaVersion': 5, 'postgresSchemaVersion': 1, 'paymentsVersion': 1, 'postgresRecoveryVersion': 1, 'subscriptionAllocationsVersion': 1,
                 'clientApiVersion': 3, 'serverBillingVersion': 2, 'agentTelemetryVersion': 1, 'operationsVersion': 1,
-                'operationLogsVersion': 1, 'commercialProtectionVersion': 1, 'offlineAdmissionVersion': 1,
+                'operationLogsVersion': 1, 'commercialProtectionVersion': 1, 'offlineAdmissionVersion': 1, 'vlessRealityVersion': 1,
                 'desktopVersion': versions[0], 'desktopIconSHA256': digest(root / 'desktop/assets/hqip.ico'),
                 'sha256': hashes}
     if previous_sha:

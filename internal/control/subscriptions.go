@@ -170,7 +170,19 @@ func (s *Server) userSubscriptionDetail(w http.ResponseWriter, r *http.Request, 
 		if err != nil {
 			continue
 		}
-		nodes = append(nodes, map[string]any{"id": n.ID, "name": n.Name, "server": n.PublicIP, "publicIp": n.PublicIP, "port": n.Port, "sni": n.Domain, "ready": n.Status == "ready" && n.Lifecycle == "active"})
+		name := n.Name
+		endpoint, err := s.Store.RealityEndpoint(n.ID)
+		if err != nil {
+			portalResult(w, nil, err)
+			return
+		}
+		if endpoint != nil {
+			name += " · Hysteria 2"
+		}
+		nodes = append(nodes, map[string]any{"id": n.ID, "name": name, "protocol": "hysteria2", "nodeId": n.ID, "server": n.PublicIP, "publicIp": n.PublicIP, "port": n.Port, "sni": n.Domain, "ready": n.Status == "ready" && n.Lifecycle == "active"})
+		if endpoint != nil {
+			nodes = append(nodes, map[string]any{"id": n.ID + ":vless", "name": n.Name + " · VLESS + Reality", "protocol": "vless", "nodeId": n.ID, "server": n.PublicIP, "publicIp": n.PublicIP, "port": endpoint.Port, "sni": endpoint.ServerName, "ready": n.Status == "ready" && n.Lifecycle == "active"})
+		}
 	}
 	link, err := s.Store.PortalSubscription(user, v.ID, "get")
 	portalResult(w, map[string]any{"subscription": v, "nodes": nodes, "subscriptionUrl": link}, err)

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math/rand/v2"
 	"time"
+
+	"github.com/KeepS13/HQIP/internal/model"
 )
 
 // Recovery belongs to one successfully applied connection, never a new choice.
@@ -103,6 +105,8 @@ func (c *Controller) recoverConnection(r *recoveryRun) {
 }
 
 func matchingLease(state Connections, subscription, node string, now time.Time) bool {
+	// Protocol choices retain the physical-node identity used by admission.
+	node = model.EndpointNodeID(node)
 	for _, lease := range state.Connections {
 		if lease.State == "active" && lease.SubscriptionID == subscription && lease.NodeID == node && lease.ExpiresAt.After(now) {
 			return true

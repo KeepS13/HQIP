@@ -234,7 +234,7 @@ func nodeProbeKey(node Node) string {
 	if ip := net.ParseIP(server); ip != nil {
 		server = ip.String()
 	}
-	return server + "\n" + strconv.Itoa(node.Port) + "\n" + strings.TrimSuffix(strings.ToLower(node.SNI), ".")
+	return server + "\n" + strconv.Itoa(node.Port) + "\n" + strings.TrimSuffix(strings.ToLower(node.SNI), ".") + "\n" + node.Protocol + "\n" + node.Reality.PublicKey + "\n" + node.Reality.ShortID
 }
 
 func nodeProbeStatus(err error) string {

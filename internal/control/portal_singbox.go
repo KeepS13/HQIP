@@ -61,11 +61,11 @@ func portalSingBoxSubscription(profile model.ClientProfile, bundle rules.Bundle,
 		} else {
 			tags = append(tags, tag)
 		}
-		outbounds = append(outbounds, map[string]any{
-			"type": "hysteria2", "tag": tag, "server": node.Server,
-			"server_port": node.Port, "password": node.Password,
-			"tls": map[string]any{"enabled": true, "server_name": node.SNI, "insecure": false},
-		})
+		outbound, err := node.SingBoxOutbound(tag)
+		if err != nil {
+			return nil, err
+		}
+		outbounds = append(outbounds, outbound)
 	}
 	if defaultTag == "" {
 		return nil, errPortalDefaultNodeUnavailable

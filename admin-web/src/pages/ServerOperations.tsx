@@ -84,7 +84,7 @@ export function ServerCredentialPanel({ server }: { server: ManagedServer }) {
 
 export function AgentUpgradeDialog({ nodes, onClose }: { nodes?: Node[]; onClose: () => void }) {
   const inventory = usePolling<Node[]>("/nodes");
-  const release = usePolling<{ sourceSHA: string }>("/agent-release");
+  const release = usePolling<{ sourceSHA: string; vlessRealityVersion?: number }>("/agent-release");
   const available = (nodes || inventory.data || []).filter(n => n.lifecycle === "active" && n.managed);
   const [selected, setSelected] = useState<string[]>(nodes?.filter(n => n.lifecycle === "active" && n.managed).map(n => n.id) || []);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -94,9 +94,10 @@ export function AgentUpgradeDialog({ nodes, onClose }: { nodes?: Node[]; onClose
     try { setResults(await api("/agent-upgrades", "POST", { nodeIds: selected, sourceSHA: release.data.sourceSHA })); }
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <Modal wide title="升级 Agent" description="保留流量账本与节点配置，转发核心继续运行。" onClose={() => { if (!busy) onClose(); }}>
+  return <Modal wide title="升级 Agent" description="保留流量账本，原 Hysteria 2 核心继续运行。" onClose={() => { if (!busy) onClose(); }}>
     <div className="form-stack"><ErrorNotice message={error || release.error || (!nodes ? inventory.error : "")} />
       {release.data && <Notice>目标版本 {release.data.sourceSHA.slice(0, 8)}。服务器需先保存 SSH 凭据；同一服务器上的任务依次执行。</Notice>}
+      {release.data?.vlessRealityVersion === 1 && <Notice>升级后启用 VLESS + Reality。用户更新订阅后可选择同一服务器的两种协议，共用原套餐流量与授权。升级会短暂中断已有 VLESS 连接。</Notice>}
       {results ? <><ul className="upgrade-results">{results.map(r => <li key={r.nodeId}><strong>{available.find(n => n.id === r.nodeId)?.name || r.nodeId}</strong><span>{r.job ? "已排队" : r.error}</span></li>)}</ul><OperationHistory /></> : <>{inventory.loading && !nodes ? <Loading /> : <><label className="assignment-option upgrade-select-all"><input type="checkbox" checked={available.length > 0 && selected.length === available.length} onChange={e => setSelected(e.target.checked ? available.map(n => n.id) : [])} /><span>全选 {available.length} 个节点</span><small>已选 {selected.length} 个</small></label><div className="upgrade-node-grid">{available.map(n => <label className={`assignment-option upgrade-node-option${selected.includes(n.id) ? " selected" : ""}`} key={n.id}><input type="checkbox" checked={selected.includes(n.id)} onChange={e => setSelected(old => e.target.checked ? [...old, n.id] : old.filter(id => id !== n.id))} /><span><strong>{n.name}</strong><small className="mono">{n.publicIp}</small></span></label>)}</div></>}</>}
       <div className="modal-actions"><Button variant="secondary" disabled={busy} onClick={onClose}>{results ? "关闭" : "取消"}</Button>{!results && <Button icon={Upload} disabled={!selected.length || !release.data} busy={busy} onClick={() => void submit()}>升级所选 {selected.length} 个节点</Button>}</div>
     </div>
