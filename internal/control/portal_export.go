@@ -60,7 +60,11 @@ func portalV2RaySubscription(profile model.ClientProfile) ([]byte, error) {
 		}
 		if node.Protocol == "vless" {
 			link.Scheme, link.Host, link.Path = "vless", net.JoinHostPort(node.Server, strconv.Itoa(node.Port)), ""
-			link.RawQuery = url.Values{"encryption": {"none"}, "security": {"reality"}, "type": {"tcp"}, "sni": {node.SNI}, "fp": {"chrome"}, "pbk": {node.Reality.PublicKey}, "sid": {node.Reality.ShortID}}.Encode()
+			query := url.Values{"encryption": {"none"}, "security": {"reality"}, "type": {"tcp"}, "sni": {node.SNI}, "fp": {"chrome"}, "pbk": {node.Reality.PublicKey}, "sid": {node.Reality.ShortID}}
+			if node.Reality.Flow != "" {
+				query.Set("flow", node.Reality.Flow)
+			}
+			link.RawQuery = query.Encode()
 		}
 		if node.ID == profile.DefaultNodeID {
 			links = append([]string{link.String()}, links...)

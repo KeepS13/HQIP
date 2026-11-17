@@ -16,8 +16,10 @@ import (
 func recordReality(tx *sql.Tx, node string, report model.AgentReport, active bool) error {
 	key := "vless-reality:" + node
 	capable := false
+	vision := false
 	for _, capability := range report.Capabilities {
 		capable = capable || capability == model.RealityCapability
+		vision = vision || capability == model.RealityVisionCapability
 	}
 	if report.Reality == nil || !capable || !active {
 		_, err := tx.Exec("DELETE FROM metadata WHERE key=?", key)
@@ -26,10 +28,17 @@ func recordReality(tx *sql.Tx, node string, report model.AgentReport, active boo
 	if err := report.Reality.Validate(); err != nil {
 		return err
 	}
+	// Copy caller-owned data. A capability removal must clear the flow as well
+	// as an upgrade enables it, including a node rollback with an unchanged key.
+	endpoint := *report.Reality
+	endpoint.Flow = ""
+	if vision {
+		endpoint.Flow = model.RealityVisionFlow
+	}
 	if _, err := tx.Exec("INSERT INTO metadata(key,value) VALUES('vless_reality_version','1') ON CONFLICT(key) DO UPDATE SET value='1'"); err != nil {
 		return err
 	}
-	_, err := tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, jsonString(report.Reality))
+	_, err := tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, jsonString(endpoint))
 	return err
 }
 

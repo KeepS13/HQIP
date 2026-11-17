@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/reality"
 )
 
 type cachedCredential struct {
@@ -563,6 +564,9 @@ func (a *Agent) sync(ctx context.Context) error {
 		if endpoint := a.realityReport(); endpoint != nil {
 			report.Reality = endpoint
 			report.Capabilities = append(report.Capabilities, model.RealityCapability)
+			if reality.VisionEnabled {
+				report.Capabilities = append(report.Capabilities, model.RealityVisionCapability)
+			}
 		}
 	}
 	a.cacheMu.RLock()

@@ -20,7 +20,7 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := model.RealityEndpoint{Port: 8443, ServerName: model.DefaultRealityServerName, PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef"}
+	endpoint := model.RealityEndpoint{Port: 8443, ServerName: model.DefaultRealityServerName, PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef", Flow: model.RealityVisionFlow}
 	raw, _ := json.Marshal(endpoint)
 	if _, err := s.Store.DB.Exec("INSERT INTO metadata(key,value) VALUES(?,?)", "vless-reality:"+sub.NodeIDs[0], string(raw)); err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 			t.Fatal("native protocols have inconsistent credentials")
 		}
 		for _, node := range profile.Nodes {
-			if node.Server != allocated.Domain || (node.Protocol == "vless" && node.SNI != endpoint.ServerName) {
+			if node.Server != allocated.Domain || (node.Protocol == "vless" && (node.SNI != endpoint.ServerName || node.Reality.Flow != model.RealityVisionFlow)) {
 				t.Fatal("native dial address and Reality SNI were conflated")
 			}
 		}
@@ -108,7 +108,7 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 
 func TestDualProtocolSubscriptionExports(t *testing.T) {
 	s, user, sub, node, link := portalExportFixture(t)
-	endpoint := model.RealityEndpoint{Port: 8443, ServerName: model.DefaultRealityServerName, PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef"}
+	endpoint := model.RealityEndpoint{Port: 8443, ServerName: model.DefaultRealityServerName, PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef", Flow: model.RealityVisionFlow}
 	raw, _ := json.Marshal(endpoint)
 	if _, err := s.Store.DB.Exec("INSERT INTO metadata(key,value) VALUES(?,?)", "vless-reality:"+node.ID, string(raw)); err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestDualProtocolSubscriptionExports(t *testing.T) {
 		t.Fatal("dual Clash export failed", w.Code)
 	}
 	password, _ := clash.Proxies[0]["password"].(string)
-	if clash.Proxies[1]["uuid"] != model.RealityUUID(password) || clash.Proxies[1]["type"] != "vless" || clash.Proxies[1]["reality-opts"] == nil {
+	if clash.Proxies[1]["uuid"] != model.RealityUUID(password) || clash.Proxies[1]["type"] != "vless" || clash.Proxies[1]["reality-opts"] == nil || clash.Proxies[1]["flow"] != model.RealityVisionFlow {
 		t.Fatal("Clash Reality auth mismatch")
 	}
 	if clash.Proxies[0]["server"] != node.Domain || clash.Proxies[1]["server"] != node.Domain ||
@@ -142,7 +142,7 @@ func TestDualProtocolSubscriptionExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vless.Scheme != "vless" || vless.Hostname() != node.Domain || vless.User.Username() != model.RealityUUID(password) || vless.Query().Get("pbk") != endpoint.PublicKey || vless.Query().Get("security") != "reality" || vless.Query().Get("sni") != endpoint.ServerName {
+	if vless.Scheme != "vless" || vless.Hostname() != node.Domain || vless.User.Username() != model.RealityUUID(password) || vless.Query().Get("pbk") != endpoint.PublicKey || vless.Query().Get("security") != "reality" || vless.Query().Get("sni") != endpoint.ServerName || vless.Query().Get("flow") != model.RealityVisionFlow {
 		t.Fatal("invalid VLESS URI")
 	}
 	w = request(h, "GET", link+"?format=singbox", nil, "", "")
@@ -157,7 +157,7 @@ func TestDualProtocolSubscriptionExports(t *testing.T) {
 		if (kind == "vless" || kind == "hysteria2") && out["server"] != node.Domain {
 			t.Fatal("sing-box address must be the allocated domain")
 		}
-		if kind == "vless" && out["uuid"] != model.RealityUUID(password) {
+		if kind == "vless" && (out["uuid"] != model.RealityUUID(password) || out["flow"] != model.RealityVisionFlow) {
 			t.Fatal("sing-box UUID mismatch")
 		}
 	}

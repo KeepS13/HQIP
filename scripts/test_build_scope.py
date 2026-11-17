@@ -86,6 +86,14 @@ class BuildScopeTests(unittest.TestCase):
         self.assertEqual(set(self.downloads), {'hysteria-windows-amd64.exe', 'hysteria-windows-arm64.exe', 'caddy-linux-amd64.tar.gz'})
         self.assertEqual([env['GOARCH'] for args, env in self.commands if args[0] == 'go' and env['GOOS'] == 'windows'], ['amd64', 'arm64'])
 
+    def test_released_agents_include_the_vision_tls_adapter(self):
+        self.execute('--server-only')
+        agents = [args for args, env in self.commands
+                  if args[0] == 'go' and args[-1] == './cmd/hqip-agent']
+        self.assertEqual(len(agents), 2)
+        for args in agents:
+            self.assertIn('-tags=with_utls', args)
+
     def test_production_scope_requires_fresh_go_builds(self):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
             self.execute('--server-only', '--skip-go')

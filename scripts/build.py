@@ -53,7 +53,9 @@ def main():
         for arch in ["amd64", "arm64"]:
             env = dict(os.environ, GOOS="linux", GOARCH=arch, CGO_ENABLED="0")
             for command, name in [("hqip", "hqip"), ("hqip-agent", "agent"), ("hqip-migrate-postgres", "hqip-migrate-postgres")]:
-                run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"{name}-linux-{arch}"), f"./cmd/{command}"], env=env)
+                # sing-vmess's Vision adapter for the Reality uTLS connection
+                # is build-tagged; every released Agent must include it.
+                run(["go", "build", "-tags=with_utls", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"{name}-linux-{arch}"), f"./cmd/{command}"], env=env)
             if not args.server_only:
                 env = dict(os.environ, GOOS="windows", GOARCH=arch, CGO_ENABLED="0")
                 run(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(OUT / f"hqip-windows-{arch}.exe"), "./cmd/hqip"], env=env)

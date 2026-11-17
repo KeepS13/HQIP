@@ -102,13 +102,15 @@ func (g *Gateway) serveConn(ctx context.Context, raw net.Conn) {
 	if err != nil {
 		return
 	}
-	// Read only the version and UUID; replay them to the upstream VLESS parser.
-	// A separate immutable service per socket avoids races in UpdateUsers.
-	var header [17]byte
-	if _, err = io.ReadFull(conn, header[:]); err != nil || header[0] != 0 {
+	// The upstream parser bounds the header (one-byte addon/domain lengths).
+	// Capture exactly that header, leaving all payload in TLS-owned buffers so
+	// Vision can safely switch to the raw socket after its padding handshake.
+	var header bytes.Buffer
+	request, err := vless.ReadRequest(io.TeeReader(conn, &header))
+	if err != nil || (request.Flow != "" && (request.Flow != vless.FlowVision || !VisionEnabled)) {
 		return
 	}
-	h := hex.EncodeToString(header[1:])
+	h := hex.EncodeToString(request.UUID[:])
 	id := h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 	host, _, err := net.SplitHostPort(raw.RemoteAddr().String())
 	if err != nil {
@@ -131,8 +133,11 @@ func (g *Gateway) serveConn(ctx context.Context, raw net.Conn) {
 		}
 	}}
 	service := vless.NewService[string](logger.NOP(), handler)
-	service.UpdateUsers([]string{id}, []string{id}, []string{""})
-	replay := &replayConn{Conn: conn, prefix: bytes.NewReader(header[:])}
+	// Each socket owns an immutable service. Accept legacy empty-flow clients
+	// during rolling upgrades; new profiles select Vision only after capability
+	// reporting. Both paths use the same authenticated, guarded backend above.
+	service.UpdateUsers([]string{id}, []string{id}, []string{request.Flow})
+	replay := &replayConn{Conn: conn, prefix: bytes.NewReader(header.Bytes())}
 	_ = service.NewConnection(ctx, replay, M.ParseSocksaddr(raw.RemoteAddr().String()), nil)
 }
 
@@ -140,6 +145,11 @@ type replayConn struct {
 	net.Conn
 	prefix *bytes.Reader
 }
+
+// Vision's TLS adapter may unwrap only after the VLESS parser consumes the
+// replayed header. Unwrapping earlier would silently discard protocol bytes.
+func (c *replayConn) ReaderReplaceable() bool { return c.prefix.Len() == 0 }
+func (c *replayConn) Upstream() any           { return c.Conn }
 
 func (c *replayConn) Read(p []byte) (int, error) {
 	if c.prefix.Len() > 0 {

@@ -11,6 +11,11 @@ import (
 
 const RealityCapability = "vless-reality-v1"
 
+// Vision is negotiated separately so an unupgraded Agent never receives a
+// client configuration it cannot serve. The base Reality API stays compatible.
+const RealityVisionCapability = "vless-reality-vision-v1"
+const RealityVisionFlow = "xtls-rprx-vision"
+
 // DefaultRealityServerName is the TLS camouflage target, not the node's dial
 // address. Users connect to their allocated node domain for both protocols.
 const DefaultRealityServerName = "www.microsoft.com"
@@ -34,9 +39,15 @@ type RealityEndpoint struct {
 	ServerName string `json:"serverName"`
 	PublicKey  string `json:"publicKey"`
 	ShortID    string `json:"shortId"`
+	// Flow is derived by the controller from the Agent's capabilities. Agents
+	// omit it on the wire so older controllers can still accept their reports.
+	Flow string `json:"flow,omitempty"`
 }
 
 func (e RealityEndpoint) Validate() error {
+	if e.Flow != "" && e.Flow != RealityVisionFlow {
+		return errors.New("unsupported Reality flow")
+	}
 	key, err := base64.RawURLEncoding.DecodeString(e.PublicKey)
 	sid, sidErr := hex.DecodeString(e.ShortID)
 	if e.Port < 1 || e.Port > 65535 || err != nil || len(key) != 32 || sidErr != nil || len(sid) != 8 ||

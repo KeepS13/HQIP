@@ -18,7 +18,11 @@ func (n ClientNode) SingBoxOutbound(tag string) (map[string]any, error) {
 	if _, err := RealityUUIDHashPrefix(n.Password); err != nil {
 		return nil, err
 	}
-	return map[string]any{"type": "vless", "tag": tag, "server": n.Server, "server_port": n.Port, "uuid": n.Password, "packet_encoding": "xudp", "tls": map[string]any{"enabled": true, "server_name": n.SNI, "utls": map[string]any{"enabled": true, "fingerprint": "chrome"}, "reality": map[string]any{"enabled": true, "public_key": n.Reality.PublicKey, "short_id": n.Reality.ShortID}}}, nil
+	outbound := map[string]any{"type": "vless", "tag": tag, "server": n.Server, "server_port": n.Port, "uuid": n.Password, "packet_encoding": "xudp", "tls": map[string]any{"enabled": true, "server_name": n.SNI, "utls": map[string]any{"enabled": true, "fingerprint": "chrome"}, "reality": map[string]any{"enabled": true, "public_key": n.Reality.PublicKey, "short_id": n.Reality.ShortID}}}
+	if n.Reality.Flow != "" {
+		outbound["flow"] = n.Reality.Flow
+	}
+	return outbound, nil
 }
 
 func (n ClientNode) ClashProxy(name string) (map[string]any, error) {
@@ -28,5 +32,9 @@ func (n ClientNode) ClashProxy(name string) (map[string]any, error) {
 	if n.Protocol != "vless" {
 		return map[string]any{"name": name, "type": "hysteria2", "server": n.Server, "port": n.Port, "password": n.Password, "sni": n.SNI, "skip-cert-verify": false}, nil
 	}
-	return map[string]any{"name": name, "type": "vless", "server": n.Server, "port": n.Port, "uuid": n.Password, "network": "tcp", "tls": true, "servername": n.SNI, "client-fingerprint": "chrome", "udp": true, "packet-encoding": "xudp", "reality-opts": map[string]any{"public-key": n.Reality.PublicKey, "short-id": n.Reality.ShortID}}, nil
+	proxy := map[string]any{"name": name, "type": "vless", "server": n.Server, "port": n.Port, "uuid": n.Password, "network": "tcp", "tls": true, "servername": n.SNI, "client-fingerprint": "chrome", "udp": true, "packet-encoding": "xudp", "reality-opts": map[string]any{"public-key": n.Reality.PublicKey, "short-id": n.Reality.ShortID}}
+	if n.Reality.Flow != "" {
+		proxy["flow"] = n.Reality.Flow
+	}
+	return proxy, nil
 }

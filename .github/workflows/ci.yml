@@ -30,8 +30,8 @@ jobs:
       - run: node --test admin-web/tests/*.test.mjs
       - run: npm --prefix admin-web run build
       - run: npm --prefix user-web run build
-      - run: go vet ./...
-      - run: go test -race ./...
+      - run: go vet -tags=with_utls ./...
+      - run: go test -tags=with_utls -race ./...
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -151,8 +151,8 @@ jobs:
       - run: npm --prefix user-web run build
       - run: npm --prefix desktop/frontend ci
       - run: npm --prefix desktop/frontend run build
-      - run: go vet ./...
-      - run: go test ./...
+      - run: go vet -tags=with_utls ./...
+      - run: go test -tags=with_utls ./...
       - run: New-Item -ItemType Directory -Force dist | Out-Null
         shell: pwsh
       - run: go build -trimpath -o dist/hqip-windows-amd64.exe ./cmd/hqip
@@ -161,6 +161,13 @@ jobs:
       - run: go test ./...
         working-directory: desktop
       - run: python scripts/build_desktop.py --skip-web
+      - name: Verify Vision with the packaged sing-box core
+        shell: pwsh
+        run: |
+          $env:HQIP_SINGBOX_EXE = (Resolve-Path dist/desktop/sing-box.exe).Path
+          # The pinned upstream TLS adapter transports field pointers as uintptr.
+          # Scope the checkptr exception to that dependency; race checks remain on.
+          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/reality -run TestSingBoxRealityGuardedWire -count=1 -v
       - uses: actions/upload-artifact@v4
         id: upload_windows
         continue-on-error: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
