@@ -30,7 +30,7 @@ func (s *Store) ClientNodeCatalog(subscriptions []model.UserSubscription) ([]mod
 			if node.Lifecycle != "active" {
 				continue
 			}
-			nodes = append(nodes, model.ClientNodeEndpoint{ID: node.ID, Name: node.Name, Server: node.PublicIP, PublicIP: node.PublicIP, Port: node.Port, SNI: node.Domain, Ready: node.Status == "ready" && s.nodeAdmissionCapable(id)})
+			nodes = append(nodes, model.ClientNodeEndpoint{ID: node.ID, Name: node.Name, Server: node.Domain, PublicIP: node.PublicIP, Port: node.Port, SNI: node.Domain, Ready: node.Status == "ready" && s.nodeAdmissionCapable(id)})
 		}
 	}
 	profiles := make([]model.ClientNode, 0, len(nodes))

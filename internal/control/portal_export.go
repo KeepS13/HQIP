@@ -44,7 +44,9 @@ func portalV2RaySubscription(profile model.ClientProfile) ([]byte, error) {
 		if node.Server == "" || node.SNI == "" || node.Password == "" || node.Port < 1 || node.Port > 65535 {
 			return nil, errors.New("invalid subscription node")
 		}
-		// Profiles carry the configured node domain in SNI and the public IP in Server.
+		// HY2 uses its certificate domain even for older profiles containing an
+		// IP address. Reality's SNI is a separate camouflage target, so its URI
+		// must use Server (the allocated node domain) as the dial address.
 		link := url.URL{
 			Scheme:   "hysteria2",
 			User:     url.User(node.Password),

@@ -276,7 +276,7 @@ func (s *Store) ClientProfile(deviceID string) (model.ClientProfile, error) {
 		if n.Lifecycle != "active" {
 			return p, ErrConflict
 		}
-		p.Nodes = append(p.Nodes, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.PublicIP, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && n.AppliedRevision >= required})
+		p.Nodes = append(p.Nodes, model.ClientNode{ID: n.ID, Name: n.Name, Server: n.Domain, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && n.AppliedRevision >= required})
 	}
 	var hash string
 	var version int64

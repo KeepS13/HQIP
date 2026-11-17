@@ -179,9 +179,9 @@ func (s *Server) userSubscriptionDetail(w http.ResponseWriter, r *http.Request, 
 		if endpoint != nil {
 			name += " · Hysteria 2"
 		}
-		nodes = append(nodes, map[string]any{"id": n.ID, "name": name, "protocol": "hysteria2", "nodeId": n.ID, "server": n.PublicIP, "publicIp": n.PublicIP, "port": n.Port, "sni": n.Domain, "ready": n.Status == "ready" && n.Lifecycle == "active"})
+		nodes = append(nodes, map[string]any{"id": n.ID, "name": name, "protocol": "hysteria2", "nodeId": n.ID, "server": n.Domain, "publicIp": n.PublicIP, "port": n.Port, "sni": n.Domain, "ready": n.Status == "ready" && n.Lifecycle == "active"})
 		if endpoint != nil {
-			nodes = append(nodes, map[string]any{"id": n.ID + ":vless", "name": n.Name + " · VLESS + Reality", "protocol": "vless", "nodeId": n.ID, "server": n.PublicIP, "publicIp": n.PublicIP, "port": endpoint.Port, "sni": endpoint.ServerName, "ready": n.Status == "ready" && n.Lifecycle == "active"})
+			nodes = append(nodes, map[string]any{"id": n.ID + ":vless", "name": n.Name + " · VLESS + Reality", "protocol": "vless", "nodeId": n.ID, "server": n.Domain, "publicIp": n.PublicIP, "port": endpoint.Port, "sni": endpoint.ServerName, "ready": n.Status == "ready" && n.Lifecycle == "active"})
 		}
 	}
 	link, err := s.Store.PortalSubscription(user, v.ID, "get")

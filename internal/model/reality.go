@@ -11,6 +11,10 @@ import (
 
 const RealityCapability = "vless-reality-v1"
 
+// DefaultRealityServerName is the TLS camouflage target, not the node's dial
+// address. Users connect to their allocated node domain for both protocols.
+const DefaultRealityServerName = "www.microsoft.com"
+
 // AgentRealityConfig is installed by the owned Agent upgrade. No credential or
 // key is supplied by the browser; the Agent creates its own persistent key.
 type AgentRealityConfig struct {

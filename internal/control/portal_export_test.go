@@ -140,7 +140,7 @@ func TestPortalSubscriptionFormatsUseSameScopedCredentials(t *testing.T) {
 		t.Fatal("invalid Base64 export", err)
 	}
 	uri, err := url.Parse(string(decoded))
-	if err != nil || uri.User.Username() != config.Proxies[0].Password || uri.Hostname() != node.Domain || config.Proxies[0].Server != node.PublicIP || uri.Query().Get("sni") != config.Proxies[0].SNI || config.Proxies[0].SkipVerify {
+	if err != nil || uri.User.Username() != config.Proxies[0].Password || uri.Hostname() != node.Domain || config.Proxies[0].Server != node.Domain || uri.Query().Get("sni") != config.Proxies[0].SNI || config.Proxies[0].SkipVerify {
 		t.Fatal("export formats changed credentials, endpoint or TLS verification")
 	}
 	var singConfig portalSingBoxTestConfig

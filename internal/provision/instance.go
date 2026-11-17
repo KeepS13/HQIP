@@ -169,7 +169,12 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 		if e != nil || (port != 443 && port != 8443) {
 			return res, errors.New("Reality 端口检查失败")
 		}
-		realityConfig = &model.AgentRealityConfig{Port: port, ServerName: "www.cloudflare.com"}
+		realityConfig = &model.AgentRealityConfig{Port: port, ServerName: model.DefaultRealityServerName}
+	}
+	// Migrate the previous automatic target without rotating keys or ports.
+	// An explicitly configured different SNI remains owned by the operator.
+	if realityConfig.ServerName == "" || strings.EqualFold(strings.TrimSuffix(realityConfig.ServerName, "."), "www.cloudflare.com") {
+		realityConfig.ServerName = model.DefaultRealityServerName
 	}
 	realityConfig.BackendPort = in.Node.Port
 	ac := model.AgentConfig{ControlURL: strings.TrimRight(r.options.ControlURL, "/"), NodeID: in.Node.ID, Token: in.AgentToken, Listen: fmt.Sprintf("127.0.0.1:%d", res.AuthPort), StatePath: p.State + "/state.db", StatsURL: fmt.Sprintf("http://127.0.0.1:%d", res.StatsPort), StatsSecret: statsSecret, HysteriaService: p.CoreUnit, AgentService: p.AgentUnit, NodeDir: p.Config, Managed: true, ControllerID: r.controllerIdentity(), Domain: in.Node.Domain, PublicIP: in.Node.PublicIP, CertificateMode: in.Node.CertificateMode}

@@ -160,7 +160,8 @@ func testRealityGuardedWire(t *testing.T, binary string, xray bool) {
 	if opens.Load() != 0 || resolutions.Load() != 0 {
 		t.Fatal("latency check acquired a business lease")
 	}
-	node := model.ClientNode{Protocol: "vless", Server: "127.0.0.1", Port: endpoint.Port, SNI: endpoint.ServerName, Password: uuid, Reality: &endpoint}
+	// Exercise a DNS dial address distinct from the Reality camouflage SNI.
+	node := model.ClientNode{Protocol: "vless", Server: "localhost", Port: endpoint.Port, SNI: endpoint.ServerName, Password: uuid, Reality: &endpoint}
 	outbound, err := node.SingBoxOutbound("proxy")
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +171,9 @@ func testRealityGuardedWire(t *testing.T, binary string, xray bool) {
 	reserve, _ := net.Listen("tcp4", "127.0.0.1:0")
 	mixedPort := reserve.Addr().(*net.TCPAddr).Port
 	reserve.Close()
-	configuration := map[string]any{"log": map[string]any{"level": "debug"}, "inbounds": []any{map[string]any{"type": "mixed", "listen": "127.0.0.1", "listen_port": mixedPort}}, "outbounds": []any{outbound}, "route": map[string]any{"final": "proxy"}}
+	// Resolve the test-only hostname inside the child instead of relying on a
+	// router to answer localhost DNS queries. Production resolves allocated DNS.
+	configuration := map[string]any{"log": map[string]any{"level": "debug"}, "dns": map[string]any{"servers": []any{map[string]any{"type": "hosts", "tag": "local", "predefined": map[string]any{"localhost": "127.0.0.1"}}}, "strategy": "prefer_ipv4"}, "inbounds": []any{map[string]any{"type": "mixed", "listen": "127.0.0.1", "listen_port": mixedPort}}, "outbounds": []any{outbound}, "route": map[string]any{"final": "proxy", "default_domain_resolver": "local"}}
 	udpPort := mixedPort
 	if xray {
 		reserve, e := net.Listen("tcp4", "127.0.0.1:0")

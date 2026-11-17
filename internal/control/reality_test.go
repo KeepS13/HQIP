@@ -16,16 +16,30 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 	s, _ := newServer(t)
 	user, cookie, csrf := portalLoginFixture(t, s, "reality-native@example.com")
 	sub := subscriptionFixture(t, s, user, nil, "", 2)
-	endpoint := model.RealityEndpoint{Port: 8443, ServerName: "www.cloudflare.com", PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef"}
+	allocated, err := s.Store.Node(sub.NodeIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := model.RealityEndpoint{Port: 8443, ServerName: model.DefaultRealityServerName, PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef"}
 	raw, _ := json.Marshal(endpoint)
 	if _, err := s.Store.DB.Exec("INSERT INTO metadata(key,value) VALUES(?,?)", "vless-reality:"+sub.NodeIDs[0], string(raw)); err != nil {
 		t.Fatal(err)
 	}
 	h := s.PublicHandler()
+	w := portalRequest(h, "GET", "/api/v1/user/subscriptions/"+sub.ID, nil, cookie, csrf, s.opts.PublicURL)
+	var detail struct{ Nodes []model.ClientNode }
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &detail) != nil || len(detail.Nodes) != 2 {
+		t.Fatal("missing user-facing endpoints", w.Code, w.Body.String())
+	}
+	for _, node := range detail.Nodes {
+		if node.Server != allocated.Domain || node.PublicIP != allocated.PublicIP {
+			t.Fatal("user node address is not its allocated domain")
+		}
+	}
 	verifier := strings.Repeat("r", 43)
 	digest := sha256.Sum256([]byte(verifier))
 	redirect := "http://127.0.0.1:45231/callback"
-	w := bearerRequest(h, "POST", "/api/v3/client/authorize", map[string]string{"codeChallenge": base64.RawURLEncoding.EncodeToString(digest[:]), "redirectUri": redirect, "state": strings.Repeat("s", 32), "clientName": "Reality test", "installationId": "reality-native"}, "")
+	w = bearerRequest(h, "POST", "/api/v3/client/authorize", map[string]string{"codeChallenge": base64.RawURLEncoding.EncodeToString(digest[:]), "redirectUri": redirect, "state": strings.Repeat("s", 32), "clientName": "Reality test", "installationId": "reality-native"}, "")
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -61,6 +75,9 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 			t.Fatal("protocol opt-in/catalog mismatch", w.Code, w.Body.String())
 		}
 		for _, node := range profile.Available {
+			if node["server"] != allocated.Domain {
+				t.Fatal("catalog must advertise the allocated domain")
+			}
 			if _, found := node["password"]; found {
 				t.Fatal("catalog exposes credentials")
 			}
@@ -81,12 +98,17 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 		if test.count == 2 && profile.Nodes[1].Password != model.RealityUUID(profile.Nodes[0].Password) {
 			t.Fatal("native protocols have inconsistent credentials")
 		}
+		for _, node := range profile.Nodes {
+			if node.Server != allocated.Domain || (node.Protocol == "vless" && node.SNI != endpoint.ServerName) {
+				t.Fatal("native dial address and Reality SNI were conflated")
+			}
+		}
 	}
 }
 
 func TestDualProtocolSubscriptionExports(t *testing.T) {
 	s, user, sub, node, link := portalExportFixture(t)
-	endpoint := model.RealityEndpoint{Port: 8443, ServerName: "www.cloudflare.com", PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef"}
+	endpoint := model.RealityEndpoint{Port: 8443, ServerName: model.DefaultRealityServerName, PublicKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ShortID: "0123456789abcdef"}
 	raw, _ := json.Marshal(endpoint)
 	if _, err := s.Store.DB.Exec("INSERT INTO metadata(key,value) VALUES(?,?)", "vless-reality:"+node.ID, string(raw)); err != nil {
 		t.Fatal(err)
@@ -103,6 +125,10 @@ func TestDualProtocolSubscriptionExports(t *testing.T) {
 	if clash.Proxies[1]["uuid"] != model.RealityUUID(password) || clash.Proxies[1]["type"] != "vless" || clash.Proxies[1]["reality-opts"] == nil {
 		t.Fatal("Clash Reality auth mismatch")
 	}
+	if clash.Proxies[0]["server"] != node.Domain || clash.Proxies[1]["server"] != node.Domain ||
+		clash.Proxies[0]["sni"] != node.Domain || clash.Proxies[1]["servername"] != endpoint.ServerName {
+		t.Fatal("Clash address must be the node domain with protocol-specific SNI")
+	}
 	w = request(h, "GET", link+"?format=v2ray", nil, "", "")
 	decoded, err := base64.StdEncoding.DecodeString(w.Body.String())
 	if err != nil {
@@ -116,7 +142,7 @@ func TestDualProtocolSubscriptionExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vless.Scheme != "vless" || vless.Hostname() != node.PublicIP || vless.User.Username() != model.RealityUUID(password) || vless.Query().Get("pbk") != endpoint.PublicKey || vless.Query().Get("security") != "reality" {
+	if vless.Scheme != "vless" || vless.Hostname() != node.Domain || vless.User.Username() != model.RealityUUID(password) || vless.Query().Get("pbk") != endpoint.PublicKey || vless.Query().Get("security") != "reality" || vless.Query().Get("sni") != endpoint.ServerName {
 		t.Fatal("invalid VLESS URI")
 	}
 	w = request(h, "GET", link+"?format=singbox", nil, "", "")
@@ -128,6 +154,9 @@ func TestDualProtocolSubscriptionExports(t *testing.T) {
 	for _, out := range sing.Outbounds {
 		kind, _ := out["type"].(string)
 		counts[kind]++
+		if (kind == "vless" || kind == "hysteria2") && out["server"] != node.Domain {
+			t.Fatal("sing-box address must be the allocated domain")
+		}
 		if kind == "vless" && out["uuid"] != model.RealityUUID(password) {
 			t.Fatal("sing-box UUID mismatch")
 		}

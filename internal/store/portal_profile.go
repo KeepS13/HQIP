@@ -253,7 +253,9 @@ func (s *Store) PortalClientProfile(user, scope, subscriptionID string) (model.C
 		if err != nil {
 			return p, e, err
 		}
-		clientNode := model.ClientNode{ID: n.ID, Name: n.Name, Server: n.PublicIP, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && s.nodeAdmissionCapable(id)}
+		// Both protocol endpoints inherit the allocated DNS name. PublicIP is
+		// retained as infrastructure metadata, never substituted for the address.
+		clientNode := model.ClientNode{ID: n.ID, Name: n.Name, Server: n.Domain, PublicIP: n.PublicIP, Port: n.Port, Password: pass, SNI: n.Domain, Ready: n.Status == "ready" && s.nodeAdmissionCapable(id)}
 		if err = s.clientOfflinePolicy(&clientNode, subscriptionID, scope); err != nil {
 			return p, e, err
 		}

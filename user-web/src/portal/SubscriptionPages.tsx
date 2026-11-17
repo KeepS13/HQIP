@@ -488,7 +488,7 @@ export function UserSubscriptionDetail() {
                 <h3>{n.name}</h3>
                 <p>可选节点</p>
                 <small className="muted">
-                  {n.publicIp || n.server || ""}
+                  {n.server || n.domain || ""}
                   {n.sni || n.domain ? ` · ${n.sni || n.domain}` : ""}
                 </small>
               </article>

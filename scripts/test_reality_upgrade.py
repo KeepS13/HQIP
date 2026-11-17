@@ -10,6 +10,23 @@ import upgrade_node_agent as upgrade
 
 
 class RealityUpgradeTests(AgentTelemetryUpgradeTests):
+    def test_new_reality_endpoint_uses_microsoft_sni(self):
+        self.enable_reality()
+        with patch.object(upgrade.socket, 'socket'):
+            actual = upgrade.reality_configuration(self.config, self.cfg)
+        self.assertEqual(actual, {'port': 443, 'backendPort': 1443, 'serverName': 'www.microsoft.com'})
+
+    def test_previous_default_sni_migrates_and_rolls_back_without_port_change(self):
+        self.enable_reality()
+        self.cfg['reality'] = {'port': 3443, 'backendPort': 1443, 'serverName': 'www.cloudflare.com'}
+        (self.config / 'agent.json').write_text(json.dumps(self.cfg))
+        with patch.object(upgrade.socket, 'socket', side_effect=AssertionError('port reselection')):
+            result = upgrade.upgrade(self.node, self.artifacts)
+        active = json.loads((self.config / 'agent.json').read_text())
+        self.assertEqual(active['reality'], {'port': 3443, 'backendPort': 1443, 'serverName': 'www.microsoft.com'})
+        upgrade.rollback(Path(result['backup']))
+        self.assertEqual(json.loads((self.config / 'agent.json').read_text()), self.cfg)
+
     def enable_reality(self):
         self.cfg['publicIp'] = '127.0.0.1'
         (self.config / 'agent.json').write_text(json.dumps(self.cfg))

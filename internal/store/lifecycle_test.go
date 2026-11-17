@@ -87,8 +87,8 @@ func TestServerIPIsolationAndJobSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, n := range p.Nodes {
-		if n.Server != n.PublicIP || n.SNI == n.PublicIP {
-			t.Fatal("profile did not separate IP and TLS SNI")
+		if n.Server == "" || n.Server != n.SNI || n.SNI == n.PublicIP || n.PublicIP == "" {
+			t.Fatal("profile must dial the node domain while retaining separate physical IP metadata")
 		}
 	}
 }
