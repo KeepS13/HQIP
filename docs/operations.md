@@ -1,8 +1,8 @@
 # 运维
 
-HQIP正式控制站部署在 `107.151.244.106`。用户网页为 https://hqip.sharevps.online，管理网页为 https://cms-hqip.sharevps.online，API与客户端下载为 https://api-hqip.sharevps.online。控制服务使用PostgreSQL＋Redis；Windows只运行客户端，不承担控制服务或SSH反向隧道。
+HQIP控制站计划从 `107.151.244.106` 保留数据迁移到 `64.83.17.143:22/root`，完成状态以实际验收记录为准。用户网页为 https://hqip.sharevps.online，管理网页为 https://cms-hqip.sharevps.online，API与客户端下载为 https://api-hqip.sharevps.online。控制服务使用PostgreSQL＋Redis；Windows只运行客户端，不承担控制服务或SSH反向隧道。
 
-首次空站初始化按[全新空站部署](fresh-deployment.md)执行一次；后续更新使用[自动部署](automatic-deployment.md)。服务路径与运行身份见[服务器部署与运行](server-deployment.md)。旧域名、旧控制服务及本机迁移入口已退役，不得用旧SQLite或旧商户配置覆盖新站。
+此次使用[保留数据迁移](server-migration-sharevps.md)，不能运行历史空站初始化、退役现有节点或重置商业配置；后续更新使用[自动部署](automatic-deployment.md)。服务路径与运行身份见[服务器部署与运行](server-deployment.md)。保留现有PG业务数据、配套主密钥和节点账本，不得用旧SQLite覆盖。
 
 ## 日常检查
 
@@ -23,15 +23,15 @@ curl --fail --silent --show-error https://api-hqip.sharevps.online/readyz
 
 ## 发布和回退
 
-日常CI只接受固定目标 `107.151.244.106:22`、用户 `root`，SSH主机密钥严格固定。Linux、Windows和真实PG/Redis测试完成后，使用同一提交的完整发布包；网页、客户端、节点产物与清单均校验，不从旧release补文件。
+日常CI只接受固定目标 `64.83.17.143:22`、用户 `root`，明确拒绝旧IP，SSH主机密钥严格固定。迁移验收前保持部署暂停；迁移执行者须同步新目标的secrets。Linux、Windows和真实PG/Redis测试完成后，使用同一提交的完整发布包；网页、客户端、节点产物与清单均校验，不从旧release补文件。
 
-升级前停止控制服务，备份当前PG数据库与配套主密钥。备份完成、切换 `current` 前必须仍有至少3GiB可用空间；不足即拒绝切换。切换后验证本机两路就绪、两个网页和公网API。通过全部验收才保留本次current与previous并清理更老的、清单完整且校验通过的发布目录；异常目录跳过并留下审计记录，备份和业务数据不自动删除。
+升级先在线一致性备份当前PG数据库与配套主密钥，再短暂停止控制服务切换代码。备份完成、切换 `current` 前必须仍有至少3GiB可用空间；不足即拒绝切换。切换后验证本机两路就绪、两个网页和公网API。通过全部验收才保留本次current与previous并清理更老的、清单完整且校验通过的发布目录；异常目录跳过并留下审计记录，备份和业务数据不自动删除。
 
 代码回退使用发布状态目录和 `upgrade_domains.py`，保留当前PG订单、订阅、用量及租约。目标代码须与当前schema兼容，不兼容时向前修复。不要运行旧初装脚本、重新 `init-admin` 或用旧站SQLite恢复业务。完整步骤见[自动部署](automatic-deployment.md)。
 
 ## 备份与恢复
 
-备份应包含PostgreSQL和同一份 `master.key`。使用正式应用角色环境及匹配PG18的备份工具，归档另行加密、复制到独立受限存储；不能把密码、环境文件、私钥、令牌或数据库提交到Git或公开日志。
+备份应包含PostgreSQL和同一份 `master.key`。控制站Python脚本统一使用 `/opt/hqip-runtime/bin/python3`；备份与重试service的启动、异常记录也必须使用此独立运行时。使用正式应用角色环境及 `/usr/lib/postgresql/18/bin` 中的PG18工具，保留系统Python 3.10和现有PG14；不要通过全局PATH或系统链接调整实现兼容。归档另行加密、复制到独立受限存储；不能把密码、环境文件、私钥、令牌或数据库提交到Git或公开日志。
 
 恢复只能先在独立空数据库演练。使用完整包中的 `restore_postgres.py`恢复数据库与配套密钥、重建应用授权，并以应用身份验证访问和再次备份。恢复后的权限检查不可省略：重新创建schema可能改变授权。详细命令与验收见[PostgreSQL灾备恢复](postgresql-recovery.md)。
 

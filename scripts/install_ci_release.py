@@ -101,7 +101,7 @@ def main():
                 raise ValueError('Release directory already exists')
             staging = base / 'releases' / ('.fresh-' + sha)
             materialize(Path(archive), checksum, sha, None, staging)
-            subprocess.run(['python3', '-B', str(staging / 'scripts/fresh_deploy.py'),
+            subprocess.run([sys.executable, '-B', str(staging / 'scripts/fresh_deploy.py'),
                             'verify-release', '--release', str(staging)], check=True)
             staging.rename(release)
             print(json.dumps({'release': str(release), 'sourceSHA': sha, 'phase': 'unpacked'}))
@@ -122,17 +122,17 @@ def main():
         control.verify_release(staging)
         # Run only a file already verified against the uploaded manifest. It
         # validates required assets and current-commit node/client provenance.
-        subprocess.run(['python3', '-B', str(staging / 'scripts/fresh_deploy.py'),
+        subprocess.run([sys.executable, '-B', str(staging / 'scripts/fresh_deploy.py'),
                         'verify-release', '--release', str(staging)], check=True)
         staging.rename(release)
         state = '/root/backups/hqip-ci-' + sha + '-' + run_id
-        subprocess.run(['python3', '-B', str(release / 'scripts/upgrade_domains.py'),
+        subprocess.run([sys.executable, '-B', str(release / 'scripts/upgrade_domains.py'),
                         'upgrade', '--release', str(release), '--state', state, '--defer-protection'], check=True)
     # The backup runner also acquires deploy.lock. Acceptance must run after
     # releasing it; waiting for a backup while holding it would deadlock.
     manifest = json.loads((release / 'release.json').read_text())
     if manifest.get('commercialProtectionVersion') == 1:
-        subprocess.run(['python3', '-B', str(release / 'scripts/upgrade_domains.py'),
+        subprocess.run([sys.executable, '-B', str(release / 'scripts/upgrade_domains.py'),
                         'complete', '--state', state], check=True, timeout=2250)
 
 

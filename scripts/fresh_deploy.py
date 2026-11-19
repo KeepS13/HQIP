@@ -80,7 +80,7 @@ def inventory(path):
 def environment(path, role):
     if path.is_symlink() or not path.is_file() or (os.name != 'nt' and path.stat().st_mode & 0o077):
         raise ValueError('Storage environment must be a private ordinary file')
-    value = {'PATH': '/usr/bin:/bin'}
+    value = {'PATH': '/usr/lib/postgresql/18/bin:/usr/bin:/bin'}
     for line in path.read_text().splitlines():
         fields = shlex.split(line, comments=True)
         if not fields:
@@ -222,7 +222,7 @@ def prepare(release, state, rules=None):
     app_env = environment(STORAGE / 'storage.env', 'hqip_app')
     migration_env = environment(STORAGE / 'migration.env', 'hqip_migrator')
     for name in ('pg_dump', 'pg_restore'):
-        if ' 18.' not in run(name, '--version'):
+        if ' 18.' not in run('/usr/lib/postgresql/18/bin/' + name, '--version'):
             raise ValueError('PostgreSQL 18 backup tools are required')
     # Existing website TLS remains valid; business DNS credentials are not copied.
     for host in DOMAINS:

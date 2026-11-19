@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import tarfile
 import tempfile
 from types import SimpleNamespace
@@ -150,10 +151,11 @@ class RetentionTests(unittest.TestCase):
 
 class CIGuardTests(unittest.TestCase):
     def test_only_exact_production_ssh_target_is_accepted(self):
-        ci.validate_target('107.151.244.106', '22', 'root')
+        ci.validate_target('64.83.17.143', '22', 'root')
         for target in [('example.test', '22', 'root'), ('127.0.0.1', '22', 'root'),
-                       ('107.151.244.106', '2222', 'root'), ('107.151.244.106', '022', 'root'),
-                       ('107.151.244.106', '22', 'admin'), ('107.151.244.106 ', '22', 'root')]:
+                       ('107.151.244.106', '22', 'root'),
+                       ('64.83.17.143', '2222', 'root'), ('64.83.17.143', '022', 'root'),
+                       ('64.83.17.143', '22', 'admin'), ('64.83.17.143 ', '22', 'root')]:
             with self.subTest(target=target), self.assertRaisesRegex(ValueError, 'target must be'):
                 ci.validate_target(*target)
 
@@ -172,7 +174,7 @@ class CIGuardTests(unittest.TestCase):
         compile(ci.remote_space_script(), '<space-check>', 'exec')
         compile(ci.remote_retention_script(), '<release-retention>', 'exec')
 
-    def run_ci(self, public_error=None, preflight_error=None, target=None):
+    def run_ci(self, public_error=None, preflight_error=None, target=None, already_active=False, runtime_error=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -194,7 +196,10 @@ class CIGuardTests(unittest.TestCase):
             if args[0] == 'ssh':
                 ssh_calls.append(args)
                 if args[-1].startswith('cat '):
-                    return SimpleNamespace(stdout=json.dumps({'sourceSHA': previous}))
+                    return SimpleNamespace(stdout=json.dumps({'sourceSHA': sha if already_active else previous,
+                                                              'previousSourceSHA': previous}))
+                if shlex.split(args[-1])[0] == '/opt/hqip-runtime/bin/python3' and runtime_error:
+                    raise runtime_error
                 if args[-1].startswith('mktemp '):
                     events.append('temporary')
                     return SimpleNamespace(stdout='/tmp/hqip-ci.1234567890')
@@ -220,7 +225,7 @@ class CIGuardTests(unittest.TestCase):
                 raise public_error
 
         environment = {'GITHUB_SHA': sha, 'GITHUB_REPOSITORY': 'test/repo', 'GITHUB_RUN_ID': '7',
-                       'GITHUB_RUN_ATTEMPT': '1', 'DEPLOY_HOST': '107.151.244.106', 'DEPLOY_PORT': '22',
+                       'GITHUB_RUN_ATTEMPT': '1', 'DEPLOY_HOST': '64.83.17.143', 'DEPLOY_PORT': '22',
                        'DEPLOY_USER': 'root', 'DEPLOY_SSH_KEY': 'test-key', 'DEPLOY_KNOWN_HOSTS': 'test-pin'}
         environment.update(target or {})
         with patch.dict(os.environ, environment, clear=True), patch.object(ci, 'ROOT', root), \
@@ -239,13 +244,31 @@ class CIGuardTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(events, ['space', 'temporary', 'upload', 'install', 'public', 'retention'])
         self.assertTrue(commands)
-        self.assertTrue(all('StrictHostKeyChecking=yes' in args and 'root@107.151.244.106' in args for args in commands))
+        self.assertTrue(all('StrictHostKeyChecking=yes' in args and 'root@64.83.17.143' in args for args in commands))
+        python_commands = [shlex.split(args[-1]) for args in commands if 'python' in args[-1]]
+        self.assertEqual(len(python_commands), 3)  # disk preflight, installer, retention
+        self.assertTrue(all(args[:2] == ['/opt/hqip-runtime/bin/python3', '-B'] for args in python_commands))
 
     def test_public_failure_rolls_back_without_retention(self):
-        events, _, error = self.run_ci(public_error=ValueError('unready'))
+        events, commands, error = self.run_ci(public_error=ValueError('unready'))
         self.assertIsInstance(error, ValueError)
         self.assertNotIn('retention', events)
         self.assertEqual(events[-2:], ['public', 'rollback'])
+        rollback = next(shlex.split(args[-1]) for args in commands if 'rollback' in args[-1])
+        self.assertEqual(rollback[:2], ['/opt/hqip-runtime/bin/python3', '-B'])
+
+    def test_already_active_release_uses_runtime_for_retention_without_installing(self):
+        events, commands, error = self.run_ci(already_active=True)
+        self.assertIsNone(error)
+        self.assertEqual(events, ['public', 'retention'])
+        self.assertEqual(shlex.split(commands[-1][-1])[:3], ['/opt/hqip-runtime/bin/python3', '-B', '-'])
+
+    def test_missing_runtime_fails_before_upload_without_system_python_fallback(self):
+        events, commands, error = self.run_ci(runtime_error=RuntimeError('runtime unavailable'))
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(events, [])
+        self.assertEqual(len(commands), 2)  # manifest read, failed runtime preflight
+        self.assertEqual(shlex.split(commands[-1][-1])[:2], ['/opt/hqip-runtime/bin/python3', '-B'])
 
     def test_low_space_prevents_upload_and_switch(self):
         events, _, error = self.run_ci(preflight_error=ValueError('3 GiB required'))
@@ -253,9 +276,11 @@ class CIGuardTests(unittest.TestCase):
         self.assertEqual(events, ['space'])
 
     def test_wrong_target_fails_before_any_ssh(self):
-        _, commands, error = self.run_ci(target={'DEPLOY_HOST': '127.0.0.1'})
-        self.assertIsInstance(error, ValueError)
-        self.assertEqual(commands, [])
+        for host in ('127.0.0.1', '107.151.244.106'):
+            with self.subTest(host=host):
+                _, commands, error = self.run_ci(target={'DEPLOY_HOST': host})
+                self.assertIsInstance(error, ValueError)
+                self.assertEqual(commands, [])
 
 
 class UpgradeDiskGateTests(unittest.TestCase):

@@ -17,7 +17,8 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-PRODUCTION_TARGET = ('107.151.244.106', '22', 'root')
+PRODUCTION_TARGET = ('64.83.17.143', '22', 'root')
+REMOTE_PYTHON = '/opt/hqip-runtime/bin/python3'
 MIN_FREE_BYTES = 3 * 1024 ** 3
 
 
@@ -36,7 +37,7 @@ def copy_remote_manifest(remote, source, destination):
 
 def validate_target(host, port, user):
     if (host, port, user) != PRODUCTION_TARGET:
-        raise ValueError('Deployment target must be 107.151.244.106:22/root')
+        raise ValueError('Deployment target must be 64.83.17.143:22/root')
 
 
 def check_ci_space(archive_bytes=0, expanded_bytes=0, requirements=None):
@@ -229,7 +230,7 @@ def main():
         if previous['sourceSHA'] == sha:
             print('Commit already active: ' + sha)
             check_public()
-            remote(['python3', '-B', '-', sha, previous.get('previousSourceSHA') or ''],
+            remote([REMOTE_PYTHON, '-B', '-', sha, previous.get('previousSourceSHA') or ''],
                    input=remote_retention_script(), text=True)
             return
         dist = ROOT / 'dist'
@@ -241,7 +242,7 @@ def main():
             raise ValueError('Archive checksum mismatch')
         with tarfile.open(archive, 'r:gz') as package:
             expanded_bytes = sum(member.size for member in package.getmembers())
-        remote(['python3', '-B', '-', str(archive.stat().st_size), str(expanded_bytes)],
+        remote([REMOTE_PYTHON, '-B', '-', str(archive.stat().st_size), str(expanded_bytes)],
                input=remote_space_script(), text=True)
         # Private temporary directory, owned by the SSH user; clean only this run.
         incoming = command([*ssh, 'mktemp -d /tmp/hqip-ci.XXXXXXXXXX'], capture_output=True, text=True).stdout.strip()
@@ -251,15 +252,15 @@ def main():
         try:
             command(['scp', *common, '-P', port, str(archive), f'{user}@{host}:{incoming}/release.tar.gz'])
             script = (ROOT / 'scripts/install_ci_release.py').read_text()
-            remote(['python3', '-', sha, incoming + '/release.tar.gz', info['sha256'], run_id],
+            remote([REMOTE_PYTHON, '-B', '-', sha, incoming + '/release.tar.gz', info['sha256'], run_id],
                    input=script, text=True)
             try:
                 check_public()
-                remote(['python3', '-B', '-', sha, previous['sourceSHA']],
+                remote([REMOTE_PYTHON, '-B', '-', sha, previous['sourceSHA']],
                        input=remote_retention_script(), text=True)
             except Exception:
                 print('Post-deployment acceptance failed; rolling back code and preserving live data.', flush=True)
-                remote(['python3', '-B', f'/opt/hqip-control/releases/{sha}/scripts/upgrade_domains.py',
+                remote([REMOTE_PYTHON, '-B', f'/opt/hqip-control/releases/{sha}/scripts/upgrade_domains.py',
                         'rollback', '--state', state])
                 raise
         finally:

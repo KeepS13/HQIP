@@ -14,10 +14,10 @@
 
 把应用与迁移环境文件复制到一个 0700 目录，保持文件 0600，仅修改两份配置中的数据库名，使其都指向这个明确的空目标。不要在命令行传连接串或用 shell 输出环境文件。恢复仍使用回环 PostgreSQL 18 的 15432 端口；不得重新运行 `prepare_storage.py` 覆盖已有存储配置。
 
-使用经过完整清单校验的 release，以及已核对摘要的备份：
+目标主机须先提供独立 Python 3.11 `/opt/hqip-runtime/bin/python3`，及 `/usr/lib/postgresql/18/bin` 下的 `psql`、`pg_dump`、`pg_restore`。恢复工具显式检查PG18工具，并把PG18路径传给恢复及验证备份子进程；不改变Ubuntu 22.04系统Python或已有PG14服务。使用经过完整清单校验的 release，以及已核对摘要的备份：
 
 ```sh
-python3 /opt/hqip-control/releases/完整40位提交/scripts/restore_postgres.py \
+/opt/hqip-runtime/bin/python3 -B /opt/hqip-control/releases/完整40位提交/scripts/restore_postgres.py \
   --release /opt/hqip-control/releases/完整40位提交 \
   --backup /root/backups/已解密受限备份.tar.gz \
   --backup-sha256 已核对的64位SHA256 \

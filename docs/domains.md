@@ -6,7 +6,7 @@
 | 管理网页 | https://cms-hqip.sharevps.online |
 | API、订阅、客户端下载 | https://api-hqip.sharevps.online |
 
-唯一正式服务器为`107.151.244.106`。管理页面没有`/admin`前缀；两个网页由Nginx托管，API按路径分发至18090/18091回环端口。旧域名不提供代理或重定向。全新空站见[部署步骤](fresh-deployment.md)，后续上线见[自动部署](automatic-deployment.md)。
+迁移目标为`64.83.17.143`，来源为`107.151.244.106`；本页不代表切换已完成。此次保留全部业务数据及上述三个域名，按[保留数据迁移](server-migration-sharevps.md)验收。管理页面没有`/admin`前缀；两个网页由Nginx托管，API按路径分发至18090/18091回环端口。后续上线见[自动部署](automatic-deployment.md)，历史空站流程不适用于本次迁移。
 
 两个Vite前端支持`VITE_API_URL`和`VITE_ADMIN_URL`；管理端另支持`VITE_USER_URL`，构建变量优先于上述默认地址。开发端口为5173/5174，开发API为8080/8081；不要在开发期间放宽生产Origin、TLS或人机验证约束。
 

@@ -25,8 +25,9 @@ def storage_environment(path=None):
  # forward the deployer's ambient environment (which may contain unrelated
  # cloud or database credentials) into a long-lived child process.
  # pg_dump/pg_restore are child processes of the backup binary. Supply only
- # trusted system directories, never the caller's potentially writable PATH.
- env={'PATH':'/usr/bin:/bin'}
+ # the provisioned PG18 tools and trusted system directories, never the
+ # caller's potentially writable PATH or the coexisting PG14 tool selection.
+ env={'PATH':'/usr/lib/postgresql/18/bin:/usr/bin:/bin'}
  if path is None:path=STORAGE_ENV
  if path.is_symlink() or not path.is_file():raise ValueError('PostgreSQL storage environment is missing')
  if os.name!='nt' and path.stat().st_mode & 0o077:raise ValueError('Storage environment must have mode 0600')

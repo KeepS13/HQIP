@@ -231,7 +231,7 @@ class AutomaticBackupTests(unittest.TestCase):
             self.assertNotIn('fake-secret', repr(arguments))
             self.assertEqual(arguments[1], 'backup')
             self.assertNotIn('stop', arguments)
-            self.assertEqual(options['env']['PATH'], '/usr/bin:/bin')
+            self.assertEqual(options['env']['PATH'], '/usr/lib/postgresql/18/bin:/usr/bin:/bin')
             destination = Path(arguments[-1])
             self.assertFalse((self.root / ('hqip-' + run['runId'])).exists())
             payload = {'hqip.pg.dump': b'PGDMPtestdump', 'master.key': b'x' * 32,

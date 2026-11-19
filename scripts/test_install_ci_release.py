@@ -4,10 +4,12 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import install_ci_release as deploy
 
@@ -81,6 +83,47 @@ class CIReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'standalone'):
             deploy.materialize(archive, deploy.digest(archive), 'b' * 40, None, self.release)
         self.assertFalse(self.release.exists())
+
+    def test_every_installer_child_uses_the_running_interpreter(self):
+        import upgrade_control
+
+        for fresh in (True, False):
+            with self.subTest(fresh=fresh):
+                base = self.root / ('fresh' if fresh else 'ci')
+                releases = base / 'releases'
+                releases.mkdir(parents=True)
+                if fresh:
+                    self.manifest.pop('previousSourceSHA', None)
+                else:
+                    self.manifest['previousSourceSHA'] = 'a' * 40
+                    self.manifest['commercialProtectionVersion'] = 1
+                    previous = releases / ('a' * 40)
+                    previous.mkdir()
+                    (previous / 'release.json').write_text(json.dumps(self.previous))
+                    (base / 'current').symlink_to(previous, target_is_directory=True)
+                archive = self.archive()
+                args = ['b' * 40, str(archive), deploy.digest(archive)]
+                args = ['--fresh', *args] if fresh else [*args, '7-1']
+                interpreter = '/opt/independent runtime/bin/python3'
+
+                def path(value):
+                    return base if value == '/opt/hqip-control' else Path(value)
+
+                with patch.object(deploy, 'Path', side_effect=path), \
+                        patch.object(os, 'geteuid', return_value=0, create=True), \
+                        patch.dict(sys.modules, {'fcntl': Mock(LOCK_EX=2, LOCK_NB=4)}), \
+                        patch.object(sys, 'argv', ['install_ci_release.py', *args]), \
+                        patch.object(sys, 'path', list(sys.path)), \
+                        patch.object(sys, 'executable', interpreter), \
+                        patch.object(upgrade_control, 'verify_release'), \
+                        patch.object(subprocess, 'run') as run:
+                    deploy.main()
+                calls = [call.args[0] for call in run.call_args_list]
+                self.assertEqual([args[3] for args in calls],
+                                 ['verify-release'] if fresh else ['verify-release', 'upgrade', 'complete'])
+                self.assertTrue(all(args[:2] == [interpreter, '-B'] for args in calls))
+                self.assertTrue(all(call.kwargs['check'] for call in run.call_args_list))
+                self.assertTrue((releases / ('b' * 40) / 'release.json').is_file())
 
     def test_corrupted_uploaded_file_refused(self):
         self.payload['hqip'] = b'corrupted'

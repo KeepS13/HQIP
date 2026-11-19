@@ -1,6 +1,8 @@
-# 新服务器全新空站部署
+# 历史流程：全新空站部署
 
-正式目标只使用 `107.151.244.106` 和 `hqip.sharevps.online`、`cms-hqip.sharevps.online`、`api-hqip.sharevps.online`。控制数据库使用 PostgreSQL 18，Redis 8 提供共享认证限流。旧业务数据不导入，旧域名不转发、不兼容。用户、订阅、订单、服务器、节点、支付、人机验证及业务 DNS 配置重新建立；现有三个网站的 HTTPS 证书和续期保留。
+本页仅适用于明确授权放弃原有业务、重新开空站的场景。当前 `107.151.244.106` → `64.83.17.143` 的任务是[保留数据迁移](server-migration-sharevps.md)，禁止套用本页的初始化、节点退役和空站切换步骤。下文旧IP描述历史空站目标，不是当前CI目标；新的CI只接受 `64.83.17.143:22/root`，迁移完成状态以实际验收记录为准。
+
+历史空站目标使用 `107.151.244.106` 和 `hqip.sharevps.online`、`cms-hqip.sharevps.online`、`api-hqip.sharevps.online`。控制数据库使用 PostgreSQL 18，Redis 8 提供共享认证限流。在此空站流程中，旧业务数据不导入，旧域名不转发、不兼容。用户、订阅、订单、服务器、节点、支付、人机验证及业务 DNS 配置重新建立；现有三个网站的 HTTPS 证书和续期保留。
 
 这是一次显式重新开站流程，与日常 CI 升级分离。`prepare` 在独立目录和端口验证，不停止现有控制服务。`activate` 只有在旧节点已退役、旧控制已停止、最终备份已验证后才切换。任一步失败保留证据和数据，不自动启动旧业务库。验收之前保持 `HQIP_DEPLOY_PAUSED=true`。
 
@@ -9,17 +11,17 @@
 - 使用已提交源码构建控制程序、两套网页、Windows 客户端、两种架构的 Agent/HY2 以及校验过的 Caddy。执行 `python scripts/build.py --skip-web --server-only`、Windows 的 `build_desktop.py`，然后 `python scripts/package_domains.py`。服务端模式不构建或下载旧版 Windows CLI，不能与 `--skip-go` 同用；桌面端由独立构建提供。首次打包不传 `--previous-source-sha`。
 - 完整包为 `dist/hqip-full-<SHA前12位>.tar.gz`，摘要见 `dist/domains-release.json`。包内每个文件都有哈希，Agent、节点核心、客户端来源与本次提交对应，不从旧发布目录复用文件。
 - 完整包同时携带 HQIP 日志策略，准备、激活及后续升级均显式安装：`hqip-control` journal 命名空间限制磁盘64MiB、运行时16MiB、最长7天；Nginx只轮转 `/var/log/nginx/hqip-control/access.log`，每日或检查时超过10MiB保留7份并压缩。该路径避开系统的Nginx日志通配规则，轮转仅通过USR1复开日志，不重启共享Nginx。大小阈值在系统logrotate调度时检查，不是写入时硬截断。
-- 新机已安装 Nginx、Docker Engine/Compose、Python 3.11+、PostgreSQL 18 的 `pg_dump`/`pg_restore`；已有三个网站的有效 TLS 证书、受信任的 SSH 主机密钥和足够存储空间。数据库端口不得暴露公网。
-- 将受校验的 `scripts/install_ci_release.py` 和完整包上传新机，通过 `python3 -B install_ci_release.py --fresh <完整SHA> <包路径> <包SHA256>` 解包。它只安装发布目录，不改变 `current` 或数据。
-- 只在 `/etc/hqip-storage` 不存在时运行 `python3 <发布目录>/scripts/prepare_storage.py --output /etc/hqip-storage`。生成独立随机凭据，绝不覆盖已有配置；禁止使用演示或 CI 密码。
+- 新机已安装 Nginx、Docker Engine/Compose、独立 Python 3.11（`/opt/hqip-runtime/bin/python3`）、`/usr/lib/postgresql/18/bin` 中的 PostgreSQL 18 客户端工具；已有三个网站的有效 TLS 证书、受信任的 SSH 主机密钥和足够存储空间。保留系统Python及现有PG14，数据库端口不得暴露公网。下方控制站命令均使用独立解释器。
+- 将受校验的 `scripts/install_ci_release.py` 和完整包上传新机，通过 `/opt/hqip-runtime/bin/python3 -B install_ci_release.py --fresh <完整SHA> <包路径> <包SHA256>` 解包。它只安装发布目录，不改变 `current` 或数据。
+- 只在 `/etc/hqip-storage` 不存在时运行 `/opt/hqip-runtime/bin/python3 <发布目录>/scripts/prepare_storage.py --output /etc/hqip-storage`。生成独立随机凭据，绝不覆盖已有配置；禁止使用演示或 CI 密码。
 
 ## 准备和切换
 
 以下 `<发布目录>` 为 `/opt/hqip-control/releases/<完整SHA>`，`<状态目录>` 为 `/root/backups/hqip-fresh-<时间>`，必须为新目录。
 
 ```sh
-python3 -B <发布目录>/scripts/fresh_deploy.py prepare --release <发布目录> --state <状态目录>
-python3 -B <发布目录>/scripts/fresh_deploy.py verify --state <状态目录>
+/opt/hqip-runtime/bin/python3 -B <发布目录>/scripts/fresh_deploy.py prepare --release <发布目录> --state <状态目录>
+/opt/hqip-runtime/bin/python3 -B <发布目录>/scripts/fresh_deploy.py verify --state <状态目录>
 ```
 
 `prepare` 核对完整产物、存储模板、工具版本和网站证书，启动受限存储栈，拒绝非空 PostgreSQL。完整包已解出后、准备完成后和正式激活前，各目标文件系统必须实测仍有至少3GiB可用空间，为同机其他项目保留余量。用迁移角色执行一次 `init-admin --initialize-postgres`，随后用应用角色运行临时服务。新数据位于 `/var/lib/hqip-control-fresh`，临时接口只监听 `127.0.0.1:18190/18191`。临时与正式服务均通过 `/readyz` 检查 PostgreSQL 和 Redis。初始凭据在暂存目录的 `bootstrap-admin.json`，权限0600，不打印密码。默认注册、用户门户、支付关闭，不复制旧商业配置。
@@ -27,7 +29,7 @@ python3 -B <发布目录>/scripts/fresh_deploy.py verify --state <状态目录>
 准备验证通过后，通过现有节点退役流程停止旧节点准入、结算并备份本地账本，再停止现有控制服务。对最终旧数据和配套密钥加密归档，复制一份到独立受限存储并完成恢复核对。不要在最终快照后重新启动旧控制服务。
 
 ```sh
-python3 -B <发布目录>/scripts/fresh_deploy.py inventory
+/opt/hqip-runtime/bin/python3 -B <发布目录>/scripts/fresh_deploy.py inventory
 ```
 
 上述命令只输出正式旧数据目录及其文件清单摘要。由完成备份核验的操作者写入0600的最终回执，字段如下；摘要必须来自实际文件和上述命令：
@@ -46,9 +48,9 @@ python3 -B <发布目录>/scripts/fresh_deploy.py inventory
 脚本不会将 `verified` 标记代替备份恢复核对。执行者必须先完成核验再生成回执。脚本会再次计算目录及归档摘要，并确认旧服务已停止；归档后发生的新写入会拒绝切换。
 
 ```sh
-python3 -B <发布目录>/scripts/fresh_deploy.py activate --state <状态目录> --retirement-receipt <最终回执路径>
-python3 -B <发布目录>/scripts/fresh_deploy.py verify --state <状态目录> --public
-python3 -B <发布目录>/scripts/fresh_deploy.py finalize --state <状态目录>
+/opt/hqip-runtime/bin/python3 -B <发布目录>/scripts/fresh_deploy.py activate --state <状态目录> --retirement-receipt <最终回执路径>
+/opt/hqip-runtime/bin/python3 -B <发布目录>/scripts/fresh_deploy.py verify --state <状态目录> --public
+/opt/hqip-runtime/bin/python3 -B <发布目录>/scripts/fresh_deploy.py finalize --state <状态目录>
 ```
 
 激活仅将旧 `/var/lib/hqip-control` 移至 `<状态目录>/final-retired`，将新暂存目录移为正式目录，安装应用角色环境文件、准确的三个站点和控制服务；不删除旧数据、不覆盖其他站点。为确保移动原子性，三个目录必须位于同一文件系统。发布与新站命令共用部署锁。

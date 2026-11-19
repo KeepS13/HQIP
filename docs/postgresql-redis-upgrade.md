@@ -1,6 +1,6 @@
 # PostgreSQL 与 Redis 架构升级
 
-正式部署基线为 PostgreSQL 18＋Redis 8。此次重新开空站，不导入旧SQLite业务数据；执行与验收以[全新空站部署](fresh-deployment.md)为准。必须完成真实数据库回归、备份恢复和压力测试，不得仅凭单元测试宣称容量达标。
+正式部署基线为 PostgreSQL 18＋Redis 8。本页的初始化步骤记录历史上从SQLite重新开空站的架构升级；当前迁往 `64.83.17.143` 必须[保留现有PG数据及配置](server-migration-sharevps.md)，不能重跑空站初始化、生成新主密钥或退役现有节点。必须完成真实数据库回归、备份恢复和压力测试，不得仅凭单元测试宣称容量达标。
 
 ## 数据边界
 
@@ -26,11 +26,11 @@
 
 ## 配置文件与角色
 
-`python3 scripts/prepare_storage.py --output /etc/hqip-storage` 只生成新的私有配置目录，不启动服务、不迁移数据，也不会覆盖已有目录。使用其中的 `compose.yaml` 启动隔离存储环境后，按以下角色执行操作：
+`/opt/hqip-runtime/bin/python3 scripts/prepare_storage.py --output /etc/hqip-storage` 只为明确的新空站生成新的私有配置目录，不启动服务、不迁移数据，也不会覆盖已有目录。保留数据迁移应恢复受限配置，不能用此命令重新生成凭据。使用其中的 `compose.yaml` 启动隔离存储环境后，按以下角色执行操作：
 
 - `migration.env` 使用 `hqip_migrator`，仅供离线导入、全新站点 `init-admin --initialize-postgres`、空数据库恢复使用。它拥有 schema 创建权限，不得作为控制服务的长期身份。
 - `storage.env` 使用 `hqip_app`，仅有应用表的读写及序列使用权限。完成初始化或迁移后才将这个文件以 `0600` 安装至 `/etc/hqip-control/storage.env`；正常启动和备份都使用这个身份。不要使用应用身份执行建表或恢复。
-- PostgreSQL 备份工具 `pg_dump`、`pg_restore` 必须单独安装在控制机上，并与数据库主版本兼容。环境文件不安装这些工具。
+- PostgreSQL 18 客户端工具 `pg_dump`、`pg_restore`、`psql` 必须单独安装在控制机 `/usr/lib/postgresql/18/bin`；HQIP子进程优先使用该目录，已有PG14服务保持不变。环境文件不安装这些工具。
 - `secrets/` 和其父目录保持 `0700`，宿主机其他用户不能访问。挂载给容器的文件为只读 `0444`，供容器内部的非 root 用户读取；连接配置文件保持 `0600`。Docker Compose 的本地文件 secret 使用 bind mount，不会代为转换文件权限，见 [Docker 官方说明](https://docs.docker.com/reference/compose-file/services/#secrets)。
 
 正式`hqip-control.service`要求`storage.env`存在，并依赖`hqip-storage.service`。初始化与日常CI严格分开，缺少配置时拒绝启动；`postgresql.enabled`也会拒绝回退SQLite。CI会启动生成的Compose配置，验证应用身份不能建表、业务读写可用，且Redis ACL允许限流并拒绝其他键和管理命令。

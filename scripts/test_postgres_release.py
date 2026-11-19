@@ -16,7 +16,7 @@ class PostgresReleaseTests(unittest.TestCase):
             file.chmod(0o600)
             with patch.object(deploy,'STORAGE_ENV',file), patch.dict(deploy.os.environ,{'PATH':'/untrusted','PGPASSWORD':'unrelated','DEPLOY_SSH_KEY':'unrelated'}):
                 env=deploy.storage_environment()
-            self.assertEqual(env['PATH'],'/usr/bin:/bin')
+            self.assertEqual(env['PATH'],'/usr/lib/postgresql/18/bin:/usr/bin:/bin')
             self.assertNotIn('PGPASSWORD',env)
             self.assertNotIn('DEPLOY_SSH_KEY',env)
 

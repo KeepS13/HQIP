@@ -40,7 +40,8 @@ class PostgresRecoveryTests(unittest.TestCase):
         files = []
 
         def run(arguments, **options):
-            self.assertEqual(arguments[0], '/usr/bin/psql')
+            self.assertEqual(arguments[0], '/usr/lib/postgresql/18/bin/psql')
+            self.assertEqual(options['env']['PATH'], '/usr/lib/postgresql/18/bin:/usr/bin:/bin')
             self.assertNotIn('test-only', repr(arguments))
             self.assertNotIn('test-only', repr(options['env']))
             self.assertNotIn('HQIP_DATABASE_URL', options['env'])

@@ -17,7 +17,7 @@ from urllib.parse import unquote, urlsplit
 
 from release_bundle import digest, verify_full_release
 
-SAFE_ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'GOMAXPROCS': '2'}
+SAFE_ENV = {'PATH': '/usr/lib/postgresql/18/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8', 'GOMAXPROCS': '2'}
 ROLES = ('hqip_migrator', 'hqip_app')
 
 
@@ -88,7 +88,7 @@ def sql(address, role, database, statement):
         service = Path(directory) / 'service.conf'
         service.write_text('[hqip]\n' + ''.join(key + '=' + value + '\n' for key, value in values.items()))
         service.chmod(0o600)
-        return run(['/usr/bin/psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1'], sql=statement,
+        return run(['/usr/lib/postgresql/18/bin/psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1'], sql=statement,
                    env={**SAFE_ENV, 'PGSERVICEFILE': str(service), 'PGSERVICE': 'hqip',
                         'PGHOST': '127.0.0.1'}, timeout=90)
 
@@ -203,7 +203,7 @@ def restore(release, backup, backup_sha, data, migration_file, application_file,
     manifest = verify_full_release(release)
     migration = environment(migration_file, 'hqip_migrator', database)
     application = environment(application_file, 'hqip_app', database)
-    for tool in ('/usr/bin/pg_dump','/usr/bin/pg_restore'):
+    for tool in ('/usr/lib/postgresql/18/bin/pg_dump','/usr/lib/postgresql/18/bin/pg_restore'):
         require(' 18.' in run([tool,'--version']), 'PostgreSQL 18 backup tools are required')
     if database == 'hqip':
         for unit in ('hqip-control.service','hqip-control-prepare.service'):
