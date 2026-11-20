@@ -48,7 +48,8 @@ limit_conn_zone $binary_remote_addr zone=hqip_api_connections:10m;
  default "{BASE_CSP}";
  ~^/(login|register|authorize)(\\?|$) "{AUTH_CSP}";
 }}
-map $uri $hqip_static_cache {{ default "no-store"; ~^/assets/ "public, max-age=31536000, immutable"; }}
+# Download handlers own cache policy: only verified hash URLs are immutable.
+map $uri $hqip_static_cache {{ default "no-store"; ~^/assets/ "public, max-age=31536000, immutable"; ~^/downloads/ ""; }}
 '''
  for host in [USER,ADMIN]:text+=http_host(host)
  for host,folder,csp in [(USER,'user-web','$hqip_user_csp'),(ADMIN,'admin-web',BASE_CSP)]:
