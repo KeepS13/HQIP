@@ -17,12 +17,12 @@ UNIT_ROOT = Path('/etc/systemd/system')
 def verify_cloudflare(resolve=socket.getaddrinfo, opener=None):
     networks = tuple(ipaddress.ip_network(value) for value in CF_RANGES)
     opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    for host in (USER, ADMIN, API):
+    for host, path in ((USER, '/'), (ADMIN, '/'), (API, '/healthz')):
         try:
             addresses = {ipaddress.ip_address(item[4][0]) for item in resolve(host, 443, type=socket.SOCK_STREAM)}
             if not addresses or any(not any(address in network for network in networks) for address in addresses):
                 raise ValueError('DNS is not proxied')
-            request = urllib.request.Request('https://' + host + ('/healthz' if host == API else '/'),
+            request = urllib.request.Request('https://' + host + path,
                                              method='HEAD', headers={'User-Agent': 'HQIP-Deployment/1.0'})
             with opener.open(request, timeout=20) as response:
                 if response.status != 200 or not response.headers.get('CF-Ray'):

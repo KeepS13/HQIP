@@ -41,7 +41,7 @@ func TestOfficialAuthorizationOriginPair(t *testing.T) {
 		}
 	}
 	page, _ := url.Parse(UserSiteURL + "/authorize")
-	for _, address := range []string{"https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444", "http://api-hqip.sharevps.online", legacyServerURL, legacyUserSiteURL} {
+	for _, address := range []string{previousOfficialServerURL, "https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444", "http://api-hqip.sharevps.online", legacyServerURL, legacyUserSiteURL} {
 		custom, _ := url.Parse(address)
 		if trustedAuthorizationOrigin(custom, page) {
 			t.Fatal("custom server gained official origin trust", address)
@@ -62,7 +62,7 @@ func TestOfficialAuthorizationOriginPair(t *testing.T) {
 }
 
 func TestSavedOfficialURLMigrationLeavesCustomServerAndTokens(t *testing.T) {
-	for _, address := range []string{legacyUserSiteURL, legacyUserSiteURL + "/", legacyServerURL, legacyServerURL + "/", DefaultServerURL, DefaultServerURL + "/", UserSiteURL, UserSiteURL + "/", "https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444", "https://api-hqip.5202345.xyz:444"} {
+	for _, address := range []string{legacyUserSiteURL, legacyUserSiteURL + "/", legacyServerURL, legacyServerURL + "/", DefaultServerURL, DefaultServerURL + "/", previousOfficialServerURL, previousOfficialServerURL + "/", "https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444", "https://api-hqip.5202345.xyz:444"} {
 		t.Run(address, func(t *testing.T) {
 			dir := t.TempDir()
 			saved := persisted{ServerURL: address, AccountVersion: 3, Mode: "rule", InstallationID: "preserved-installation", SelectedSubscriptionID: "subscription-a", SelectedNodeID: "node-a", Preferences: map[string]SelectionPreference{"account-a": {SubscriptionID: "subscription-a", NodeIDs: map[string]string{"subscription-a": "node-a"}}}, Tokens: Tokens{RefreshToken: "stored-refresh", AccessToken: "stored-access", SessionID: "stored-session"}}
@@ -76,7 +76,7 @@ func TestSavedOfficialURLMigrationLeavesCustomServerAndTokens(t *testing.T) {
 			}
 			defer c.Close()
 			want := address
-			if address == DefaultServerURL || address == DefaultServerURL+"/" || address == UserSiteURL || address == UserSiteURL+"/" {
+			if address == DefaultServerURL || address == DefaultServerURL+"/" || address == previousOfficialServerURL || address == previousOfficialServerURL+"/" {
 				want = DefaultServerURL
 			}
 			if c.saved.ServerURL != want || c.view.ServerURL != want || c.api.base != strings.TrimRight(want, "/") || c.api.Tokens() != saved.Tokens || c.saved.InstallationID != saved.InstallationID || c.saved.SelectedSubscriptionID != saved.SelectedSubscriptionID || c.saved.SelectedNodeID != saved.SelectedNodeID || !reflect.DeepEqual(c.saved.Preferences, saved.Preferences) {
@@ -94,13 +94,24 @@ func TestSavedOfficialURLMigrationLeavesCustomServerAndTokens(t *testing.T) {
 	}
 }
 
+func TestOfficialURLMigrationDoesNotRepairInvalidAddresses(t *testing.T) {
+	for _, address := range []string{previousOfficialServerURL + "/api", "http://api-hqip.sharevps.online"} {
+		if migrateOfficialServerURL(address) != address {
+			t.Fatal("invalid URL became an official root", address)
+		}
+		if _, err := NewAPI(address, Tokens{}); err == nil {
+			t.Fatal("invalid server URL accepted", address)
+		}
+	}
+}
+
 func TestFreshInstallUsesCurrentOfficialAPI(t *testing.T) {
 	c, err := New(t.TempDir(), fakePlatform{}, &fakeEngine{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if c.View().ServerURL != "https://api-hqip.sharevps.online" || c.View().LoggedIn {
+	if c.View().ServerURL != "https://hqip.sharevps.online" || c.View().LoggedIn {
 		t.Fatal("unexpected first-install endpoint or identity")
 	}
 }
@@ -108,7 +119,7 @@ func TestFreshInstallUsesCurrentOfficialAPI(t *testing.T) {
 func TestOfficialControlDomainsBypassProxyAndTUNDNS(t *testing.T) {
 	profile := Profile{Nodes: []Node{{ID: "1", Server: "203.0.113.7", SNI: "node.example.com", Port: 443, Password: "test-password", Ready: true}}}
 	for _, tun := range []bool{false, true} {
-		for _, address := range []string{DefaultServerURL, DefaultServerURL + "/", UserSiteURL, legacyServerURL, legacyUserSiteURL, "https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444"} {
+		for _, address := range []string{DefaultServerURL, DefaultServerURL + "/", previousOfficialServerURL, previousOfficialServerURL + "/", legacyServerURL, legacyUserSiteURL, "https://custom.example", "https://api-hqip.sharevps.online.evil.example", "https://api-hqip.sharevps.online:444"} {
 			data, err := GenerateConfig(ConfigOptions{Profile: profile, Bundle: rules.Default(), Selected: "1", Mode: "global", TUN: tun, MixedPort: 14001, APIPort: 14002, APISecret: "01234567890123456789012345678901", ServerURL: address})
 			if err != nil {
 				t.Fatal(err)
@@ -146,8 +157,7 @@ func TestOfficialControlDomainsBypassProxyAndTUNDNS(t *testing.T) {
 				}
 			}
 			want := map[string]bool{"203.0.113.7": true}
-			if address == DefaultServerURL || address == DefaultServerURL+"/" || address == UserSiteURL {
-				want["api-hqip.sharevps.online"] = true
+			if address == DefaultServerURL || address == DefaultServerURL+"/" || address == previousOfficialServerURL || address == previousOfficialServerURL+"/" {
 				want["hqip.sharevps.online"] = true
 			} else {
 				u, err := url.Parse(address)

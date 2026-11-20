@@ -28,7 +28,7 @@ func TestCorePauseAcknowledgesModeAndClosesOnlyForwardedBusiness(t *testing.T) {
 		case r.URL.Path == "/configs":
 			json.NewEncoder(w).Encode(map[string]string{"mode": mode})
 		case r.URL.Path == "/connections":
-			w.Write([]byte(`{"connections":[{"id":"business","chains":["node-A","proxy"],"metadata":{"type":"mixed/mixed-in"}},{"id":"probe","chains":["proxy"],"metadata":{"type":"mixed/probe-in"}},{"id":"management","chains":["direct"],"metadata":{"type":"tun/tun-in","host":"api-hqip.sharevps.online"}},{"id":"direct-business","chains":["direct"],"metadata":{"type":"mixed/mixed-in","host":"ordinary.example"}}]}`))
+			w.Write([]byte(`{"connections":[{"id":"business","chains":["node-A","proxy"],"metadata":{"type":"mixed/mixed-in"}},{"id":"probe","chains":["proxy"],"metadata":{"type":"mixed/probe-in"}},{"id":"management","chains":["direct"],"metadata":{"type":"tun/tun-in","host":"hqip.sharevps.online"}},{"id":"direct-business","chains":["direct"],"metadata":{"type":"mixed/mixed-in","host":"ordinary.example"}}]}`))
 		case r.Method == "DELETE":
 			if r.URL.Path != "/connections/business" && r.URL.Path != "/connections/direct-business" {
 				t.Error("closed management or probe")

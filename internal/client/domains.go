@@ -2,14 +2,15 @@ package client
 
 import "strings"
 
-const DefaultServerURL = "https://api-hqip.sharevps.online"
+const DefaultServerURL = "https://hqip.sharevps.online"
 const UserSiteURL = "https://hqip.sharevps.online"
+const previousOfficialServerURL = "https://api-hqip.sharevps.online"
 
-// Only current official roots normalize to the official API. Retired roots,
+// Migrate only the exact previous official API root. Other retired roots,
 // paths, alternate ports and lookalike hosts remain custom addresses.
 func migrateOfficialServerURL(server string) string {
 	switch strings.TrimSuffix(server, "/") {
-	case DefaultServerURL, UserSiteURL:
+	case DefaultServerURL, previousOfficialServerURL:
 		return DefaultServerURL
 	default:
 		return server
@@ -17,5 +18,5 @@ func migrateOfficialServerURL(server string) string {
 }
 
 func officialBypassDomains() []string {
-	return []string{"api-hqip.sharevps.online", "hqip.sharevps.online"}
+	return []string{"hqip.sharevps.online"}
 }

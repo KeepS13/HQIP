@@ -1,6 +1,6 @@
 # HQIP Windows 4.6.0 客户端
 
-用户入口为 [hqip.sharevps.online](https://hqip.sharevps.online)，管理入口为 [cms-hqip.sharevps.online](https://cms-hqip.sharevps.online)。客户端连接 API `https://api-hqip.sharevps.online`，使用邮箱账户通过系统浏览器完成 PKCE 授权；客户端不保存账户密码，DPAPI 保护令牌和连接配置。用户网页注册、改密及管理员重置密码均至少 6 个 Unicode 字符、最多 1024 字节。注册、网页登录仍需要 Turnstile。
+用户入口为 [hqip.sharevps.online](https://hqip.sharevps.online)，管理入口为 [cms-hqip.sharevps.online](https://cms-hqip.sharevps.online)。客户端连接 API `https://hqip.sharevps.online`，使用邮箱账户通过系统浏览器完成 PKCE 授权；客户端不保存账户密码，DPAPI 保护令牌和连接配置。用户网页注册、改密及管理员重置密码均至少 6 个 Unicode 字符、最多 1024 字节。注册、网页登录仍需要 Turnstile。
 
 ## 订阅与连接
 
@@ -59,3 +59,7 @@
 许可从节点最后一次成功核验授权起最长 24 小时，订阅到期时间更早时按订阅截止。重连、重启和失败的刷新不会延长许可。节点先使用预留的套餐流量，用尽后仅在控制服务失联时使用应急流量；每份订阅有效期内所有节点合计最多 1 GiB，不额外扣款，不因网络恢复而重置。许可到期、明确撤权或可用预算耗尽会停止转发。控制服务失联期间新发生的撤权，最迟在恢复核验或原许可到期时生效。
 
 账户用量显示最后同步时间，应急流量单独统计。手动断开和退出登录立即生效，不会被后台恢复任务重新连上。未启用该能力的旧节点保留原有短期授权策略。
+
+## 4.7.1 地址迁移
+
+正式 API 与用户网页统一为 `https://hqip.sharevps.online`。升级后自动迁移准确的旧官方 API 根地址，保留账户令牌、设备身份和节点选择；自定义服务器地址不变。`api-hqip.sharevps.online` 下线后，旧客户端需要从用户网页手动下载新版，旧订阅链接需重新获取。

@@ -1,4 +1,4 @@
-export const API_URL = (import.meta.env.VITE_API_URL || "https://api-hqip.sharevps.online").replace(/\/$/, "");
+export const API_URL = (import.meta.env.VITE_API_URL || "https://hqip.sharevps.online").replace(/\/$/, "");
 export const ADMIN_URL = (import.meta.env.VITE_ADMIN_URL || "https://cms-hqip.sharevps.online").replace(/\/$/, "");
 export const USER_URL = (import.meta.env.VITE_USER_URL || "https://hqip.sharevps.online").replace(/\/$/, "");
 export function passwordError(value: string): string {

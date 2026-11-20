@@ -2,7 +2,7 @@ import {useId, useState} from 'react';
 import {ArrowUpRight, ChevronDown} from 'lucide-react';
 import './login-form.css';
 
-export const defaultServerURL='https://api-hqip.sharevps.online';
+export const defaultServerURL='https://hqip.sharevps.online';
 
 export function LoginForm({serverUrl,pending,busy,onLogin}:{serverUrl:string;pending:boolean;busy:boolean;onLogin:(address:string)=>void}) {
   // Keep edits separate from the native state, which is refreshed while typing.

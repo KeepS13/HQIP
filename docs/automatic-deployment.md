@@ -8,7 +8,7 @@
 
 目标必须先通过[保留数据迁移](server-migration-sharevps.md)建立可验证的正式基线，初次接管保留源站的精确活动 release 与数据。后续 CI 只接受 `64.83.17.143:22/root`，旧 IP `107.151.244.106` 在任何 SSH 前被拒绝。Actions secrets 必须由迁移执行者同步设置：`DEPLOY_HOST=64.83.17.143`、`DEPLOY_PORT=22`、`DEPLOY_USER=root`、新目标的 `DEPLOY_SSH_KEY` 与 `DEPLOY_KNOWN_HOSTS`。SSH 严格验证主机身份，不能沿用源站主机密钥；验收后移除旧 HQIP 部署专用授权。
 
-控制服务运行PostgreSQL＋Redis；存储环境文件必需。Ubuntu 22.04 目标必须提前提供独立 Python 3.11 入口 `/opt/hqip-runtime/bin/python3`，以及 `/usr/lib/postgresql/18/bin` 中的 PG18 备份/恢复工具与 psql、三个正式站点和证书。远程磁盘检查、安装、版本保留及回退均显式使用独立 Python；安装器子脚本继承同一解释器，备份 service 的 ExecStart/ExecStopPost 也使用此入口。路径缺失时部署失败，不回退到系统 Python 3.10。运行时及库由 root 管理且可被 service 沙箱读取；保留系统默认 Python 和现有 PG14。不要把密码、运行数据或旧备份放进发布包。
+控制服务运行PostgreSQL＋Redis；存储环境文件必需。Ubuntu 22.04 目标必须提前提供独立 Python 3.11 入口 `/opt/hqip-runtime/bin/python3`，以及 `/usr/lib/postgresql/18/bin` 中的 PG18 备份/恢复工具与 psql、两个正式站点和证书。远程磁盘检查、安装、版本保留及回退均显式使用独立 Python；安装器子脚本继承同一解释器，备份 service 的 ExecStart/ExecStopPost 也使用此入口。路径缺失时部署失败，不回退到系统 Python 3.10。运行时及库由 root 管理且可被 service 沙箱读取；保留系统默认 Python 和现有 PG14。不要把密码、运行数据或旧备份放进发布包。
 
 ## 完整发布与回退
 

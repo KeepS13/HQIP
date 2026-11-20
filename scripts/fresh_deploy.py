@@ -31,7 +31,7 @@ ENABLED_SITE = Path('/etc/nginx/sites-enabled/hqip.conf')
 JOURNAL_LIMITS = Path('/etc/systemd/journald@hqip-control.conf.d/limits.conf')
 LOGROTATE_CONFIG = Path('/etc/logrotate.d/hqip-control')
 NGINX_LOG_DIR = Path('/var/log/nginx/hqip-control')
-DOMAINS = ('hqip.sharevps.online', 'cms-hqip.sharevps.online', 'api-hqip.sharevps.online')
+DOMAINS = ('hqip.sharevps.online', 'cms-hqip.sharevps.online')
 MIN_FREE_BYTES = 3 * 1024 ** 3
 EMPTY_TABLES = ('portal_users', 'portal_subscriptions', 'portal_templates', 'payment_orders',
                 'servers', 'nodes', 'portal_leases', 'cloudflare_settings', 'credentials', 'devices')

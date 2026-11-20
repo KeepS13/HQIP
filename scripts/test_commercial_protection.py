@@ -37,6 +37,7 @@ class CommercialProtectionTests(unittest.TestCase):
         opener = SimpleNamespace(open=open_request)
         protection.verify_cloudflare(self.resolver, opener)
         self.assertEqual(len(calls), 3)
+        self.assertEqual(calls, ['https://' + render_domains.USER + '/', 'https://' + render_domains.ADMIN + '/', 'https://' + render_domains.API + '/healthz'])
         self.assertIn('https://' + render_domains.API + '/healthz', calls)
         bad_resolver = lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('203.0.113.2', 443))]
         with self.assertRaisesRegex(ValueError, 'configuration was preserved'):
@@ -49,8 +50,8 @@ class CommercialProtectionTests(unittest.TestCase):
         self.assertIn('geo $realip_remote_addr $hqip_cloudflare_peer', text)
         self.assertNotIn('geo $http_cf_connecting_ip', text)
         self.assertNotIn('geo $remote_addr $hqip_cloudflare_peer', text)
-        self.assertEqual(text.count('if ($hqip_cloudflare_peer = 0) { return 403; }'), 6)
-        self.assertEqual(text.count('[A-Za-z0-9_-]{1,128}$'), 3)
+        self.assertEqual(text.count('if ($hqip_cloudflare_peer = 0) { return 403; }'), 4)
+        self.assertEqual(text.count('[A-Za-z0-9_-]{1,128}$'), 2)
         self.assertNotIn('location ^~ /.well-known/acme-challenge/', text)
         self.assertNotIn('default_server', text)
 

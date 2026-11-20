@@ -175,7 +175,7 @@ class FreshDeploymentTests(unittest.TestCase):
         rule = (Path(__file__).resolve().parents[1] / 'deploy/hqip-nginx-logrotate.conf').read_text()
         owned = '/var/log/nginx/hqip-control/access.log'
         self.assertIn(owned + ' {', rule)
-        self.assertEqual(render_domains.render().count('access_log ' + owned + ' '), 6)
+        self.assertEqual(render_domains.render().count('access_log ' + owned + ' '), 4)
         directives = '\n'.join(line for line in rule.splitlines() if not line.lstrip().startswith('#'))
         self.assertNotIn('/var/log/nginx/*.log', directives)
         self.assertNotIn('copytruncate', directives)

@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
 const assets = path.join(root, 'user-web', 'dist');
 const output = path.join(root, '.local', 'client-imports-qa');
 const origin = 'https://hqip.example.test';
-const apiOrigin = 'https://api-hqip.sharevps.online';
+const apiOrigin = 'https://hqip.sharevps.online';
 const user = { id: 'fixture-user', email: 'demo@example.test', enabled: true, revision: 1 };
 const nodes = [{ id: 'fixture-node', name: '测试节点', server: 'node.example.test', ready: true }];
 const createSubscription = (id, status = 'active') => ({

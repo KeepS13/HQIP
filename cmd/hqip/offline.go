@@ -34,7 +34,7 @@ func offlineAdmissionSettings(args []string) error {
 	if *node == "" {
 		return errors.New("需要 --node")
 	}
-	s, err := store.OpenConfigured(*dir, "https://api-hqip.sharevps.online", os.Getenv("HQIP_DATABASE_URL"))
+	s, err := store.OpenConfigured(*dir, "https://hqip.sharevps.online", os.Getenv("HQIP_DATABASE_URL"))
 	if err != nil {
 		return err
 	}

@@ -277,8 +277,8 @@ def main():
 def check_public():
     # curl retries transient edge failures; inspect JSON as well as HTTP status.
     for url in ['https://hqip.sharevps.online/', 'https://cms-hqip.sharevps.online/',
-                'https://api-hqip.sharevps.online/healthz',
-                'https://api-hqip.sharevps.online/readyz']:
+                'https://hqip.sharevps.online/healthz',
+                'https://hqip.sharevps.online/readyz']:
         result = command(['curl', '--fail', '--silent', '--show-error', '--retry', '5',
                           '--retry-delay', '2', '--retry-all-errors', '--max-time', '20',
                           '--user-agent', 'Go-http-client/1.1', url], capture_output=True, text=True)

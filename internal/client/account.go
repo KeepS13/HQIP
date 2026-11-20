@@ -408,18 +408,18 @@ func (c *Controller) accountWatchdogTick(ctx context.Context) {
 	}
 }
 
-// Official deployments separate API and browser origins. Other servers retain same-origin authorization.
+// The official API and browser now share one origin. Keep its authorization
+// path checks even though a same-origin comparison alone would accept any path.
+// Custom servers retain their existing same-origin authorization behavior.
 func trustedAuthorizationOrigin(api, page *url.URL) bool {
 	if api == nil || page == nil || api.User != nil || page.User != nil || api.Opaque != "" || page.Opaque != "" || page.Fragment != "" {
 		return false
 	}
-	if page.Scheme == api.Scheme && strings.EqualFold(page.Host, api.Host) {
-		return true
+	if strings.EqualFold(api.Host, "hqip.sharevps.online") {
+		return api.Scheme == "https" && page.Scheme == "https" &&
+			strings.EqualFold(page.Host, api.Host) && page.Path == "/authorize" && page.RawPath == ""
 	}
-	if api.Scheme != "https" || page.Scheme != "https" || page.Path != "/authorize" || page.RawPath != "" {
-		return false
-	}
-	return strings.EqualFold(api.Host, "api-hqip.sharevps.online") && strings.EqualFold(page.Host, "hqip.sharevps.online")
+	return page.Scheme == api.Scheme && strings.EqualFold(page.Host, api.Host)
 }
 
 func AccountURL(server string) string {
