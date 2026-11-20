@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/apernet/hysteria/core/v2/billing"
 )
 
 func offlineExpiry(now time.Time, e *model.UserSubscription) time.Time {
@@ -58,6 +59,13 @@ func loadOfflineGrant(q portalQuery, node, id string) (model.OfflineGrant, error
 	err := q.QueryRow(`SELECT l.id,l.node_id,l.user_id,l.subscription_id,l.session_id,o.credential_hash,o.authorized_at,l.expires,o.normal_budget,o.normal_unlimited,o.emergency_budget,o.emergency_used,l.upload,l.download,l.revision,r.version,l.bandwidth,r.pending,l.closed,l.revoked,o.report_version FROM portal_offline_grants o JOIN portal_leases l ON l.id=o.lease_id JOIN portal_rates r ON r.lease_id=l.id WHERE l.id=? AND l.node_id=?`, id, node).Scan(&g.ID, &g.NodeID, &g.UserID, &g.SubscriptionID, &g.SessionID, &g.CredentialHash, &authorized, &until, &g.NormalBudgetBytes, &g.NormalUnlimited, &g.EmergencyBudgetBytes, &g.EmergencyUsedBytes, &g.UploadBytes, &g.DownloadBytes, &g.Revision, &g.RateVersion, &g.BandwidthBytesPerSecond, &g.RatePending, &g.Closed, &g.Revoked, &g.ReportVersion)
 	g.Version = model.OfflineAdmissionVersion
 	g.AuthorizedAt, g.OfflineUntil = time.Unix(authorized, 0).UTC(), time.Unix(until, 0).UTC()
+	if err == nil {
+		var state *leaseBilling
+		state, err = loadLeaseBilling(q, id)
+		if state != nil {
+			g.Billing = &state.Grant
+		}
+	}
 	return g, notFound(err)
 }
 
@@ -67,6 +75,14 @@ func (s *Store) AcquireOfflineGrant(node, connection, password string) (model.Of
 		return model.OfflineGrant{}, err
 	}
 	return loadOfflineGrant(s.DB, node, l.ID)
+}
+
+func (s *Store) AcquireProtocolOfflineGrant(node, connection, password, protocol string) (model.OfflineGrant, error) {
+	lease, err := s.AcquireProtocolLease(node, connection, password, protocol, true)
+	if err != nil {
+		return model.OfflineGrant{}, err
+	}
+	return loadOfflineGrant(s.DB, node, lease.ID)
 }
 
 func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model.OfflineGrant, error) {
@@ -90,6 +106,10 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 		if err != nil {
 			return empty, err
 		}
+		billingState, err := loadLeaseBilling(tx, id)
+		if err != nil {
+			return empty, err
+		}
 		var previous string
 		if err = tx.QueryRow("SELECT report_body FROM portal_offline_grants WHERE lease_id=?", id).Scan(&previous); err != nil {
 			return empty, err
@@ -106,14 +126,26 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 		}
 		total, oldTotal := u.UploadBytes+u.DownloadBytes, g.UploadBytes+g.DownloadBytes
 		normal, oldNormal := total-u.EmergencyUsedBytes, oldTotal-g.EmergencyUsedBytes
-		if normal < oldNormal || !g.NormalUnlimited && normal > g.NormalBudgetBytes || u.EmergencyUsedBytes > g.EmergencyBudgetBytes {
+		if normal < oldNormal || billingState == nil && !g.NormalUnlimited && normal > g.NormalBudgetBytes || u.EmergencyUsedBytes > g.EmergencyBudgetBytes {
 			return empty, ErrConflict
 		}
 		normalDelta := normal - oldNormal
+		uploadDelta, downloadDelta := u.UploadBytes-g.UploadBytes, u.DownloadBytes-g.DownloadBytes
+		if billingState != nil {
+			uploadDelta, downloadDelta, normalDelta, err = settleBilling(tx, g.SubscriptionID, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, u.EmergencyUsedBytes)
+			if err != nil {
+				return empty, err
+			}
+		} else if len(u.Billing) > 0 {
+			return empty, ErrConflict
+		}
 		if g.NormalUnlimited {
 			normalDelta = 0
+			if billingState != nil {
+				billingState.Reserved = 0
+			}
 		}
-		if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", u.UploadBytes-g.UploadBytes, u.DownloadBytes-g.DownloadBytes, normalDelta, g.SubscriptionID); err != nil {
+		if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", uploadDelta, downloadDelta, normalDelta, g.SubscriptionID); err != nil {
 			return empty, err
 		}
 		if _, err = tx.Exec("UPDATE portal_emergency_usage SET used=used+?,reserved=reserved-? WHERE subscription_id=?", u.EmergencyUsedBytes-g.EmergencyUsedBytes, u.EmergencyUsedBytes-g.EmergencyUsedBytes, g.SubscriptionID); err != nil {
@@ -159,6 +191,10 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			remaining := int64(0)
 			if !g.NormalUnlimited {
 				remaining = g.NormalBudgetBytes - normal
+				if billingState != nil {
+					remaining = billingState.Reserved
+					billingState.Reserved = 0
+				}
 			}
 			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", remaining, g.SubscriptionID); err != nil {
 				return empty, err
@@ -184,6 +220,16 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 				add := available / int64(max(1, e.MaxConnections-e.Occupied+1))
 				if add > 0 {
 					g.NormalBudgetBytes += add
+					if billingState != nil {
+						units, err := billing.Units(add, 100)
+						if err != nil {
+							return empty, err
+						}
+						if billingState.Grant.BudgetUnits, err = billing.Add(billingState.Grant.BudgetUnits, units); err != nil {
+							return empty, err
+						}
+						billingState.Reserved += add
+					}
 					if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", add, g.SubscriptionID); err != nil {
 						return empty, err
 					}
@@ -195,6 +241,17 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			budget = total
 			if total <= math.MaxInt64-model.OfflineChunkBytes {
 				budget += model.OfflineChunkBytes
+			}
+		}
+		if billingState != nil {
+			budget = billing.MaxRawBytes
+			if !g.Revoked && !u.Closed {
+				if err = issueBillingPolicy(tx, billingState); err != nil {
+					return empty, err
+				}
+			}
+			if err = saveLeaseBilling(tx, id, billingState); err != nil {
+				return empty, err
 			}
 		}
 		if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,budget=?,expires=?,closed=?,revoked=?,revision=? WHERE id=?", u.UploadBytes, u.DownloadBytes, budget, g.OfflineUntil.Unix(), u.Closed, g.Revoked, e.Revision, id); err != nil {

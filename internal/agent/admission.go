@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/apernet/hysteria/core/v2/billing"
 )
 
 var connectionIdentifier = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -31,14 +32,22 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ConnectionID  string `json:"connectionId"`
-		Password      string `json:"password"`
-		LegacyRenewal string `json:"legacyRenewal,omitempty"`
+		ConnectionID      string `json:"connectionId"`
+		Password          string `json:"password"`
+		LegacyRenewal     string `json:"legacyRenewal,omitempty"`
+		BillingCapability string `json:"billingCapability,omitempty"`
+		BillingProtocol   string `json:"billingProtocol,omitempty"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil || !connectionIdentifier.MatchString(body.ConnectionID) || len(body.Password) < 16 || len(body.Password) > 1024 {
 		http.Error(w, "invalid admission", 400)
 		return
 	}
+	password, protocol, identityErr := a.billingIdentity(body.Password, body.BillingCapability)
+	if identityErr != nil {
+		http.Error(w, "invalid protocol identity", 403)
+		return
+	}
+	body.Password, body.BillingProtocol = password, protocol
 	a.cacheMu.RLock()
 	portal := a.cache.PortalEnabled
 	retired := a.cache.Retirement != nil
@@ -74,7 +83,7 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.offlineAllowed() || a.cachedOfflineCredential(body.Password) {
-		a.offlineAdmit(w, r, body.ConnectionID, body.Password)
+		a.offlineAdmit(w, r, body.ConnectionID, body.Password, protocol)
 		return
 	}
 	a.forwardAdmission(w, r, "/api/v1/agents/admission", body)
@@ -94,7 +103,7 @@ func (a *Agent) renewConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body model.LeaseUsage
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil || body.UploadBytes < 0 || body.DownloadBytes < 0 || body.AppliedRateVersion < 0 || body.UploadBytes > math.MaxInt64-body.DownloadBytes {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&body) != nil || body.UploadBytes < 0 || body.DownloadBytes < 0 || body.AppliedRateVersion < 0 || body.UploadBytes > math.MaxInt64-body.DownloadBytes {
 		http.Error(w, "invalid counters", 400)
 		return
 	}
@@ -245,10 +254,31 @@ func writeAdmissionResponse(w http.ResponseWriter, status int, data []byte, err 
 
 func confirmedLeaseUsage(id string, usage model.LeaseUsage, data []byte) bool {
 	var grant struct {
-		LeaseID       string `json:"leaseId"`
-		UploadBytes   int64  `json:"uploadBytes"`
-		DownloadBytes int64  `json:"downloadBytes"`
-		Closed        bool   `json:"closed"`
+		Billing       *billing.Grant `json:"billing"`
+		LeaseID       string         `json:"leaseId"`
+		UploadBytes   int64          `json:"uploadBytes"`
+		DownloadBytes int64          `json:"downloadBytes"`
+		Closed        bool           `json:"closed"`
 	}
-	return json.Unmarshal(data, &grant) == nil && grant.LeaseID == id && grant.UploadBytes == usage.UploadBytes && grant.DownloadBytes == usage.DownloadBytes && grant.Closed == usage.Closed
+	if json.Unmarshal(data, &grant) != nil || grant.LeaseID != id || grant.UploadBytes != usage.UploadBytes || grant.DownloadBytes != usage.DownloadBytes || grant.Closed != usage.Closed {
+		return false
+	}
+	if len(usage.Billing) > 0 {
+		if grant.Billing == nil {
+			return false
+		}
+		for _, segment := range usage.Billing {
+			found := false
+			for _, ack := range grant.Billing.Acknowledged {
+				if segment.Equal(ack) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+	}
+	return true
 }

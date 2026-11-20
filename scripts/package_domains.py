@@ -65,6 +65,8 @@ def package_release(root, sha, previous_sha=None):
     nodes['sha256'] = {name: nodes['sha256'][name] for name in NODE_ASSETS}
     nodes['agentTelemetryVersion'], nodes['agentSourceSHA'] = 1, sha
     nodes['offlineAdmissionVersion'] = 1
+    if nodes.get('trafficBillingVersion') != 1:
+        raise ValueError('Rebuild both Agent and forwarding core with traffic billing support')
     node_manifest = out / 'artifacts/manifest.json'
     node_manifest.write_text(json.dumps(nodes, indent=2) + '\n', encoding='utf-8')
     hashes['artifacts/manifest.json'] = digest(node_manifest)
@@ -74,6 +76,7 @@ def package_release(root, sha, previous_sha=None):
                 'operationLogsVersion': 1, 'commercialProtectionVersion': 1, 'offlineAdmissionVersion': 1, 'vlessRealityVersion': 1,
                 'desktopVersion': versions[0], 'desktopIconSHA256': digest(root / 'desktop/assets/hqip.ico'),
                 'sha256': hashes}
+    manifest['trafficBillingVersion'] = 1
     if previous_sha:
         manifest['previousSourceSHA'] = previous_sha  # Deployment guard, never a source of files.
     (out / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

@@ -12,7 +12,7 @@ NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
 RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py',
                    'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py',
                    'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py',
-                   'automatic_backup.py', 'commercial_protection.py', 'offline_deployment.py', 'render_domains.py')
+                   'automatic_backup.py', 'commercial_protection.py', 'offline_deployment.py', 'traffic_billing_deployment.py', 'render_domains.py')
 PROTECTION_FILES = {'scripts/automatic_backup.py', 'scripts/commercial_protection.py', 'scripts/render_domains.py',
                     'deploy/hqip-backup.service', 'deploy/hqip-backup.timer',
                     'deploy/hqip-backup-retry.service', 'deploy/hqip-backup-retry.timer'}
@@ -63,6 +63,11 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if reality == 1:
         required = required | {'scripts/hqip_firewall.py'}
     offline = manifest.get('offlineAdmissionVersion', 0)
+    billing = manifest.get('trafficBillingVersion', 0)
+    if type(billing) is not int or billing not in (0, 1):
+        raise ValueError('Unsupported traffic billing capability')
+    if billing == 0:
+        required = required - {'scripts/traffic_billing_deployment.py'}
     if type(offline) is not int or offline not in (0, 1):
         raise ValueError('Unsupported offline admission capability')
     if offline == 0:
@@ -186,6 +191,8 @@ def verify_desktop(release, manifest, hashes):
                     or inner.get('dirty') is not False or set(inner.get('sha256', {})) != DESKTOP_BINARIES):
                 raise ValueError('Desktop inner manifest version or provenance mismatch')
             resources = inner.get('windowsResources', {})
+            if manifest.get('trafficBillingVersion', 0) == 1 and (inner.get('trafficBillingVersion') != 1 or 'with_v2ray_api' not in inner.get('singBoxBuildTags', '').split(',')):
+                raise ValueError('Desktop package lacks proxy billing statistics capability')
             if (resources.get('groupId') != 3 or not re.fullmatch('[a-f0-9]{64}', resources.get('iconSha256', ''))
                     or resources['iconSha256'] != manifest.get('desktopIconSHA256')):
                 raise ValueError('Desktop Windows resource provenance mismatch')
@@ -224,6 +231,8 @@ def verify_full_release(release, manifest=None, *, allow_legacy=False):
         if nodes.get('sha256', {}).get(name) != hashes['artifacts/' + name]:
             raise ValueError('Node artifact checksum mismatch: ' + name)
     core = nodes.get('hysteriaSource', {})
+    if manifest.get('trafficBillingVersion', 0) == 1 and nodes.get('trafficBillingVersion') != 1:
+        raise ValueError('Node package lacks protocol billing capability')
     for arch in ('amd64', 'arm64'):
         if core.get('sha256', {}).get('hqip-hysteria-linux-' + arch) != hashes['artifacts/hysteria-linux-' + arch]:
             raise ValueError('Admission core provenance mismatch')

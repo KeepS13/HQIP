@@ -193,11 +193,24 @@ func (s *Server) prepareCloudflareLocked(ctx context.Context, node model.Node) (
 		for attempt := 0; attempt < 5; attempt++ {
 			intent, err = s.Store.NodeDNSIntent(node.ID)
 			if errors.Is(err, store.ErrNotFound) {
+				if node.IPSwitch != nil {
+					return node, nil, errors.New("未找到原节点的 Cloudflare DNS 归属记录，无法安全切换")
+				}
 				name := s.Store.CloudflareName(node.ID, zone.Name)
 				intent, err = s.Store.CreateDNSIntent(node.ID, zone.ID, zone.Name, cloudflare.Record{Type: "A", Name: name, Content: node.PublicIP, TTL: 120, Proxied: false, Comment: "HQIP node " + node.ID + " " + secure.Token()[:16]})
 			}
 			if err != nil {
 				return node, nil, err
+			}
+			if intent.ZoneID == zone.ID && node.IPSwitch != nil && intent.Record.Content == node.IPSwitch.FromIP {
+				updated, switchErr := client.SwitchOwnedIPv4(ctx, intent.ZoneID, intent.Record, node.PublicIP)
+				if switchErr != nil {
+					return node, nil, switchErr
+				}
+				if err = s.Store.CompleteIPSwitchDNS(intent, updated); err != nil {
+					return node, nil, err
+				}
+				intent.Record = updated
 			}
 			if intent.ZoneID != zone.ID || intent.Record.Content != node.PublicIP {
 				return node, nil, errors.New("节点 DNS 归属已变化，请先清理原记录")

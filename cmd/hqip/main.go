@@ -39,6 +39,8 @@ func run(args []string) error {
 		return errors.New("用法：hqip serve | init-admin | backup | restore")
 	}
 	switch args[0] {
+	case "migrate-traffic-billing":
+		return migrateTrafficBilling(args[1:])
 	case "migrate-offline-admission":
 		return migrateOfflineAdmission(args[1:])
 	case "offline-admission":

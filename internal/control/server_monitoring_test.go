@@ -30,7 +30,7 @@ func TestServerCapacityAPIIsolationAndConcurrency(t *testing.T) {
 	s.runner = i
 	cookie, csrf := loginAdmin(t, s, h)
 	w := request(h, "POST", "/api/v1/servers", map[string]any{
-		"name": "VPS", "sshHost": "203.0.113.10", "password": "ephemeral",
+		"name": "VPS", "sshHost": "8.8.8.10", "password": "ephemeral",
 		"bandwidthMbps": 250.5, "monthlyQuotaBytes": 1_000_000_000_000,
 		"expiresAt": s.Store.Now().Add(30 * 24 * time.Hour).Truncate(time.Hour).Format(time.RFC3339),
 	}, cookie, csrf)
@@ -44,7 +44,7 @@ func TestServerCapacityAPIIsolationAndConcurrency(t *testing.T) {
 	if v.BandwidthMbps == nil || *v.BandwidthMbps != 250.5 || v.MonthlyQuotaBytes == nil || *v.MonthlyQuotaBytes != 1_000_000_000_000 || i.checks != 1 {
 		t.Fatal("creation lost capacity or skipped SSH verification")
 	}
-	a, err := s.Store.CreateAddress(v.ID, "203.0.113.10")
+	a, err := s.Store.CreateAddress(v.ID, "8.8.8.10")
 	if err != nil {
 		t.Fatal(err)
 	}

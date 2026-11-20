@@ -46,6 +46,7 @@ import { Domains } from "./pages/Domains";
 import { Notifications } from "./pages/Notifications";
 import { OperationLogs } from "./pages/OperationLogs";
 import { Payments } from "./pages/Payments";
+import { TrafficBilling } from "./pages/TrafficBilling";
 import { Orders, OrderDetail } from "./pages/Orders";
 import { HostResources } from "./HostResources";
 import { AlertUnreadBadge } from "./AlertUnread";
@@ -360,6 +361,7 @@ export default function App() {
     "/subscription-requests": "旧申请历史",
     "/orders": "订单管理",
     "/payments": "支付设置",
+    "/traffic-billing": "流量计费",
     "/turnstile": "注册与安全验证",
     "/notifications": "预警中心",
     "/operation-logs": "操作日志",
@@ -426,6 +428,7 @@ export default function App() {
             </nav>
             <div className="nav-caption nav-caption-second">系统设置</div>
             <nav>
+              <NavLink to="/traffic-billing"><Activity size={18} /><span>流量计费</span></NavLink>
               <NavLink to="/payments">
                 <CreditCard size={19} />
                 <span>支付设置</span>
@@ -525,6 +528,7 @@ export default function App() {
               <Route path="/orders" element={<Orders />} />
               <Route path="/orders/:id" element={<OrderDetail />} />
               <Route path="/payments" element={<Payments />} />
+              <Route path="/traffic-billing" element={<TrafficBilling />} />
               <Route path="/turnstile" element={<TurnstileSettingsPage />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/operation-logs" element={<OperationLogs />} />

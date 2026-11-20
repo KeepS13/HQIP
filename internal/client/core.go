@@ -52,6 +52,7 @@ type Core struct {
 	cancel                   context.CancelFunc
 	tunStop                  func() error
 	port, apiPort, probePort int
+	statsPort                int
 	secret                   string
 	lastProfile              Profile
 	controlURL               string
@@ -131,6 +132,10 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 		return e
 	}
 	secret := randomID()
+	statsPort, e := freePort()
+	if e != nil {
+		return e
+	}
 	probePort, e := freePort()
 	if e != nil {
 		return e
@@ -141,7 +146,7 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 			expectedIP = n.PublicIP
 		}
 	}
-	opts := ConfigOptions{Profile: p, Bundle: b, Selected: selected, Mode: mode, TUN: tun, MixedPort: port, ProbePort: probePort, APIPort: apiPort, APISecret: secret, GeoPath: geo, ServerURL: server}
+	opts := ConfigOptions{Profile: p, Bundle: b, Selected: selected, Mode: mode, TUN: tun, MixedPort: port, ProbePort: probePort, APIPort: apiPort, StatsPort: statsPort, APISecret: secret, GeoPath: geo, ServerURL: server}
 	// Probe the actual process; a separate probe process consumes another slot.
 	data, e := GenerateConfig(opts)
 	if e != nil {
@@ -163,6 +168,7 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 		c.port = port
 		c.probePort = probePort
 		c.apiPort = apiPort
+		c.statsPort = statsPort
 		c.secret = secret
 		if e = Probe(ctx, probePort, expectedIP); e != nil {
 			_ = c.stopLocked()
@@ -195,6 +201,7 @@ func (c *Core) Apply(ctx context.Context, p Profile, b rules.Bundle, selected, m
 	c.port = port
 	c.probePort = probePort
 	c.apiPort = apiPort
+	c.statsPort = statsPort
 	c.secret = secret
 	if e = Probe(ctx, probePort, expectedIP); e != nil {
 		_ = c.stopLocked()

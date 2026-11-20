@@ -18,7 +18,7 @@ export function DeployNode({ node, onClose, refresh }: { node: Node; onClose: ()
   }
   return <Modal title="预检与部署" description="确认当前主机、IP 与安装归属后再执行部署。" onClose={() => { if (!busy) onClose(); }}><div className="form-stack">
     <Field label={`${node.sshUser}@${node.sshHost}:${node.sshPort} 的密码`} hint="留空使用服务器已保存的 SSH 凭据。"><input type="password" autoComplete="new-password" value={password} onChange={e => { setPassword(e.target.value); setCheck(null); setAccept(false); }} /></Field>
-    {node.dnsMode !== "cloudflare" && <Field label="证书验证方式"><select value={certificateMode} onChange={e=>{setCertificateMode(e.target.value);setCheck(null);}}><option value="http">HTTP 自动续期</option><option value="cloudflare" disabled={!cf.data?.configured}>Cloudflare DNS 自动续期</option></select></Field>}
+    {node.dnsMode !== "cloudflare" && <Field label="证书验证方式"><select disabled={!!node.ipSwitch} value={certificateMode} onChange={e=>{setCertificateMode(e.target.value);setCheck(null);}}><option value="http">HTTP 自动续期</option><option value="cloudflare" disabled={!cf.data?.configured}>Cloudflare DNS 自动续期</option></select></Field>}
     {certificateMode === "cloudflare" && node.certificateMode !== "cloudflare" && <Field label="Cloudflare Zone ID" hint="默认使用域名设置中的 Zone；现有域名和 A 记录保持不变。"><input value={zoneId} onChange={e=>{setZoneId(e.target.value);setCheck(null);}} placeholder={cf.data?.defaultZoneId || "域名所属的 Zone ID"}/></Field>}
     <div><Button variant="secondary" busy={busy} onClick={() => void inspect()}>检查服务器</Button></div>
     {check && <><Notice>{check.platform} · {check.architecture}<br />目标 IP：{node.publicIp} · {check.boundIps?.includes(node.publicIp) ? "网卡已绑定" : "网卡未绑定"}</Notice>

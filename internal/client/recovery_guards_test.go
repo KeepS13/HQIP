@@ -132,6 +132,9 @@ func TestRecoveryMetricsKeepTotalsWithoutStaleSpeed(t *testing.T) {
 	c.view.RunState = "recovering"
 	c.beginMetricsLocked()
 	before := c.view.Metrics.ConnectedAt
+	// Recovery preserves the last already-accounted snapshot; global raw
+	// counters from an engine without proxy statistics cannot replace it.
+	c.view.Metrics.UploadBytes, c.view.Metrics.DownloadBytes = 1000, 2000
 	c.sampleMetrics(context.Background())
 	engine.err = errors.New("injected sample outage")
 	c.sampleMetrics(context.Background())

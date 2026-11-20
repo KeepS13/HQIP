@@ -132,13 +132,17 @@ func (r *Runner) assess(n model.Node, inv hostInventory) PreflightResult {
 	out.Fingerprint = hex.EncodeToString(h[:])
 	p := pathsFor(n.ID)
 	if inv.Owner != nil {
-		out.ExistingManaged = inv.Owner.NodeID == n.ID && inv.Owner.ControllerID == r.controllerIdentity() && inv.Owner.MachineID == inv.MachineID && inv.Owner.PublicIP == n.PublicIP && inv.Owner.InstallationVersion == installationVersion
+		ownedIP := inv.Owner.PublicIP == n.PublicIP || (n.IPSwitch != nil && n.IPSwitch.FromIP != "" && inv.Owner.PublicIP == n.IPSwitch.FromIP)
+		out.ExistingManaged = inv.Owner.NodeID == n.ID && inv.Owner.ControllerID == r.controllerIdentity() && inv.Owner.MachineID == inv.MachineID && ownedIP && inv.Owner.InstallationVersion == installationVersion
 		if !out.ExistingManaged {
 			out.Conflicts = append(out.Conflicts, "节点目录属于其他控制中心、IP 或安装，不允许覆盖")
 		}
 	}
 	if inv.Platform != "ubuntu 22.04" && inv.Platform != "ubuntu 24.04" && inv.Platform != "debian 12" {
 		out.Conflicts = append(out.Conflicts, "仅支持 Ubuntu 22.04/24.04、Debian 12")
+	}
+	if n.IPSwitch != nil && inv.Owner == nil {
+		out.Conflicts = append(out.Conflicts, "原节点归属记录缺失，拒绝切换公网 IP")
 	}
 	if inv.Architecture != "x86_64" && inv.Architecture != "aarch64" && inv.Architecture != "arm64" {
 		out.Conflicts = append(out.Conflicts, "仅支持 amd64/arm64")

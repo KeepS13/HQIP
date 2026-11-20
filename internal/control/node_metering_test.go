@@ -11,8 +11,8 @@ func TestNodeAPIIgnoresRetiredCapacityFields(t *testing.T) {
 	s, handler := newServer(t)
 	cookie, csrf := loginAdmin(t, s, handler)
 	w := request(handler, "POST", "/api/v1/nodes", map[string]any{
-		"name": "meter-only", "sshHost": "203.0.113.9", "sshUser": "root", "sshPort": 22,
-		"publicIp": "203.0.113.9", "domain": "meter.example.com", "port": 443, "password": "ssh-secret",
+		"name": "meter-only", "sshHost": "8.8.8.9", "sshUser": "root", "sshPort": 22,
+		"publicIp": "8.8.8.9", "domain": "meter.example.com", "port": 443, "password": "ssh-secret",
 		"bandwidthMbps": 1, "monthlyQuotaBytes": 10,
 	}, cookie, csrf)
 	if w.Code != 202 {

@@ -40,7 +40,7 @@ func TestManagedCredentialAPIAndPasswordRecovery(t *testing.T) {
 	i := &operationsInstaller{}
 	s.runner = i
 	cookie, csrf := loginAdmin(t, s, h)
-	form := map[string]any{"name": "managed", "sshHost": "203.0.113.10", "sshPort": 30022, "sshUser": "root", "password": "initial-secret-password", "saveCredential": true, "expiresAt": s.Store.Now().Add(24 * time.Hour).Truncate(time.Hour).Format(time.RFC3339)}
+	form := map[string]any{"name": "managed", "sshHost": "8.8.8.10", "sshPort": 30022, "sshUser": "root", "password": "initial-secret-password", "saveCredential": true, "expiresAt": s.Store.Now().Add(24 * time.Hour).Truncate(time.Hour).Format(time.RFC3339)}
 	w := request(h, "POST", "/api/v1/servers", form, cookie, csrf)
 	if w.Code != 201 {
 		t.Fatal(w.Body.String())

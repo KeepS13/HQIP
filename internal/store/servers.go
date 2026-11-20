@@ -4,12 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net/netip"
 	"strings"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/netutil"
 )
+
+var ErrAddressInUse = errors.New("该公网 IP 已有节点或待清理实例，请在原节点重试或完成删除")
 
 func (s *Store) ControllerID() (string, error) {
 	var id string
@@ -297,17 +299,12 @@ func (s *Store) Addresses(serverID string) ([]model.ServerAddress, error) {
 	return result, nil
 }
 func (s *Store) CreateAddress(serverID, ip string) (model.ServerAddress, error) {
+	ip, err := netutil.ParsePublicIPv4(ip)
+	if err != nil {
+		return model.ServerAddress{}, err
+	}
 	v := model.ServerAddress{ID: NewID(), ServerID: serverID, IP: ip, CreatedAt: s.Now().UTC(), NodeIDs: []string{}}
-	a, err := netip.ParseAddr(ip)
-	if err != nil || !a.Is4() || !a.IsGlobalUnicast() || a.IsPrivate() {
-		return v, errors.New("仅支持直接绑定网卡的公网 IPv4")
-	}
-	for _, prefix := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4"} {
-		if netip.MustParsePrefix(prefix).Contains(a) {
-			return v, errors.New("该地址不是可用公网 IPv4")
-		}
-	}
-	res, err := s.DB.Exec("INSERT INTO server_addresses(id,server_id,ip,created_at) SELECT ?,id,?,? FROM servers WHERE id=? AND deleted_at=0", v.ID, a.String(), s.Now().Unix(), serverID)
+	res, err := s.DB.Exec("INSERT INTO server_addresses(id,server_id,ip,created_at) SELECT ?,id,?,? FROM servers WHERE id=? AND deleted_at=0", v.ID, ip, s.Now().Unix(), serverID)
 	if err != nil {
 		return v, errors.New("该 IP 已在服务器中登记")
 	}
@@ -325,7 +322,7 @@ func (s *Store) DeleteAddress(serverID, addressID string) error {
 	}
 	defer tx.Rollback()
 	var count int
-	if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE json_extract(config,'$.addressId')=? AND lifecycle!='deleted'", addressID).Scan(&count); err != nil {
+	if err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE (json_extract(config,'$.addressId')=? OR json_extract(json_extract(config,'$.ipSwitch'),'$.fromAddressId')=?) AND lifecycle!='deleted'", addressID, addressID).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
@@ -362,9 +359,41 @@ func (s *Store) prepareNode(tx *sql.Tx, n *model.Node) error {
 		}
 	} else {
 		var raw string
-		var ip string
-		if err := tx.QueryRow("SELECT s.config,a.ip FROM servers s JOIN server_addresses a ON a.server_id=s.id WHERE s.id=? AND a.id=? AND s.deleted_at=0 AND a.deleted_at=0", n.ServerID, n.AddressID).Scan(&raw, &ip); err != nil {
+		if err := tx.QueryRow("SELECT config FROM servers WHERE id=? AND deleted_at=0", n.ServerID).Scan(&raw); err != nil {
 			return notFound(err)
+		}
+		if n.AddressID == "" {
+			ip, err := netutil.ParsePublicIPv4(n.PublicIP)
+			if err != nil {
+				return err
+			}
+			n.PublicIP = ip
+			err = tx.QueryRow("SELECT id FROM server_addresses WHERE server_id=? AND ip=? AND deleted_at=0", n.ServerID, ip).Scan(&n.AddressID)
+			if err == sql.ErrNoRows {
+				n.AddressID = NewID()
+				if _, err = tx.Exec("INSERT INTO server_addresses(id,server_id,ip,created_at) VALUES(?,?,?,?)", n.AddressID, n.ServerID, ip, s.Now().Unix()); err != nil {
+					return err
+				}
+				if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'server.address.create',?)", s.Now().Unix(), n.AddressID); err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+		}
+		var ip string
+		if err := tx.QueryRow("SELECT ip FROM server_addresses WHERE server_id=? AND id=? AND deleted_at=0", n.ServerID, n.AddressID).Scan(&ip); err != nil {
+			return notFound(err)
+		}
+		if n.PublicIP != "" && strings.TrimSpace(n.PublicIP) != ip {
+			return errors.New("公网 IP 与已登记地址不一致")
+		}
+		var used int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE (json_extract(config,'$.addressId')=? OR json_extract(json_extract(config,'$.ipSwitch'),'$.fromAddressId')=?) AND lifecycle!='deleted'", n.AddressID, n.AddressID).Scan(&used); err != nil {
+			return err
+		}
+		if used > 0 {
+			return ErrAddressInUse
 		}
 		var v model.Server
 		if err := json.Unmarshal([]byte(raw), &v); err != nil {

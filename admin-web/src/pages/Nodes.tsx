@@ -1,8 +1,7 @@
 import { API_URL } from "../config";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   Link,
-  useNavigate,
   useParams,
   useSearchParams,
 } from "react-router-dom";
@@ -56,42 +55,10 @@ import {
 import { DeployNode, DeleteNode, RetireNode, DeletedNodeNotice } from "./NodeActions";
 import { NetworkQuality } from "./NetworkQuality";
 import { NodeAudience, type NodeListItem } from "../NodeAudience";
+import { AddNode } from "./AddNode";
 import { compareResourceNames } from "../resource-order";
-import type { Node, NodeDetail, TaskEvent, ManagedServer, ServerAddress, CloudflareSettings, CloudflareZone } from "../types";
+import type { Node, NodeDetail, TaskEvent } from "../types";
 
-function AddNode({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate(); const [params] = useSearchParams();
-  const servers = usePolling<ManagedServer[]>("/servers"), settings = usePolling<CloudflareSettings>("/settings/cloudflare");
-  const [serverId, setServerId] = useState(params.get("server") || "");
-  const [addresses, setAddresses] = useState<ServerAddress[]>([]), [zones, setZones] = useState<CloudflareZone[]>([]);
-  const [form, setForm] = useState({ name: "", addressId: params.get("address") || "", domain: "", port: "443", password: "", zoneId: "", dnsMode: "" });
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const change = (key: keyof typeof form, value: string) => setForm(p => ({ ...p, [key]: value }));
-  useEffect(() => { if (!serverId) { setAddresses([]); return; } let alive = true; setAddresses([]); api<ServerAddress[]>(`/servers/${serverId}/addresses`).then(a => { if (alive) setAddresses(a); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [serverId]);
-  useEffect(() => { if (settings.data && !form.dnsMode) setForm(p => ({ ...p, dnsMode: settings.data!.configured ? "cloudflare" : "manual", zoneId: settings.data!.defaultZoneId })); }, [settings.data, form.dnsMode]);
-  useEffect(() => { if (!settings.data?.configured) return; let alive = true; api<{zones: CloudflareZone[]}>("/settings/cloudflare/zones").then(r => { if (alive) setZones(r.zones); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [settings.data?.configured]);
-  async function submit(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setError("");
-    try {
-      const node = await api<Node>("/nodes", "POST", { name: form.name.trim(), serverId, addressId: form.addressId, domain: form.dnsMode === "manual" ? form.domain.trim().toLowerCase() : "", dnsMode: form.dnsMode, zoneId: form.zoneId, port: Number(form.port), password: form.password });
-      setForm(p => ({ ...p, password: "" })); onClose(); navigate(`/nodes/${node.id}`);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
-  return <Modal title="添加 IP 节点" description="选择服务器和已绑定的 IP，为其部署独立 Hysteria 2 实例。" wide onClose={() => { if (!busy) onClose(); }}>
-    <form onSubmit={submit} className="form-stack">
-      <Field label="节点名称"><input required maxLength={80} value={form.name} onChange={e => change("name", e.target.value)} placeholder="例如：香港 · IP 1" /></Field>
-      <ErrorNotice message={servers.error} />
-      <div className="form-grid"><Field label="服务器"><select required value={serverId} onChange={e => { setServerId(e.target.value); change("addressId", ""); }}><option value="">选择服务器</option>{servers.data?.map(s => <option key={s.id} value={s.id}>{s.name} · {s.sshHost}</option>)}</select></Field><Field label="公网 IP" hint="入口和出口均使用此地址"><select required value={form.addressId} onChange={e => change("addressId", e.target.value)}><option value="">选择已登记的 IP</option>{addresses.map(a => <option key={a.id} value={a.id} disabled={!!a.nodeIds?.length}>{a.ip}{a.nodeIds?.length ? "（已部署）" : ""}</option>)}</select></Field></div>
-      <p className="muted">没有可选项？<Link to="/servers">先添加服务器和公网 IP</Link>。</p>
-      <Field label="域名方式"><select value={form.dnsMode || "manual"} onChange={e => change("dnsMode", e.target.value)}><option value="cloudflare" disabled={!settings.data?.configured}>Cloudflare 自动分配</option><option value="manual">使用已有域名</option></select></Field>
-      {form.dnsMode === "cloudflare" ? <Field label="Cloudflare 域名" hint="自动创建独立子域名和仅 DNS 的 A 记录"><select required value={form.zoneId} onChange={e => change("zoneId", e.target.value)}><option value="">选择域名</option>{settings.data?.defaultZoneId && !zones.some(z => z.id === settings.data!.defaultZoneId) && <option value={settings.data.defaultZoneId}>{settings.data.defaultZoneName}</option>}{zones.map(z => <option value={z.id} key={z.id} disabled={z.status !== "active"}>{z.name}</option>)}</select></Field> : <Field label="已有节点域名" hint="A 记录需指向所选 IP；HTTP 证书验证需要此 IP 的 TCP 80 可用"><input required value={form.domain} pattern="[^/ :]+[.][^/ :]+" onChange={e => change("domain", e.target.value)} placeholder="node.example.com" autoCapitalize="none" /></Field>}
-      {!settings.data?.configured && <p className="muted"><Link to="/domains">配置 Cloudflare Token</Link> 后可自动分配域名。</p>}
-      <div className="form-grid"><Field label="本次部署的 SSH 密码" hint="留空使用服务器已保存的 SSH 凭据。"><input type="password" autoComplete="new-password" value={form.password} onChange={e => change("password", e.target.value)} /></Field><Field label="Hysteria UDP 端口"><input type="number" required min={1} max={65535} value={form.port} onChange={e => change("port", e.target.value)} /></Field></div>
-      <Notice>节点记录实际上传与下载流量，统计周期随所属服务器。已有 HY2 会先进行归属检查；发现旧安装时，可在节点详情预检后接管。</Notice>
-      <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy} icon={Plus}>添加并部署</Button></div>
-    </form>
-  </Modal>;
-}
 
 export function Nodes() {
   const { data, error, loading, refresh } = usePolling<NodeListItem[]>("/nodes"),
@@ -106,6 +73,8 @@ export function Nodes() {
   function close() {
     setParams((p) => {
       p.delete("add");
+      p.delete("server");
+      p.delete("address");
       return p;
     });
   }
@@ -222,7 +191,7 @@ export function Nodes() {
         <ShieldCheck size={14} />
         网站仅显示通过真实代理测试的可用节点；流量统计为实际代理用量，不含探测。
       </div>
-      {add && <AddNode onClose={close} />}
+      {add && <AddNode initialServerId={params.get("server") || ""} initialAddressId={params.get("address") || ""} onClose={close} />}
     </>
   );
 }
@@ -458,6 +427,7 @@ export function NodePage() {
         }
       />
       <ErrorNotice message={error} />
+      {node.ipSwitch && node.lifecycle === "active" && <Notice tone="warning">公网 IP 切换：{node.ipSwitch.fromIp} → {node.publicIp}。部署验证完成后生效；失败时请查看日志并点击“重试部署”，原节点与历史用量会保留。</Notice>}
       {node.lifecycle === "deleted" && <DeletedNodeNotice node={node} />}
       {node.lifecycle === "retiring" && <Notice tone="warning">正在撤销授权并等待本节点停止。Agent 失联或版本较旧时，请使用“SSH 清理”；完成前不会将其他节点或此 IP 释放给新部署。</Notice>}
       {node.status === "error" && (

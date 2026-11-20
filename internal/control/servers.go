@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/netutil"
 	"github.com/KeepS13/HQIP/internal/provision"
 	"github.com/KeepS13/HQIP/internal/store"
 )
@@ -42,6 +42,7 @@ func (s *Server) registerServerRoutes(m *http.ServeMux) {
 		"GET /api/v1/servers/{id}/renewals":   s.serverRenewals, "POST /api/v1/servers/{id}/renewals": s.renewServer,
 		"GET /api/v1/servers/{id}/addresses": s.listAddresses, "POST /api/v1/servers/{id}/addresses": s.createAddress, "DELETE /api/v1/servers/{id}/addresses/{address}": s.deleteAddress,
 		"POST /api/v1/nodes/{id}/preflight": s.nodePreflight, "POST /api/v1/nodes/{id}/takeover": s.retryNode,
+		"POST /api/v1/nodes/{id}/public-ip":     s.switchNodePublicIP,
 		"GET /api/v1/nodes/{id}/delete-preview": s.nodeDeletePreview, "DELETE /api/v1/nodes/{id}": s.deleteNode,
 		"POST /api/v1/nodes/{id}/retire": s.retireNode, "DELETE /api/v1/devices/{id}": s.deleteDevice,
 	} {
@@ -70,8 +71,10 @@ func (f *serverForm) validate() error {
 	if !validName(f.Name) {
 		return errors.New("服务器名称应为 1–80 个字符")
 	}
-	if len(f.SSHHost) > 253 || (net.ParseIP(f.SSHHost) == nil && !domainRE.MatchString(f.SSHHost)) {
-		return errors.New("SSH 地址必须为 IP 或完整域名")
+	if host, err := netutil.ParsePublicIPv4(f.SSHHost); err != nil {
+		return errors.New("SSH 管理地址必须为有效的公网 IPv4")
+	} else {
+		f.SSHHost = host
 	}
 	if !userRE.MatchString(f.SSHUser) || f.SSHPort < 1 || f.SSHPort > 65535 {
 		return errors.New("SSH 用户或端口格式无效")
@@ -165,10 +168,6 @@ func (s *Server) updateServer(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "到期时间请通过首次配置或续费操作调整")
 		return
 	}
-	if err := f.validate(); err != nil {
-		fail(w, 400, err.Error())
-		return
-	}
 	current, err := s.Store.Server(r.PathValue("id"))
 	if err != nil {
 		managementError(w, err)
@@ -176,6 +175,20 @@ func (s *Server) updateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if current.Revision != f.ExpectedRevision {
 		managementError(w, store.ErrConflict)
+		return
+	}
+	if f.Password == "" {
+		f.Password, err = s.Store.ServerPassword(current)
+		if err != nil {
+			fail(w, 400, "无法使用原 SSH 密码，请填写密码后重试："+err.Error())
+			return
+		}
+		// Preserve the saved password even when saveCredential was omitted or
+		// false. Rebind it to the connection only after SSH identity verification.
+		f.SaveCredential = true
+	}
+	if err := f.validate(); err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	checked, err := s.inspectServer(r, f, current)

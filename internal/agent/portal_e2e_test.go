@@ -567,6 +567,22 @@ func (f *portalE2E) wait(timeout time.Duration, check func() bool, message strin
 func e2ePort(t *testing.T, udp bool) int {
 	t.Helper()
 	for i := 0; i < 100; i++ {
+		if udp {
+			// Windows may offer a TCP ephemeral port reserved for UDP by
+			// Hyper-V. Choose UDP first, then verify the same TCP port.
+			packet, err := net.ListenPacket("udp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			port := packet.LocalAddr().(*net.UDPAddr).Port
+			listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+			packet.Close()
+			if err == nil {
+				listener.Close()
+				return port
+			}
+			continue
+		}
 		l, e := net.Listen("tcp", "127.0.0.1:0")
 		if e != nil {
 			t.Fatal(e)

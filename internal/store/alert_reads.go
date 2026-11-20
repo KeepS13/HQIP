@@ -12,7 +12,9 @@ const alertUnreadKinds = "'opened','escalated','unknown','resolved','ended'"
 
 func (s *Store) AlertUnreadSummary() (model.AlertUnreadSummary, error) {
 	var summary model.AlertUnreadSummary
-	err := s.DB.QueryRow(`SELECT COUNT(*) FROM alerts a WHERE a.status!='pending'
+	// Recovery clears the reminder even if the alert was never read. Keep its
+	// history and read receipts so a later recurrence can become unread again.
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM alerts a WHERE a.status NOT IN ('pending','resolved')
 	 AND COALESCE((SELECT MAX(id) FROM alert_activity WHERE alert_id=a.id AND kind='read'),0)
 	 <= COALESCE((SELECT MAX(id) FROM alert_activity WHERE alert_id=a.id AND kind IN (` + alertUnreadKinds + `)),0)`).Scan(&summary.Unread)
 	return summary, err

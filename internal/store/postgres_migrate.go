@@ -117,7 +117,7 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	}
 	// pgx extended protocol parses one statement at a time; split the static
 	// schema script before executing it in the migration transaction.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.Exec(ctx, statement); err != nil {
 				return report, err
@@ -128,6 +128,9 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 		return report, err
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM payment_settings"); err != nil {
+		return report, err
+	}
+	if _, err = tx.Exec(ctx, "DELETE FROM traffic_billing_settings"); err != nil {
 		return report, err
 	}
 	catalog, err := snapshot.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid")
@@ -176,6 +179,12 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 		return report, err
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('offline_admission_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
+		return report, err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('traffic_billing_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
+		return report, err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO traffic_billing_settings(id,enabled,revision,hy2,vless) VALUES(1,0,1,150,150) ON CONFLICT(id) DO NOTHING"); err != nil {
 		return report, err
 	}
 	data, err := json.MarshalIndent(report, "", "  ")

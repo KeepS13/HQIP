@@ -55,6 +55,7 @@ export interface Node {
   sshPort: number;
   sshUser: string;
   publicIp: string;
+  ipSwitch?: { fromIp: string; fromAddressId: string } | null;
   domain: string;
   port: number;
   bandwidthMbps: number | null;

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -355,9 +356,16 @@ func (s *Store) queueWithOptions(id, kind, password string, options Job) (model.
 		return n, err
 	}
 	defer tx.Rollback()
-	var lifecycle string
-	if err = tx.QueryRow("SELECT lifecycle FROM nodes WHERE id=?", id).Scan(&lifecycle); err != nil {
+	var lifecycle, currentConfig string
+	if err = tx.QueryRow("SELECT lifecycle,config FROM nodes WHERE id=?", id).Scan(&lifecycle, &currentConfig); err != nil {
 		return n, notFound(err)
+	}
+	var current model.Node
+	if err = json.Unmarshal([]byte(currentConfig), &current); err != nil {
+		return n, err
+	}
+	if current.IPSwitch != nil && (kind == "verify" || options.Takeover || options.CertificateMode != "") {
+		return n, errors.New("公网 IP 切换尚未完成，请先重试部署或删除此节点")
 	}
 	if kind == "retire" {
 		if lifecycle != "retiring" {

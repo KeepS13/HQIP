@@ -556,11 +556,15 @@ func (a *Agent) sync(ctx context.Context) error {
 		report.Capabilities = append(report.Capabilities, "multi-ip-v2", "retirement-v1", "certificate-v1")
 	}
 	var coreCapabilities struct {
-		Admission bool `json:"admission"`
-		Version   int  `json:"version"`
+		Admission             bool `json:"admission"`
+		Version               int  `json:"version"`
+		TrafficBillingVersion int  `json:"trafficBillingVersion"`
 	}
 	if a.statsJSON(ctx, http.MethodGet, "/hqip/capabilities", nil, &coreCapabilities) == nil && coreCapabilities.Admission && coreCapabilities.Version == 1 {
 		report.Capabilities = append(report.Capabilities, "admission-v1")
+		if coreCapabilities.TrafficBillingVersion == 1 {
+			report.Capabilities = append(report.Capabilities, "traffic-billing-v1")
+		}
 		if endpoint := a.realityReport(); endpoint != nil {
 			report.Reality = endpoint
 			report.Capabilities = append(report.Capabilities, model.RealityCapability)

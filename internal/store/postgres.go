@@ -42,7 +42,7 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	// PostgreSQL extended protocol accepts one statement per Parse. Execute
 	// schema statements individually instead of sending the whole migration
 	// script as one multi-command query.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.ExecContext(ctx, statement); err != nil {
 				return err
@@ -101,6 +101,10 @@ func OpenPostgres(dataDir, baseURL, dsn string) (*Store, error) {
 	if err = db.QueryRow("SELECT value FROM metadata WHERE key='operation_logs_version'").Scan(&version); err != nil || version != "1" {
 		db.Close()
 		return nil, errors.New("操作日志 schema 未升级，请使用迁移账号执行 hqip migrate-operation-logs")
+	}
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='traffic_billing_version'").Scan(&version); err != nil || version != "1" {
+		db.Close()
+		return nil, errors.New("流量计费 schema 未升级，请执行 hqip migrate-traffic-billing")
 	}
 	if err = db.QueryRow("SELECT value FROM metadata WHERE key='offline_admission_version'").Scan(&version); err != nil || version != "1" {
 		db.Close()

@@ -1,9 +1,12 @@
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowDown, ArrowRight, ArrowUp, CalendarClock, Clock3, Globe2, Plus, Search, Server, Settings2, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { api, usePolling } from "../api";
 import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, bytes, date, useToast } from "../components";
 import TrafficAnalyticsPanel from "../TrafficAnalyticsPanel";
+import { AddNode } from "./AddNode";
+import { NodeIPSwitch } from "./NodeIPSwitch";
+import { isPublicIPv4 } from "../public-ipv4";
 import QuotaFields from "../QuotaFields";
 import { hasNodeReport } from "../monitoring";
 import { compareResourceNames } from "../resource-order";
@@ -28,10 +31,12 @@ function ServerForm({ server, onClose, onSaved }: { server?: ManagedServer; onCl
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const change = (key: keyof typeof form, value: string) => setForm(p => ({ ...p, [key]: value }));
   async function submit(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setError("");
+    e.preventDefault();
+    if (!isPublicIPv4(form.sshHost)) { setError("SSH 管理地址必须为有效的公网 IPv4"); return; }
+    setBusy(true); setError("");
     try {
       const result = await api<ManagedServer>(server ? `/servers/${server.id}` : "/servers", server ? "PATCH" : "POST", {
-        ...form, sshPort: Number(form.sshPort), expectedRevision, saveCredential,
+        ...form, sshHost: form.sshHost.trim(), sshPort: Number(form.sshPort), expectedRevision, saveCredential,
         bandwidthMbps: server ? server.bandwidthMbps : quota.bandwidth === "" ? null : Number(quota.bandwidth),
         monthlyQuotaBytes: server ? server.monthlyQuotaBytes : quota.quota === "" ? null : Math.round(Number(quota.quota) * (quota.unit === "GB" ? 1e9 : 1e12)),
         ...(!server ? { expiresAt: parseBeijingExpiry(expiry.day, expiry.hour) } : {}),
@@ -39,20 +44,20 @@ function ServerForm({ server, onClose, onSaved }: { server?: ManagedServer; onCl
       setForm(p => ({ ...p, password: "" })); onSaved(result);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <Modal wide={!server} title={server ? "编辑服务器连接" : "添加服务器"} description="检查 SSH 连接与主机身份，节点将在下一步单独部署。" onClose={() => { if (!busy) onClose(); }}>
+  return <Modal wide={!server} title={server ? "编辑服务器连接" : "添加服务器"} description={server ? "检查 SSH 连接与主机身份后保存。" : "检查并保存后，将自动打开此服务器的节点部署窗口。"} onClose={() => { if (!busy) onClose(); }}>
     <form className="form-stack" onSubmit={submit}>
       <div className={server ? "form-stack" : "server-form-sections"}>
       <section className={server ? "form-stack" : "server-form-section"} aria-label="服务器连接信息">
       {!server && <h3><Server size={17} />连接与身份</h3>}
       <Field label="服务器名称"><input required maxLength={80} value={form.name} onChange={e => change("name", e.target.value)} placeholder="例如：香港 VPS" /></Field>
-      <Field label="SSH 管理地址"><input required value={form.sshHost} onChange={e => change("sshHost", e.target.value)} placeholder="IP 或完整域名" autoCapitalize="none" /></Field>
+      <Field label="SSH 管理地址（公网 IPv4）"><input required inputMode="decimal" spellCheck={false} value={form.sshHost} onChange={e => change("sshHost", e.target.value)} placeholder="服务器的公网 IPv4" autoCapitalize="none" /></Field>
       <div className="form-grid"><Field label="SSH 用户"><input required value={form.sshUser} onChange={e => change("sshUser", e.target.value)} /></Field><Field label="SSH 端口"><input type="number" min={1} max={65535} required value={form.sshPort} onChange={e => change("sshPort", e.target.value)} /></Field></div>
-      <Field label="SSH 密码" hint="验证此服务器的登录凭据。"><input type="password" autoComplete="new-password" required value={form.password} onChange={e => change("password", e.target.value)} /></Field>
-      <label className="assignment-option"><input type="checkbox" checked={saveCredential} onChange={e=>setSaveCredential(e.target.checked)} /><span>加密保存凭据，用于后续运维及每小时自动巡检</span></label>
+      <Field label="SSH 密码" hint={server ? "选填，留空使用已保存的原密码验证连接，并保持原密码。" : "验证此服务器的登录凭据。"}><input type="password" autoComplete="new-password" required={!server} value={form.password} onChange={e => change("password", e.target.value)} placeholder={server ? "留空保持原密码" : undefined} /></Field>
+      <label className="assignment-option"><input type="checkbox" checked={saveCredential} disabled={!!server && form.password === ""} onChange={e=>setSaveCredential(e.target.checked)} /><span>{server ? "加密保存本次填写的密码，用于后续运维及每小时自动巡检" : "加密保存凭据，用于后续运维及每小时自动巡检"}</span></label>
       </section>
       {!server && <section className="server-form-section" aria-label="服务器额度与有效期"><h3><CalendarClock size={17} />额度与有效期</h3><QuotaFields {...quota} quotaLabel="每周期流量额度" /><ExpiryFields {...expiry} onChange={setExpiry} /><p className="billing-help">默认到期时间为当前时间向上取整小时后加 30 天，请按厂商实际有效期核对。</p><Notice>服务器容量仅作提醒，所属节点分别统计实际用量。到期不停止代理；未经续期确认，不会自动清零用量。</Notice></section>}
       </div>
-      <p className="billing-help">HQIP 会固定 SSH 主机指纹。新增公网 IP 请先在 VPS 厂商和系统中配置，再加入此服务器的 IP 清单。</p>
+      <p className="billing-help">HQIP 会固定 SSH 主机指纹。节点公网 IP 需先在 VPS 厂商和系统中配置，再通过“添加节点”部署。</p>
       <ErrorNotice message={error} /><div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" busy={busy}>检查并保存</Button></div>
     </form>
   </Modal>;
@@ -121,7 +126,7 @@ export function Servers() {
     <PageHeader title="服务器" eyebrow="SERVERS" description="按 VPS 汇总资源、节点速率与代理用量，独立管理每个公网 IP。" actions={<><RefreshButton refresh={refresh} /><Button variant="secondary" icon={Upload} onClick={()=>setUpgrade(true)}>批量升级 Agent</Button><Button icon={Plus} onClick={() => setAdd(true)}>添加服务器</Button></>} />
     <ErrorNotice message={error ? `${error}${data ? "；以下保留上次成功数据，已标记过期。" : ""}` : ""} retry={() => void refresh()} />
     <div className="list-toolbar server-toolbar"><span className="list-count">服务器 <span>{data?.length || 0}</span></span><div className="server-filters"><label className="search-input"><Search size={15} /><input aria-label="搜索服务器名称或 IP" placeholder="搜索服务器名称 / IP" value={search} onChange={e => setSearch(e.target.value)} /></label><button type="button" className={`server-filter ${abnormal ? "active" : ""}`} aria-pressed={abnormal} onClick={() => setAbnormal(value => !value)}>仅看异常</button></div></div>
-    {loading ? <Loading /> : !data ? null : !data.length ? <Panel title="添加第一台服务器"><Empty icon={Server} title="还没有服务器" description="登记 SSH 地址并完成身份检查后，可以添加一个或多个公网 IP。" action={<Button onClick={() => setAdd(true)} icon={Plus}>添加服务器</Button>} /></Panel> : !visible.length ? <Panel title="筛选结果"><Empty icon={Search} title="没有匹配的服务器" description="尝试更换名称、IP，或关闭异常筛选。" /></Panel> : <div className="server-grid">{visible.map(server => {
+    {loading ? <Loading /> : !data ? null : !data.length ? <Panel title="添加第一台服务器"><Empty icon={Server} title="还没有服务器" description="填写 SSH 公网 IPv4 并完成身份检查后，即可为此服务器添加节点。" action={<Button onClick={() => setAdd(true)} icon={Plus}>添加服务器</Button>} /></Panel> : !visible.length ? <Panel title="筛选结果"><Empty icon={Search} title="没有匹配的服务器" description="尝试更换名称、IP，或关闭异常筛选。" /></Panel> : <div className="server-grid">{visible.map(server => {
       const health = serverHealth(server, !!error);
       return <Link className="server-card" to={`/servers/${server.id}`} key={server.id} aria-label={`管理服务器 ${server.name}`}>
         <div className="server-card-body">
@@ -135,7 +140,7 @@ export function Servers() {
       </Link>;
     })}</div>}
     <p className="footnote">异常筛选包含已到期及 48 小时内到期。速率含探测，周期用量不含探测；CPU、内存、磁盘仅取一个最新主机样本。</p>
-    {add && <ServerForm onClose={() => setAdd(false)} onSaved={server => navigate(`/servers/${server.id}`)} />}
+    {add && <ServerForm onClose={() => setAdd(false)} onSaved={server => navigate(`/servers/${server.id}?addNode=1`)} />}
     <OperationHistory />
     {upgrade && <AgentUpgradeDialog onClose={()=>setUpgrade(false)} />}
   </>;
@@ -144,10 +149,18 @@ export function Servers() {
 export function ServerPage() {
 	const [upgrade,setUpgrade]=useState(false);
   const { id } = useParams(); const navigate = useNavigate(); const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const { data, error, loading, refresh } = usePolling<{ server: ManagedServer; addresses: ServerAddress[]; nodes: Node[]; nodeUsage: Node[] }>(`/servers/${id}`);
   const [trafficRevision, setTrafficRevision] = useState(0);
-  const [edit, setEdit] = useState(false), [settings, setSettings] = useState(false), [add, setAdd] = useState(false), [ip, setIP] = useState(""), [busy, setBusy] = useState(false), [actionError, setActionError] = useState("");
+  const [edit, setEdit] = useState(false), [settings, setSettings] = useState(false), [add, setAdd] = useState(false), [nodeIP, setNodeIP] = useState(""), [busy, setBusy] = useState(false), [actionError, setActionError] = useState("");
   const [remove, setRemove] = useState<ServerAddress | "server" | null>(null);
+  const [ipSwitch, setIPSwitch] = useState<{ server: ManagedServer; node: Node } | null>(null);
+  useEffect(() => {
+    if (params.get("addNode") !== "1" || !data || data.server.id !== id) return;
+    setNodeIP(data.server.sshHost);
+    setAdd(true);
+    setParams(p => { const next = new URLSearchParams(p); next.delete("addNode"); return next; }, { replace: true });
+  }, [params, setParams, data, id]);
   if (loading) return <Loading />;
   if (!data) return <ErrorNotice message={error} retry={() => void refresh()} />;
   const { server, addresses, nodes } = data;
@@ -156,10 +169,6 @@ export function ServerPage() {
   const activeUsage = nodeUsage.filter(node => node.lifecycle !== "deleted");
   const deletedUsage = nodeUsage.filter(node => node.lifecycle === "deleted");
   const sourceNode = nodeUsage.find(node => node.id === server.metricsSourceNodeId);
-  async function addAddress(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setActionError("");
-    try { await api(`/servers/${id}/addresses`, "POST", { publicIp: ip.trim() }); setAdd(false); setIP(""); await refresh(); } catch (e) { setActionError((e as Error).message); } finally { setBusy(false); }
-  }
   async function deleteEntry() {
     setBusy(true); setActionError("");
     try {
@@ -194,15 +203,24 @@ export function ServerPage() {
       </tr>)}</tbody></table></div> : <Empty icon={Server} title="暂无活动节点" description="部署节点后，这里会展示每个 IP 节点对服务器用量的贡献。" />}
     </Panel>
     {deletedUsage.length > 0 && <details className="server-history"><summary>已删除节点的历史贡献 <span>{deletedUsage.length} 个节点</span></summary><p>历史用量继续计入服务器汇总，不再展示实时速率。</p><div className="table-scroll"><table><thead><tr><th>节点 / 公网 IP / 域名</th><th>本月上传</th><th>本月下载</th><th>本月合计</th><th>累计代理流量</th></tr></thead><tbody>{deletedUsage.map(node => <tr key={node.id}><td><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small mono">{node.publicIp}</div><div className="table-small mono">{node.domain}</div></td><td>{bytes(node.monthUpload)}</td><td>{bytes(node.monthDownload)}</td><td>{bytes(node.monthUpload + node.monthDownload)}</td><td>{bytes(node.totalUpload + node.totalDownload)}</td></tr>)}</tbody></table></div></details>}
-    <Panel title="公网 IP" subtitle="一个 IP 对应一个独立节点；入口和出口使用同一地址" action={<Button icon={Plus} onClick={() => { setActionError(""); setAdd(true); }}>添加 IP</Button>}>
-      {addresses.length ? <div className="table-scroll"><table><thead><tr><th>公网 IPv4</th><th>节点</th><th>操作</th></tr></thead><tbody>{addresses.map(address => { const node = nodes.find(node => node.addressId === address.id && node.lifecycle !== "deleted"); return <tr key={address.id}><td className="mono">{address.ip}</td><td>{node ? <div><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small"><NodeBadge node={node} /></div></div> : <span className="muted">未部署</span>}</td><td><div className="row-actions">{node ? <Link className="button button-secondary" to={`/nodes/${node.id}`}>管理节点</Link> : <Link className="button button-primary" to={`/nodes?add=1&server=${server.id}&address=${address.id}`}>部署节点</Link>}<Button variant="ghost" icon={Trash2} disabled={!!node} onClick={() => { setActionError(""); setRemove(address); }}>删除 IP</Button></div></td></tr>; })}</tbody></table></div> : <Empty icon={Globe2} title="暂无公网 IP" description="添加已经配置到服务器网卡上的公网 IPv4，再选择域名部署节点。" />}
+    <Panel title="公网 IP" subtitle="一个 IP 对应一个独立节点；入口和出口使用同一地址" action={<Button icon={Plus} onClick={() => { setNodeIP(""); setAdd(true); }}>添加节点</Button>}>
+      {addresses.length ? <div className="table-scroll"><table><thead><tr><th>公网 IPv4</th><th>节点</th><th>操作</th></tr></thead><tbody>{addresses.map(address => { const node = nodes.find(node => (node.addressId === address.id || node.ipSwitch?.fromAddressId === address.id) && node.lifecycle !== "deleted"); return <tr key={address.id}><td className="mono">{address.ip}</td><td>{node ? <div><Link to={`/nodes/${node.id}`}>{node.name}</Link><div className="table-small"><NodeBadge node={node} /></div></div> : <span className="muted">未部署</span>}</td><td><div className="row-actions">{node ? <Link className="button button-secondary" to={`/nodes/${node.id}`}>管理节点</Link> : <Button onClick={() => { setNodeIP(address.ip); setAdd(true); }}>部署节点</Button>}<Button variant="ghost" icon={Trash2} disabled={!!node} onClick={() => { setActionError(""); setRemove(address); }}>删除 IP</Button></div></td></tr>; })}</tbody></table></div> : <Empty icon={Globe2} title="暂无公网 IP" description="点击“添加节点”，填写已配置到服务器网卡上的公网 IPv4 并部署。" />}
     </Panel>
     <Notice>删除节点只停止对应 IP 的实例。删除 IP 清单不会解绑网卡或释放厂商 IP；有节点或清理任务的 IP 必须先完成节点删除。</Notice>
     <Panel title="主机身份"><dl className="details-list"><div><dt>SSH 指纹</dt><dd className="mono break-all">{server.hostKey || "尚未固定"}</dd></div><div><dt>系统</dt><dd>{server.platform} · {server.architecture}</dd></div><div><dt>登记时间</dt><dd>{date(server.createdAt)}</dd></div></dl></Panel>
     {settings && <ServerSettings server={server} onClose={() => setSettings(false)} onSaved={message => { setSettings(false); void refresh(); toast(message); }} />}
     {upgrade && <AgentUpgradeDialog nodes={nodes} onClose={()=>setUpgrade(false)} />}
-    {edit && <ServerForm server={server} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); void refresh(); }} />}
-    {add && <Modal title="添加公网 IP" onClose={() => { if (!busy) setAdd(false); }}><form className="form-stack" onSubmit={addAddress}><Field label="公网 IPv4"><input required value={ip} onChange={e => setIP(e.target.value)} placeholder="已绑定到此 VPS 的公网 IP" /></Field><Notice>这里只登记地址。部署前会检查它是否在本机网卡上，并验证实际出口；不会自动修改系统网络。</Notice><ErrorNotice message={actionError} /><div className="modal-actions"><Button type="button" variant="secondary" onClick={() => setAdd(false)} disabled={busy}>取消</Button><Button type="submit" busy={busy}>添加 IP</Button></div></form></Modal>}
+    {edit && <ServerForm server={server} onClose={() => setEdit(false)} onSaved={updated => {
+      setEdit(false); void refresh();
+      if (updated.sshHost !== server.sshHost) {
+        void api<{ nodes: Node[] }>(`/servers/${updated.id}`).then(detail => {
+          const node = detail.nodes.find(n => n.publicIp === server.sshHost && n.lifecycle === "active" && n.managed && !n.ipSwitch);
+          if (node) setIPSwitch({ server: updated, node });
+        }).catch(e => toast(`连接已保存，但检查原 IP 节点失败：${(e as Error).message}`));
+      }
+    }} />}
+    {ipSwitch && <NodeIPSwitch {...ipSwitch} onClose={() => setIPSwitch(null)} />}
+    {add && <AddNode server={server} initialPublicIp={nodeIP} onClose={() => setAdd(false)} />}
     {remove && <Modal title={remove === "server" ? "删除服务器" : "删除 IP"} onClose={() => { if (!busy) setRemove(null); }}><div className="form-stack"><Notice tone="warning">{remove === "server" ? "只有全部节点已清理完成的服务器才能删除。历史流量与审计记录保留。" : `将 ${remove.ip} 从 HQIP 清单移除。系统网卡和厂商分配不变。`}</Notice><ErrorNotice message={actionError} /><div className="modal-actions"><Button variant="secondary" onClick={() => setRemove(null)} disabled={busy}>取消</Button><Button variant="danger" busy={busy} onClick={() => void deleteEntry()}>确认删除</Button></div></div></Modal>}
   </>;
 }

@@ -208,6 +208,9 @@ func (s *Server) runJob(parent context.Context, job store.Job) {
 	if err == nil && job.Kind == "install" && job.CertificateMode != "" {
 		err = s.Store.CommitNodeCertificateMode(node.ID, job.ID, job.CertificateMode, job.ZoneID)
 	}
+	if err == nil && job.Kind == "install" && node.IPSwitch != nil {
+		err = s.Store.CompleteNodeIPSwitch(node.ID, job.ID, node.PublicIP)
+	}
 	if err != nil {
 		message := "部署或验证失败：" + redact(err.Error())
 		_ = s.Store.SetStatus(node.ID, "error", message, output.SharedHost || node.SharedHost)

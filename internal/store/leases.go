@@ -9,6 +9,7 @@ import (
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/secure"
+	"github.com/apernet/hysteria/core/v2/billing"
 )
 
 const leaseSelect = `SELECT id,node_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget,upload,download,closed,revoked,COALESCE((SELECT version FROM portal_rates WHERE lease_id=id),1),COALESCE((SELECT pending FROM portal_rates WHERE lease_id=id),1) FROM portal_leases `
@@ -88,10 +89,20 @@ func activeCredentialSession(tx *sql.Tx, user, subscription, scope string, now t
 	return n == 1, err
 }
 func (s *Store) AcquireLease(node, connection, password string, offline ...bool) (model.ConnectionLease, error) {
+	return s.acquireLease(node, connection, password, "", len(offline) == 1 && offline[0])
+}
+
+func (s *Store) AcquireProtocolLease(node, connection, password, protocol string, offline bool) (model.ConnectionLease, error) {
+	if protocol != "hysteria2" && protocol != "vless" {
+		return model.ConnectionLease{}, ErrConflict
+	}
+	return s.acquireLease(node, connection, password, protocol, offline)
+}
+
+func (s *Store) acquireLease(node, connection, password, protocol string, withOffline bool) (model.ConnectionLease, error) {
 	if len(connection) < 16 || len(connection) > 128 || strings.ContainsAny(connection, "\r\n\x00") || len(password) != 43 {
 		return model.ConnectionLease{}, ErrUnauthorized
 	}
-	withOffline := len(offline) == 1 && offline[0]
 	if withOffline && !s.OfflineAdmissionEnabled(node) {
 		return model.ConnectionLease{}, ErrEntitlement
 	}
@@ -160,7 +171,33 @@ func (s *Store) AcquireLease(node, connection, password string, offline ...bool)
 			if old.UserID != user || old.SessionID != scope || old.Closed || old.revoked || old.SubscriptionID != e.ID || !old.ExpiresAt.After(now) {
 				return empty, ErrEntitlement
 			}
+			state, err := loadLeaseBilling(tx, old.ID)
+			if err != nil {
+				return empty, err
+			}
+			if state != nil {
+				if state.Grant.Protocol != protocol {
+					return empty, ErrConflict
+				}
+				old.Billing = &state.Grant
+			}
+			if state == nil && protocol != "" {
+				return empty, ErrConflict
+			}
 			return old.ConnectionLease, nil
+		}
+		if protocol == "" {
+			settings, err := readTrafficBilling(tx)
+			if err != nil {
+				return empty, err
+			}
+			if settings.Enabled {
+				old, err := existing()
+				if errors.Is(err, sql.ErrNoRows) {
+					return empty, ErrEntitlement
+				}
+				return old, err
+			}
 		}
 		rate := leaseRate(e)
 		budget := leaseWindow(rate)
@@ -173,7 +210,15 @@ func (s *Store) AcquireLease(node, connection, password string, offline ...bool)
 				budget = available
 			}
 		}
-		if e.Occupied >= e.MaxConnections || budget < model.MinimumSubscriptionLeaseBytes {
+		minimum := model.MinimumSubscriptionLeaseBytes
+		if protocol != "" {
+			policy, err := billingPolicy(tx, protocol)
+			if err != nil {
+				return empty, err
+			}
+			minimum = billing.Ceiling(model.MinimumSubscriptionLeaseBytes * policy.Multiplier)
+		}
+		if e.Occupied >= e.MaxConnections || budget < minimum {
 			// Replays still succeed when their existing reservation fills the
 			// quota or last slot. Rejected new connections stay read-only.
 			old, err := existing()
@@ -204,6 +249,10 @@ func (s *Store) AcquireLease(node, connection, password string, offline ...bool)
 		if rows == 0 {
 			return existing()
 		}
+		billingState, err := createLeaseBilling(tx, l.ID, protocol, budget)
+		if err != nil {
+			return empty, err
+		}
 		reserve := budget
 		if withOffline && e.QuotaBytes == nil {
 			reserve = 0
@@ -213,6 +262,23 @@ func (s *Store) AcquireLease(node, connection, password string, offline ...bool)
 		}
 		if withOffline {
 			if err = createOfflineGrant(tx, &l, e, secure.Hash(password), now); err != nil {
+				return empty, err
+			}
+		}
+		if billingState != nil {
+			if withOffline {
+				if e.QuotaBytes == nil {
+					billingState.Reserved = 0
+					billingState.Grant.BudgetUnits = billing.MaxRawBytes
+				}
+				if err = tx.QueryRow("SELECT emergency_budget FROM portal_offline_grants WHERE lease_id=?", l.ID).Scan(&billingState.Grant.EmergencyBytes); err != nil {
+					return empty, err
+				}
+			}
+			if err = saveLeaseBilling(tx, l.ID, billingState); err != nil {
+				return empty, err
+			}
+			if _, err = tx.Exec("UPDATE portal_leases SET budget=? WHERE id=?", billing.MaxRawBytes, l.ID); err != nil {
 				return empty, err
 			}
 		}
@@ -230,6 +296,9 @@ func (s *Store) AcquireLease(node, connection, password string, offline ...bool)
 			return empty, err
 		}
 		l = updated.ConnectionLease
+		if billingState != nil {
+			l.Billing = &billingState.Grant
+		}
 		err = tx.Commit()
 		return l, err
 	})
@@ -257,6 +326,13 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 		if err != nil {
 			return empty, notFound(err)
 		}
+		billingState, err := loadLeaseBilling(tx, id)
+		if err != nil {
+			return empty, err
+		}
+		if billingState != nil {
+			l.Billing = &billingState.Grant
+		}
 		var offlineCount int
 		if err = tx.QueryRow("SELECT COUNT(*) FROM portal_offline_grants WHERE lease_id=?", id).Scan(&offlineCount); err != nil {
 			return empty, err
@@ -272,6 +348,9 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 			return empty, ErrConflict
 		}
 		if l.Closed {
+			if !validBillingReplay(billingState, u.Billing) {
+				return empty, ErrConflict
+			}
 			if !u.Closed || consumed != l.ConsumedBytes {
 				return empty, ErrEntitlement
 			}
@@ -284,7 +363,16 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 		// rows. Locking a lease's rate first can deadlock with another lease's
 		// renewal while it rebalances the shared subscription rates.
 		du, dd := u.UploadBytes-l.UploadBytes, u.DownloadBytes-l.DownloadBytes
-		if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", du, dd, du+dd, l.SubscriptionID); err != nil {
+		released := du + dd
+		if billingState != nil {
+			du, dd, released, err = settleBilling(tx, l.SubscriptionID, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, 0)
+			if err != nil {
+				return empty, err
+			}
+		} else if len(u.Billing) > 0 {
+			return empty, ErrConflict
+		}
+		if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", du, dd, released, l.SubscriptionID); err != nil {
 			return empty, err
 		}
 		if u.AppliedRateVersion == l.RateVersion {
@@ -303,7 +391,12 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 		l.ConsumedBytes = consumed
 		// Final reports can arrive after expiry; settlement never resurrects leases.
 		if u.Closed {
-			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", l.BudgetBytes-consumed, l.SubscriptionID); err != nil {
+			remaining := l.BudgetBytes - consumed
+			if billingState != nil {
+				remaining = billingState.Reserved
+				billingState.Reserved = 0
+			}
+			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", remaining, l.SubscriptionID); err != nil {
 				return empty, err
 			}
 			l.Closed = true
@@ -332,6 +425,11 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 				valid = rank <= e.MaxConnections
 			}
 			if !valid {
+				if billingState != nil {
+					if err = saveLeaseBilling(tx, id, billingState); err != nil {
+						return empty, err
+					}
+				}
 				if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,revoked=1 WHERE id=?", u.UploadBytes, u.DownloadBytes, id); err != nil {
 					return empty, err
 				}
@@ -343,6 +441,16 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 			l.Revision = e.Revision
 			l.ExpiresAt = leaseExpiry(now, e)
 			needed := leaseWindow(l.BandwidthBytesPerSecond) - (l.BudgetBytes - consumed)
+			if billingState != nil {
+				if err = issueBillingPolicy(tx, billingState); err != nil {
+					return empty, err
+				}
+				window, err := billing.Units(leaseWindow(l.BandwidthBytesPerSecond), billingState.Grant.Multiplier)
+				if err != nil {
+					return empty, err
+				}
+				needed = billing.Ceiling(max(int64(0), window-(billingState.Grant.BudgetUnits-billingState.NormalUsed)))
+			}
 			if needed < 0 {
 				needed = 0
 			}
@@ -359,7 +467,18 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 				if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", needed, l.SubscriptionID); err != nil {
 					return empty, err
 				}
-				l.BudgetBytes += needed
+				if billingState != nil {
+					units, err := billing.Units(needed, 100)
+					if err != nil {
+						return empty, err
+					}
+					if billingState.Grant.BudgetUnits, err = billing.Add(billingState.Grant.BudgetUnits, units); err != nil {
+						return empty, err
+					}
+					billingState.Reserved += needed
+				} else {
+					l.BudgetBytes += needed
+				}
 			}
 			if l.BudgetBytes <= consumed {
 				if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,revoked=1 WHERE id=?", u.UploadBytes, u.DownloadBytes, id); err != nil {
@@ -369,6 +488,11 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 					return empty, err
 				}
 				return empty, ErrEntitlement
+			}
+		}
+		if billingState != nil {
+			if err = saveLeaseBilling(tx, id, billingState); err != nil {
+				return empty, err
 			}
 		}
 		if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,budget=?,bandwidth=?,revision=?,expires=?,closed=? WHERE id=?", l.UploadBytes, l.DownloadBytes, l.BudgetBytes, l.BandwidthBytesPerSecond, l.Revision, l.ExpiresAt.Unix(), l.Closed, id); err != nil {
@@ -388,6 +512,9 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 			return empty, err
 		}
 		l = updated
+		if billingState != nil {
+			l.Billing = &billingState.Grant
+		}
 		if err = tx.Commit(); err != nil {
 			return empty, err
 		}
@@ -409,6 +536,16 @@ func settledLeaseReceipt(tx *sql.Tx, node, id string, u model.LeaseUsage) (model
 	l.ConsumedBytes = l.UploadBytes + l.DownloadBytes
 	if !u.Closed || u.UploadBytes != l.UploadBytes || u.DownloadBytes != l.DownloadBytes || u.AppliedRateVersion < 0 || u.AppliedRateVersion > l.RateVersion {
 		return model.ConnectionLease{}, ErrConflict
+	}
+	state, err := loadLeaseBilling(tx, id)
+	if err != nil {
+		return l, err
+	}
+	if !validBillingReplay(state, u.Billing) {
+		return l, ErrConflict
+	}
+	if state != nil {
+		l.Billing = &state.Grant
 	}
 	return l, nil
 }

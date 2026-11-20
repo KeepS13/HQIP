@@ -22,6 +22,7 @@ import (
 func (s *Server) registerPortalAdmin(m *http.ServeMux) {
 	s.registerPaymentAdmin(m)
 	for pattern, handler := range map[string]http.HandlerFunc{
+		"GET /api/v1/settings/traffic-billing": s.trafficBillingSettings, "PUT /api/v1/settings/traffic-billing": s.trafficBillingSettings,
 		"GET /api/v1/subscription-templates": s.subscriptionTemplates, "POST /api/v1/subscription-templates": s.saveSubscriptionTemplate, "PUT /api/v1/subscription-templates/{id}": s.saveSubscriptionTemplate, "POST /api/v1/subscription-templates/{id}/preview": s.previewSubscriptionTemplate,
 		"GET /api/v1/subscription-requests": s.adminSubscriptionRequests, "POST /api/v1/subscription-requests/{id}/approve": stoppedApplication, "POST /api/v1/subscription-requests/{id}/reject": stoppedApplication,
 		"GET /api/v1/users/{id}/subscriptions": s.adminUserSubscriptions, "POST /api/v1/users/{id}/subscriptions": s.adminAssignSubscription, "DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}": s.adminRemoveSubscription,
@@ -66,6 +67,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	for pattern, handler := range map[string]portalHandler{
 		"POST /api/v3/client/logout": s.portalLogout, "GET /api/v3/client/profile": s.nativeProfile, "POST /api/v3/client/subscription": s.nativeSelectSubscription, "POST /api/v3/client/status": s.nativeStatus, "GET /api/v3/client/rules/{hash}": s.nativeRules,
 		"GET /api/v3/client/connections": s.portalConnections, "POST /api/v3/client/connections/drain": s.nativeDrain,
+		"GET /api/v3/client/billing": s.nativeBilling,
 	} {
 		m.Handle(pattern, s.portalAuth("native", handler))
 	}

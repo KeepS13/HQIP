@@ -15,6 +15,7 @@ import (
 )
 
 type Controller struct {
+	billingMetrics      billingMetrics
 	mu                  sync.Mutex
 	syncMu              sync.Mutex
 	applyMu             sync.Mutex

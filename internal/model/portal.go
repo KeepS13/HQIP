@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"github.com/apernet/hysteria/core/v2/billing"
+	"time"
+)
 
 type SubscriptionTemplate struct {
 	Description          string                `json:"description"`
@@ -89,34 +92,36 @@ type PortalSession struct {
 	Current    bool      `json:"current"`
 }
 type ConnectionLease struct {
-	OfflineReservation      bool       `json:"offlineReservation,omitempty"`
-	LastForwardingReport    *time.Time `json:"lastForwardingReport,omitempty"`
-	RateVersion             int64      `json:"rateVersion"`
-	RatePending             bool       `json:"ratePending"`
-	SessionID               string     `json:"sessionId,omitempty"`
-	State                   string     `json:"state"`
-	LastError               string     `json:"lastError"`
-	ID                      string     `json:"id"`
-	LeaseID                 string     `json:"leaseId"`
-	UserID                  string     `json:"userId"`
-	SubscriptionID          string     `json:"subscriptionId"`
-	AccountingID            string     `json:"accountingId"`
-	NodeID                  string     `json:"nodeId"`
-	CreatedAt               time.Time  `json:"createdAt"`
-	ExpiresAt               time.Time  `json:"expiresAt"`
-	BandwidthBytesPerSecond int64      `json:"bandwidthBytesPerSecond"`
-	BudgetBytes             int64      `json:"budgetBytes"`
-	ConsumedBytes           int64      `json:"consumedBytes"`
-	UploadBytes             int64      `json:"uploadBytes"`
-	DownloadBytes           int64      `json:"downloadBytes"`
-	Revision                int64      `json:"revision"`
-	Closed                  bool       `json:"closed"`
+	Billing                 *billing.Grant `json:"billing,omitempty"`
+	OfflineReservation      bool           `json:"offlineReservation,omitempty"`
+	LastForwardingReport    *time.Time     `json:"lastForwardingReport,omitempty"`
+	RateVersion             int64          `json:"rateVersion"`
+	RatePending             bool           `json:"ratePending"`
+	SessionID               string         `json:"sessionId,omitempty"`
+	State                   string         `json:"state"`
+	LastError               string         `json:"lastError"`
+	ID                      string         `json:"id"`
+	LeaseID                 string         `json:"leaseId"`
+	UserID                  string         `json:"userId"`
+	SubscriptionID          string         `json:"subscriptionId"`
+	AccountingID            string         `json:"accountingId"`
+	NodeID                  string         `json:"nodeId"`
+	CreatedAt               time.Time      `json:"createdAt"`
+	ExpiresAt               time.Time      `json:"expiresAt"`
+	BandwidthBytesPerSecond int64          `json:"bandwidthBytesPerSecond"`
+	BudgetBytes             int64          `json:"budgetBytes"`
+	ConsumedBytes           int64          `json:"consumedBytes"`
+	UploadBytes             int64          `json:"uploadBytes"`
+	DownloadBytes           int64          `json:"downloadBytes"`
+	Revision                int64          `json:"revision"`
+	Closed                  bool           `json:"closed"`
 }
 type LeaseUsage struct {
-	AppliedRateVersion int64 `json:"appliedRateVersion"`
-	UploadBytes        int64 `json:"uploadBytes"`
-	DownloadBytes      int64 `json:"downloadBytes"`
-	Closed             bool  `json:"closed"`
+	Billing            []billing.Segment `json:"billing,omitempty"`
+	AppliedRateVersion int64             `json:"appliedRateVersion"`
+	UploadBytes        int64             `json:"uploadBytes"`
+	DownloadBytes      int64             `json:"downloadBytes"`
+	Closed             bool              `json:"closed"`
 }
 type PortalTokens struct {
 	AccessToken      string     `json:"accessToken"`

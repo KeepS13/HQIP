@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/netutil"
 	"github.com/KeepS13/HQIP/internal/store"
 )
 
@@ -87,6 +88,7 @@ func validQuota(bandwidth *float64, quota *int64) bool {
 func (f *nodeForm) validate() error {
 	f.Name = strings.TrimSpace(f.Name)
 	f.SSHHost = strings.TrimSpace(f.SSHHost)
+	f.PublicIP = strings.TrimSpace(f.PublicIP)
 	f.Domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(f.Domain), "."))
 	if f.SSHPort == 0 {
 		f.SSHPort = 22
@@ -103,15 +105,23 @@ func (f *nodeForm) validate() error {
 	if len(f.SSHHost) > 253 || (net.ParseIP(f.SSHHost) == nil && !domainRE.MatchString(f.SSHHost)) {
 		return errors.New("SSH 地址必须为 IP 或完整域名")
 	}
+	// Existing managed servers retain their verified connection settings.
+	// Legacy enrollment through POST /nodes must obey the new SSH policy too.
+	if f.ServerID == "" {
+		if _, err := netutil.ParsePublicIPv4(f.SSHHost); err != nil {
+			return errors.New("SSH 管理地址必须为有效的公网 IPv4")
+		}
+	}
 	if !userRE.MatchString(f.SSHUser) {
 		return errors.New("SSH 用户名格式无效")
 	}
 	if f.SSHPort < 1 || f.SSHPort > 65535 || f.Port < 1 || f.Port > 65535 {
 		return errors.New("端口应为 1–65535")
 	}
-	ip := net.ParseIP(f.PublicIP)
-	if ip == nil || ip.To4() == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
-		return errors.New("请填写服务器的公网 IPv4 地址")
+	if ip, err := netutil.ParsePublicIPv4(f.PublicIP); err != nil {
+		return err
+	} else {
+		f.PublicIP = ip
 	}
 	if f.DNSMode != "" && f.DNSMode != "manual" && f.DNSMode != "cloudflare" {
 		return errors.New("域名模式无效")
@@ -137,22 +147,23 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 			managementError(w, err)
 			return
 		}
-		addresses, err := s.Store.Addresses(server.ID)
-		if err != nil {
-			result(w, nil, err)
-			return
-		}
-		found := false
-		for _, address := range addresses {
-			if address.ID == f.AddressID {
-				f.PublicIP = address.IP
-				found = true
-				break
+		if f.AddressID != "" {
+			found := false
+			for _, address := range server.Addresses {
+				if address.ID == f.AddressID {
+					if strings.TrimSpace(f.PublicIP) != "" && strings.TrimSpace(f.PublicIP) != address.IP {
+						fail(w, 400, "公网 IP 与已登记地址不一致")
+						return
+					}
+					f.PublicIP = address.IP
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			fail(w, 400, "请从所选服务器选择已登记的公网 IP")
-			return
+			if !found {
+				fail(w, 400, "所选公网 IP 不属于该服务器或已被删除")
+				return
+			}
 		}
 		f.SSHHost, f.SSHPort, f.SSHUser = server.SSHHost, server.SSHPort, server.SSHUser
 		if f.Password == "" {
@@ -175,6 +186,10 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 	// server capacity and subscription entitlements have quota semantics.
 	n, err := s.Store.CreateNode(model.Node{ServerID: f.ServerID, AddressID: f.AddressID, DNSMode: f.DNSMode, ZoneID: f.ZoneID, CertificateMode: certificateMode, HostKey: server.HostKey, MachineID: server.MachineID, Name: f.Name, SSHHost: f.SSHHost, SSHPort: f.SSHPort, SSHUser: f.SSHUser, PublicIP: f.PublicIP, Domain: f.Domain, Port: f.Port}, f.Password)
 	if err != nil {
+		if errors.Is(err, store.ErrAddressInUse) {
+			fail(w, 409, err.Error())
+			return
+		}
 		fail(w, 409, "创建节点失败，域名或服务器端口可能已存在")
 		return
 	}

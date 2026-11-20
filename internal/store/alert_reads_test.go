@@ -17,6 +17,51 @@ func requireUnread(t *testing.T, s *Store, want int) {
 	}
 }
 
+func TestResolvedAlertDoesNotCountAsUnreadUntilItRecurs(t *testing.T) {
+	for _, beforeRecovery := range []string{"unread", "read"} {
+		t.Run(beforeRecovery, func(t *testing.T) {
+			s, now := fixture(t)
+			c := model.NotificationCondition{Key: "health:recovery-read", Kind: "node.health", Category: "system", Title: "节点异常", Stage: 1, Continuous: true, RecoverySeconds: 30}
+			alertEval(t, s, c)
+			a := alertList(t, s)[0]
+			requireUnread(t, s, 1)
+			wantBeforeRecovery := 1
+			if beforeRecovery == "read" {
+				if err := s.MarkAlertRead(a.ID, "admin", a.Revision); err != nil {
+					t.Fatal(err)
+				}
+				wantBeforeRecovery = 0
+			}
+			// Recovery must be confirmed before an unread alert stops reminding.
+			alertEval(t, s)
+			*now = now.Add(29 * time.Second)
+			alertEval(t, s)
+			requireUnread(t, s, wantBeforeRecovery)
+			*now = now.Add(time.Second)
+			alertEval(t, s)
+			requireUnread(t, s, 0)
+			history, err := s.ListAlerts(1, 20, "", "", "history", "", false)
+			if err != nil || len(history.Items) != 1 || history.Items[0].ID != a.ID || history.Items[0].Status != "resolved" {
+				t.Fatalf("resolved alert missing from history: %+v %v", history, err)
+			}
+			// Existing recovered records stay excluded after a new connection.
+			reopened, err := reopenFixture(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			requireUnread(t, reopened, 0)
+			// A recurrence of the same alert must still produce a reminder.
+			alertEval(t, s, c)
+			requireUnread(t, s, 1)
+			recurred, err := s.Alert(a.ID)
+			if err != nil || recurred.Status != "active" {
+				t.Fatalf("alert did not recur: %+v %v", recurred, err)
+			}
+		})
+	}
+}
+
 func TestAlertReadIndependentFromAcknowledgementAndNewChanges(t *testing.T) {
 	s, now := fixture(t)
 	c := model.NotificationCondition{Key: "capacity:read-test", Kind: "server.traffic", Category: "capacity", Title: "流量提醒", Message: "达到80%", Stage: 1}

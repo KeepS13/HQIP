@@ -1515,7 +1515,7 @@ func (c *serverConfig) fillTrafficLogger(hyConfig *server.Config) error {
 						return
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(map[string]any{"admission": true, "version": 1})
+					_ = json.NewEncoder(w).Encode(map[string]any{"admission": true, "version": 1, "trafficBillingVersion": 1})
 					return
 				}
 				tss.ServeHTTP(w, r)

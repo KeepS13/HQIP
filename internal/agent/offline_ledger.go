@@ -5,38 +5,51 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/apernet/hysteria/core/v2/billing"
 )
 
 var errOfflineDenied = errors.New("cached node authorization unavailable")
 
 type offlineChild struct {
-	CoreGeneration string    `json:"coreGeneration"`
-	Ended          bool      `json:"ended"`
-	ID             string    `json:"id"`
-	Normal         int64     `json:"normal"`
-	Emergency      int64     `json:"emergency"`
-	Upload         int64     `json:"upload"`
-	Download       int64     `json:"download"`
-	AppliedRate    int64     `json:"appliedRate"`
-	Until          time.Time `json:"until"`
-	Closed         bool      `json:"closed"`
+	Billing             map[int64]billing.Segment `json:"billing,omitempty"`
+	BillingAcknowledged []billing.Segment         `json:"billingAcknowledged,omitempty"`
+	NormalUsed          int64                     `json:"normalUsed,omitempty"`
+	EmergencyUsed       int64                     `json:"emergencyUsed,omitempty"`
+	CoreGeneration      string                    `json:"coreGeneration"`
+	Ended               bool                      `json:"ended"`
+	ID                  string                    `json:"id"`
+	Normal              int64                     `json:"normal"`
+	Emergency           int64                     `json:"emergency"`
+	Upload              int64                     `json:"upload"`
+	Download            int64                     `json:"download"`
+	AppliedRate         int64                     `json:"appliedRate"`
+	Until               time.Time                 `json:"until"`
+	Closed              bool                      `json:"closed"`
 }
 
-func (c offlineChild) emergencyUsed() int64 { return max(int64(0), c.Upload+c.Download-c.Normal) }
+func (c offlineChild) emergencyUsed() int64 {
+	if c.Billing != nil {
+		return c.EmergencyUsed
+	}
+	return max(int64(0), c.Upload+c.Download-c.Normal)
+}
 
 type offlineState struct {
-	Grant       model.OfflineGrant      `json:"grant"`
-	Children    map[string]offlineChild `json:"children"`
-	LastWall    time.Time               `json:"lastWall"`
-	Denied      bool                    `json:"denied"`
-	Online      bool                    `json:"online"`
-	RetryAt     time.Time               `json:"retryAt"`
-	Failures    int                     `json:"failures"`
-	NextVersion int64                   `json:"nextVersion"`
-	Pending     *model.OfflineUsage     `json:"pending,omitempty"`
+	BillingReported map[int64]billing.Segment `json:"billingReported,omitempty"`
+	BillingPolicies map[int64]billing.Policy  `json:"billingPolicies,omitempty"`
+	Grant           model.OfflineGrant        `json:"grant"`
+	Children        map[string]offlineChild   `json:"children"`
+	LastWall        time.Time                 `json:"lastWall"`
+	Denied          bool                      `json:"denied"`
+	Online          bool                      `json:"online"`
+	RetryAt         time.Time                 `json:"retryAt"`
+	Failures        int                       `json:"failures"`
+	NextVersion     int64                     `json:"nextVersion"`
+	Pending         *model.OfflineUsage       `json:"pending,omitempty"`
 }
 
 func (l *ledger) offlineStates() ([]offlineState, error) {
@@ -140,10 +153,39 @@ func (s *offlineState) usage(now time.Time) (model.OfflineUsage, error) {
 		return u, errors.New("offline counter overflow")
 	}
 	u.Closed = allClosed && (s.Denied || s.Grant.Revoked || !now.Before(s.Grant.OfflineUntil))
+	if s.Grant.Billing != nil {
+		segments := map[int64]billing.Segment{}
+		for _, child := range s.Children {
+			for version, segment := range child.Billing {
+				merged := segments[version]
+				merged.Version = version
+				if merged.AppliedAt.IsZero() || segment.AppliedAt.Before(merged.AppliedAt) {
+					merged.AppliedAt = segment.AppliedAt
+				}
+				if segment.ValidUntil.After(merged.ValidUntil) {
+					merged.ValidUntil = segment.ValidUntil
+				}
+				merged.Upload += segment.Upload
+				merged.Download += segment.Download
+				merged.EmergencyUpload += segment.EmergencyUpload
+				merged.EmergencyDownload += segment.EmergencyDownload
+				segments[version] = merged
+			}
+		}
+		for _, segment := range segments {
+			if !segment.Equal(s.BillingReported[segment.Version]) {
+				u.Billing = append(u.Billing, segment)
+			}
+		}
+		sort.Slice(u.Billing, func(left, right int) bool { return u.Billing[left].Version < u.Billing[right].Version })
+	}
 	return u, nil
 }
 
 func (s *offlineState) updateChild(id string, u model.LeaseUsage, now time.Time) error {
+	if s.Grant.Billing != nil {
+		return s.updateBillingChild(id, u)
+	}
 	c, ok := s.Children[id]
 	if !ok {
 		return sql.ErrNoRows
@@ -164,6 +206,9 @@ func (s *offlineState) updateChild(id string, u model.LeaseUsage, now time.Time)
 }
 
 func (s *offlineState) localGrant(id string, now time.Time) (model.ConnectionLease, error) {
+	if s.Grant.Billing != nil {
+		return s.localBillingGrant(id, now)
+	}
 	var empty model.ConnectionLease
 	if err := s.observe(now); err != nil {
 		return empty, err

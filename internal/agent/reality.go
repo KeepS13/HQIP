@@ -213,8 +213,22 @@ func (a *Agent) connectRealityBackend(ctx context.Context, password string) (hy.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	credential := password
+	var capability struct {
+		TrafficBillingVersion int `json:"trafficBillingVersion"`
+	}
+	if err := a.statsJSON(ctx, http.MethodGet, "/hqip/capabilities", nil, &capability); err != nil {
+		return nil, err
+	}
+	if capability.TrafficBillingVersion == 1 {
+		var err error
+		credential, err = a.realityBillingPassword(password)
+		if err != nil {
+			return nil, err
+		}
+	}
 	client, _, err := hy.NewClient(&hy.Config{
-		ServerAddr: &net.UDPAddr{IP: net.ParseIP(a.cfg.PublicIP), Port: a.cfg.Reality.BackendPort}, Auth: password,
+		ServerAddr: &net.UDPAddr{IP: net.ParseIP(a.cfg.PublicIP), Port: a.cfg.Reality.BackendPort}, Auth: credential,
 		TLSConfig:  hy.TLSConfig{ServerName: a.cfg.Domain},
 		QUICConfig: hy.QUICConfig{DisableChromeParrot: true, MaxIdleTimeout: 10 * time.Second, KeepAlivePeriod: 2 * time.Second},
 	})

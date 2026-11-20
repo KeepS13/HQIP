@@ -1,0 +1,210 @@
+[
+  {
+    "input": "8.8.8.8",
+    "valid": true
+  },
+  {
+    "input": "1.1.1.1",
+    "valid": true
+  },
+  {
+    "input": "38.182.101.128",
+    "valid": true
+  },
+  {
+    "input": "125.124.124.124",
+    "valid": true
+  },
+  {
+    "input": " 8.8.4.4 ",
+    "valid": true
+  },
+  {
+    "input": "9.255.255.255",
+    "valid": true
+  },
+  {
+    "input": "11.0.0.0",
+    "valid": true
+  },
+  {
+    "input": "100.63.255.255",
+    "valid": true
+  },
+  {
+    "input": "100.128.0.0",
+    "valid": true
+  },
+  {
+    "input": "172.15.255.255",
+    "valid": true
+  },
+  {
+    "input": "172.32.0.0",
+    "valid": true
+  },
+  {
+    "input": "198.17.255.255",
+    "valid": true
+  },
+  {
+    "input": "198.20.0.0",
+    "valid": true
+  },
+  {
+    "input": "223.255.255.255",
+    "valid": true
+  },
+  {
+    "input": "",
+    "valid": false
+  },
+  {
+    "input": "node.example.com",
+    "valid": false
+  },
+  {
+    "input": "https://8.8.8.8",
+    "valid": false
+  },
+  {
+    "input": "8.8.8.8:22",
+    "valid": false
+  },
+  {
+    "input": "8.8.8.8/32",
+    "valid": false
+  },
+  {
+    "input": "8.8.8",
+    "valid": false
+  },
+  {
+    "input": "8.8.8.8.8",
+    "valid": false
+  },
+  {
+    "input": "008.8.8.8",
+    "valid": false
+  },
+  {
+    "input": "1.01.1.1",
+    "valid": false
+  },
+  {
+    "input": "1.2.3.256",
+    "valid": false
+  },
+  {
+    "input": "-1.2.3.4",
+    "valid": false
+  },
+  {
+    "input": "+1.2.3.4",
+    "valid": false
+  },
+  {
+    "input": "1e0.2.3.4",
+    "valid": false
+  },
+  {
+    "input": "1.2.3.4\n5",
+    "valid": false
+  },
+  {
+    "input": "::1",
+    "valid": false
+  },
+  {
+    "input": "::ffff:8.8.8.8",
+    "valid": false
+  },
+  {
+    "input": "2001:4860:4860::8888",
+    "valid": false
+  },
+  {
+    "input": "0.1.2.3",
+    "valid": false
+  },
+  {
+    "input": "10.0.0.1",
+    "valid": false
+  },
+  {
+    "input": "10.255.255.255",
+    "valid": false
+  },
+  {
+    "input": "100.64.0.0",
+    "valid": false
+  },
+  {
+    "input": "100.127.255.255",
+    "valid": false
+  },
+  {
+    "input": "127.0.0.1",
+    "valid": false
+  },
+  {
+    "input": "169.254.1.1",
+    "valid": false
+  },
+  {
+    "input": "172.16.0.0",
+    "valid": false
+  },
+  {
+    "input": "172.31.255.255",
+    "valid": false
+  },
+  {
+    "input": "192.0.0.1",
+    "valid": false
+  },
+  {
+    "input": "192.0.2.1",
+    "valid": false
+  },
+  {
+    "input": "192.88.99.1",
+    "valid": false
+  },
+  {
+    "input": "192.168.1.1",
+    "valid": false
+  },
+  {
+    "input": "198.18.0.0",
+    "valid": false
+  },
+  {
+    "input": "198.19.255.255",
+    "valid": false
+  },
+  {
+    "input": "198.51.100.1",
+    "valid": false
+  },
+  {
+    "input": "203.0.113.1",
+    "valid": false
+  },
+  {
+    "input": "224.0.0.1",
+    "valid": false
+  },
+  {
+    "input": "239.255.255.255",
+    "valid": false
+  },
+  {
+    "input": "240.0.0.1",
+    "valid": false
+  },
+  {
+    "input": "255.255.255.255",
+    "valid": false
+  }
+]

@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"errors"
+	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/apernet/hysteria/core/v2/billing"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -42,8 +44,8 @@ func TestCoreMetricsSummarizeOnlyAndUseAuthenticatedLoopback(t *testing.T) {
 		}
 	})
 	s, err := core.Sample(context.Background())
-	if err != nil || s.UploadRate != 100 || s.DownloadRate != 900 || s.UploadTotal != 1234 || s.DownloadTotal != 4567 || s.Connections != 2 || s.Memory != 2048 {
-		t.Fatalf("bad sample %+v %v", s, err)
+	if err == nil || s.UploadTotal != 0 || s.DownloadTotal != 0 {
+		t.Fatalf("raw global counters leaked without proxy statistics %+v %v", s, err)
 	}
 	delay, err := core.Delay(context.Background())
 	if err != nil || delay != 28 {
@@ -110,17 +112,20 @@ func TestDashboardHistoryIsBoundedAndFailureIsNotZero(t *testing.T) {
 	defer c.Close()
 	c.view.RunState = "connected"
 	c.beginMetricsLocked()
+	start := time.Now().Add(-80 * time.Second)
+	c.billingMetrics.Policies = []model.BillingDisplay{{Policy: billing.Policy{Version: 1, Multiplier: 150, Protocol: "hysteria2"}, AppliedAt: start, ValidUntil: start.Add(time.Hour)}}
+	c.billingMetrics.Updated = time.Now()
 	for i := 0; i < 80; i++ {
-		c.sampleMetrics(context.Background())
+		c.applyBillingSample(CoreSample{ProxyOnly: true, UploadTotal: int64(i) * 100, DownloadTotal: int64(i) * 200}, start.Add(time.Duration(i)*time.Second))
 	}
 	m := c.View().Metrics
-	if len(m.History) != 60 || !m.Available || m.Stale || m.UploadBytes != 1000 || m.DownloadBytes != 2000 {
+	if len(m.History) != 60 || !m.Available || m.Stale || m.UploadBytes != 11850 || m.DownloadBytes != 23700 {
 		t.Fatalf("bad dashboard %+v", m)
 	}
 	e.err = errors.New("temporarily unavailable")
 	c.sampleMetrics(context.Background())
 	m = c.View().Metrics
-	if !m.Stale || m.DownloadBytes != 2000 {
+	if !m.Stale || m.DownloadBytes != 23700 {
 		t.Fatal("unavailable sample erased valid counters")
 	}
 	c.view.RunState = "disconnected"

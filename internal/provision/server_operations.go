@@ -44,6 +44,7 @@ func (e *AgentUpgradeError) Error() string {
 }
 
 type AgentRelease struct {
+	TrafficBillingVersion   int               `json:"trafficBillingVersion,omitempty"`
 	VLESSRealityVersion     int               `json:"vlessRealityVersion,omitempty"`
 	OfflineAdmissionVersion int               `json:"offlineAdmissionVersion,omitempty"`
 	SourceSHA               string            `json:"sourceSHA"`
@@ -52,6 +53,7 @@ type AgentRelease struct {
 
 func (r *Runner) AgentRelease() (AgentRelease, error) {
 	var raw struct {
+		TrafficBillingVersion   int               `json:"trafficBillingVersion"`
 		VLESSRealityVersion     int               `json:"vlessRealityVersion"`
 		OfflineAdmissionVersion int               `json:"offlineAdmissionVersion"`
 		SourceSHA               string            `json:"sourceSHA"`
@@ -71,7 +73,12 @@ func (r *Runner) AgentRelease() (AgentRelease, error) {
 	if len(raw.SourceSHA) != 40 {
 		return AgentRelease{}, errors.New("Agent 发布版本无效")
 	}
-	return AgentRelease{SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion}, nil
+	return AgentRelease{SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion, TrafficBillingVersion: raw.TrafficBillingVersion}, nil
+}
+
+func (release AgentRelease) upgradeManifest(arch, hash string) []byte {
+	data, _ := json.Marshal(map[string]any{"agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "trafficBillingVersion": release.TrafficBillingVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
+	return data
 }
 
 //go:embed managed_agent_upgrade.py
@@ -121,8 +128,7 @@ func (r *Runner) UpgradeAgent(ctx context.Context, in Input, target, operationID
 		}
 		files["scripts/"+name] = data
 	}
-	manifest, _ := json.Marshal(map[string]any{"agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
-	files["artifacts/manifest.json"] = manifest
+	files["artifacts/manifest.json"] = release.upgradeManifest(arch, hash)
 	folder := "/var/lib/hqip-operations/" + operationID
 	unit := "hqip-agent-upgrade-" + operationID
 	readResult := func() (string, error) {

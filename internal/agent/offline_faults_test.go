@@ -6,6 +6,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/model"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -97,7 +98,7 @@ func TestOfflineLostReportReplaysExactSnapshotBeforeNewCounters(t *testing.T) {
 	if err = a.syncOfflineState(context.Background(), &s, true); err != nil {
 		t.Fatal(err)
 	}
-	if len(reports) != 2 || reports[0] != reports[1] {
+	if len(reports) != 2 || !reflect.DeepEqual(reports[0],reports[1]) {
 		t.Fatal("uncertain report mutated during retry")
 	}
 	if err = a.syncOfflineState(context.Background(), &s, true); err != nil {

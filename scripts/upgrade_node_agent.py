@@ -34,7 +34,15 @@ def require_offline_compatible(ledger, version):
                     raise ValueError('Offline grants require a compatible Agent; preserve the live ledger and fix forward')
 
 
-def previous_offline_version(override):
+def require_traffic_billing_compatible(ledger, version):
+    if version == 1:
+        return
+    with closing(sqlite3.connect(ledger.as_uri() + '?mode=ro', uri=True)) as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='lease_billing_reports'").fetchone():
+            raise ValueError('Traffic billing ledger requires a compatible Agent; fix forward without discarding segments')
+
+
+def previous_offline_version(override, capability='offline'):
     if not override.exists():
         return 0
     for line in override.read_text().splitlines():
@@ -44,7 +52,7 @@ def previous_offline_version(override):
         binary = Path(args[0])
         if binary.is_symlink() or not binary.is_file() or not binary.resolve().is_relative_to(node_ops.RELEASE_ROOT):
             return 0
-        marker = binary.parent / 'offline-capability.json'
+        marker = binary.parent / (capability + '-capability.json')
         if marker.is_symlink() or not marker.is_file():
             return 0
         record = json.loads(marker.read_text())
@@ -186,6 +194,7 @@ def upgrade(node, artifacts):
     if manifest.get('agentTelemetryVersion') != 1:
         raise ValueError('Native hourly Agent release required')
     require_offline_compatible(ledger, manifest.get('offlineAdmissionVersion', 0))
+    require_traffic_billing_compatible(ledger, manifest.get('trafficBillingVersion', 0))
     if cfg.get('reality') and manifest.get('vlessRealityVersion') != 1:
         raise ValueError('Reality nodes require a compatible Agent')
     before_config = node_ops.regular(config / 'agent.json').read_text()
@@ -212,6 +221,11 @@ def upgrade(node, artifacts):
         raise ValueError('Unsafe Agent capability marker')
     capability_path.write_text(json.dumps({'sha256': expected, 'version': manifest.get('offlineAdmissionVersion', 0)}))
     capability_path.chmod(0o644)
+    billing_path = target.parent / 'traffic-billing-capability.json'
+    if billing_path.is_symlink():
+        raise ValueError('Unsafe Agent billing capability marker')
+    billing_path.write_text(json.dumps({'sha256': expected, 'version': manifest.get('trafficBillingVersion', 0)}))
+    billing_path.chmod(0o644)
     override = override_path(units)
     if override.is_symlink() or override.parent.is_symlink():
         raise ValueError('Unsafe Agent override')
@@ -224,6 +238,7 @@ def upgrade(node, artifacts):
             'beforeConfig': before_config, 'installedConfig': installed_config,
             'installed': text, 'agentSHA256': expected, 'sourceSHA': manifest.get('agentSourceSHA'),
             'coreInvocation': invocation, 'beforeOfflineAdmissionVersion': previous_offline_version(override), 'phase': 'prepared'}
+    info['beforeTrafficBillingVersion'] = previous_offline_version(override, 'traffic-billing')
     firewall_rules = []
     if next_cfg.get('reality'):
         firewall_rules = [{'ip': cfg['publicIp'], 'port': next_cfg['reality']['port'], 'proto': 'tcp'}]
@@ -242,6 +257,7 @@ def upgrade(node, artifacts):
         for path in backup.rglob('*'):
             path.chmod(0o700 if path.is_dir() else 0o600)
         require_offline_compatible(ledger, manifest.get('offlineAdmissionVersion', 0))
+        require_traffic_billing_compatible(ledger, manifest.get('trafficBillingVersion', 0))
         atomic_agent_config(config / 'agent.json', installed_config)
         atomic_override(override, text)
         node_ops.command('systemctl', 'daemon-reload')
@@ -277,6 +293,7 @@ def rollback(backup):
     info = json.loads(node_ops.regular(backup / 'state.json').read_text())
     config, _, cfg = node_ops.owned_paths(info['nodeId'])
     require_offline_compatible(Path(cfg['statePath']), info.get('beforeOfflineAdmissionVersion', 0))
+    require_traffic_billing_compatible(Path(cfg['statePath']), info.get('beforeTrafficBillingVersion', 0))
     units = node_ops.node_units(info['nodeId'])
     node_ops.verify_units(info['nodeId'], config, units, check_effective=False)
     override = override_path(units)
@@ -290,6 +307,7 @@ def rollback(backup):
     node_ops.command('systemctl', 'stop', units['agent'])
     try:
         require_offline_compatible(Path(cfg['statePath']), info.get('beforeOfflineAdmissionVersion', 0))
+        require_traffic_billing_compatible(Path(cfg['statePath']), info.get('beforeTrafficBillingVersion', 0))
     except Exception:
         node_ops.command('systemctl', 'start', units['agent'])
         raise

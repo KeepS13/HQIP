@@ -87,7 +87,7 @@ function App() {
         <dl><dt>内核内存</dt><dd>{on&&m.available&&!m.stale&&m.memoryBytes>0?bytes(m.memoryBytes):'—'}</dd></dl>
       </div>
       <div className="traffic-session"><span><Clock size={12}/>连接时长 <strong>{duration(m.connectedAt,on)}</strong></span><span><Gauge size={12}/>代理延迟 <strong>{on&&m.delayMs!==null?`${m.delayMs} ms`:'—'}</strong><button className="text-button" disabled={!on||s.selectionPending||m.delayPending} onClick={()=>void act('MeasureDelay')}>{m.delayPending?'检测中…':'检测延迟'}</button></span></div>
-      <p className="muted-note">含直连流量，不用于订阅扣费 · {m.stale?'指标暂不可用，保留最近数据':'每秒更新 · 最近 60 秒'}</p>
+      <p className="muted-note">按计费口径显示，结算以服务端为准 · {!m.available?'计费数据暂不可用，保留最近数据':m.stale?'计费同步已过期':'每秒更新 · 最近 60 秒'}</p>
     </section>
     {pack?<section className="panel subscription-summary"><div className="panel-title"><h3><ShieldCheck size={17}/>{pack.templateName}<small className="subtle">#{pack.id.slice(-6)}</small></h3><span className="badge">{labels[pack.status]||pack.status}</span></div><Usage value={pack}/></section>:<section className="panel empty-subscriptions"><Layers size={27}/><h3>选择一份订阅开始使用</h3><p>已购买的流量包会自动同步到这里。</p><button className="text-button" onClick={()=>void act('OpenAccount')}>前往网页订阅中心 <ArrowUpRight size={13}/></button></section>}
     <footer><span><span className={'tiny-dot '+(on?'green':'')}/>{on?`实际连接：${actual?.name||'—'}`:'HQIP 未接管系统网络'}</span><button className="text-button" disabled={busy==='Refresh'} onClick={()=>void act('Refresh')}><RefreshCw size={12}/> {s.controlUnavailable?'账户暂未同步 · ':''}{s.lastSync?new Date(s.lastSync).toLocaleTimeString('zh-CN',{hour12:false}):'等待同步'} · 刷新</button></footer>

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -27,6 +28,7 @@ type pendingLeaseUsage struct {
 func (l *ledger) leaseCapacity(now time.Time) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	defer l.db.Exec("DELETE FROM lease_billing_reports WHERE lease_id NOT IN (SELECT lease_id FROM lease_usage)")
 	_, e := l.db.Exec("DELETE FROM lease_usage WHERE closed=1 AND dirty=0 AND received<?", now.Add(-24*time.Hour).Unix())
 	if e != nil {
 		return e
@@ -83,6 +85,13 @@ func (l *ledger) saveLeaseUsage(id string, u model.LeaseUsage, now time.Time) (p
 	if e != nil {
 		return out, e
 	}
+	raw, e := json.Marshal(u.Billing)
+	if e != nil {
+		return out, e
+	}
+	if _, e = tx.Exec("INSERT INTO lease_billing_reports(lease_id,body) VALUES(?,?) ON CONFLICT(lease_id) DO UPDATE SET body=excluded.body", id, string(raw)); e != nil {
+		return out, e
+	}
 	return out, tx.Commit()
 }
 
@@ -108,7 +117,7 @@ func (l *ledger) retryLeaseUsage(p pendingLeaseUsage, now time.Time, status int)
 func (l *ledger) pendingLeaseFinals(now time.Time) ([]pendingLeaseUsage, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	rows, e := l.db.Query("SELECT lease_id,upload,download,closed,applied_rate,version,attempts FROM lease_usage WHERE dirty=1 AND closed=1 AND next_attempt<=? ORDER BY received LIMIT 16", now.Unix())
+	rows, e := l.db.Query("SELECT lease_id,upload,download,closed,applied_rate,version,attempts,COALESCE((SELECT body FROM lease_billing_reports b WHERE b.lease_id=lease_usage.lease_id),'null') FROM lease_usage WHERE dirty=1 AND closed=1 AND next_attempt<=? ORDER BY received LIMIT 16", now.Unix())
 	if e != nil {
 		return nil, e
 	}
@@ -116,7 +125,11 @@ func (l *ledger) pendingLeaseFinals(now time.Time) ([]pendingLeaseUsage, error) 
 	out := []pendingLeaseUsage{}
 	for rows.Next() {
 		var p pendingLeaseUsage
-		if e = rows.Scan(&p.ID, &p.Usage.UploadBytes, &p.Usage.DownloadBytes, &p.Usage.Closed, &p.Usage.AppliedRateVersion, &p.Version, &p.Attempts); e != nil {
+		var raw string
+		if e = rows.Scan(&p.ID, &p.Usage.UploadBytes, &p.Usage.DownloadBytes, &p.Usage.Closed, &p.Usage.AppliedRateVersion, &p.Version, &p.Attempts, &raw); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal([]byte(raw), &p.Usage.Billing); e != nil {
 			return nil, e
 		}
 		out = append(out, p)

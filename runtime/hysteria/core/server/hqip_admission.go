@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/apernet/hysteria/core/v2/billing"
 	"io"
 	"math"
 	"net"
@@ -25,24 +26,26 @@ type AdmissionConfig struct {
 }
 
 type LeaseGrant struct {
-	LeaseID                 string    `json:"leaseId"`
-	UserID                  string    `json:"userId"`
-	AccountingID            string    `json:"accountingId"`
-	ExpiresAt               time.Time `json:"expiresAt"`
-	BandwidthBytesPerSecond int64     `json:"bandwidthBytesPerSecond"`
-	BudgetBytes             int64     `json:"budgetBytes"`
-	ConsumedBytes           int64     `json:"consumedBytes"`
-	Revision                int64     `json:"revision"`
-	RateVersion             int64     `json:"rateVersion"`
-	RatePending             bool      `json:"ratePending"`
-	Legacy                  bool      `json:"legacy,omitempty"`
+	Billing                 *billing.Grant `json:"billing,omitempty"`
+	LeaseID                 string         `json:"leaseId"`
+	UserID                  string         `json:"userId"`
+	AccountingID            string         `json:"accountingId"`
+	ExpiresAt               time.Time      `json:"expiresAt"`
+	BandwidthBytesPerSecond int64          `json:"bandwidthBytesPerSecond"`
+	BudgetBytes             int64          `json:"budgetBytes"`
+	ConsumedBytes           int64          `json:"consumedBytes"`
+	Revision                int64          `json:"revision"`
+	RateVersion             int64          `json:"rateVersion"`
+	RatePending             bool           `json:"ratePending"`
+	Legacy                  bool           `json:"legacy,omitempty"`
 }
 
 type leaseUsage struct {
-	UploadBytes        int64 `json:"uploadBytes"`
-	DownloadBytes      int64 `json:"downloadBytes"`
-	Closed             bool  `json:"closed"`
-	AppliedRateVersion int64 `json:"appliedRateVersion"`
+	Billing            []billing.Segment `json:"billing,omitempty"`
+	UploadBytes        int64             `json:"uploadBytes"`
+	DownloadBytes      int64             `json:"downloadBytes"`
+	Closed             bool              `json:"closed"`
+	AppliedRateVersion int64             `json:"appliedRateVersion"`
 }
 
 type Admission struct {
@@ -108,7 +111,7 @@ func randomConnectionID() string {
 
 func (a *Admission) open(ctx context.Context, connectionID, password string, closeConnection func()) (*connectionLease, string, error) {
 	start := time.Now()
-	g, err := a.request(ctx, "/admission", map[string]string{"connectionId": connectionID, "password": password})
+	g, err := a.request(ctx, "/admission", map[string]string{"connectionId": connectionID, "password": password, "billingCapability": billing.Capability})
 	if err != nil {
 		return nil, "", err
 	}
@@ -135,6 +138,9 @@ func (a *Admission) open(ctx context.Context, connectionID, password string, clo
 }
 
 type connectionLease struct {
+	billingSegments  []billing.Segment
+	billingNormal    int64
+	billingEmergency int64
 	admission        *Admission
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -176,6 +182,35 @@ func (l *connectionLease) acceptGrant(g LeaseGrant, requestStart time.Time, init
 	if initial && g.ConsumedBytes != 0 {
 		return errors.New("connection lease cannot be resumed")
 	}
+	if g.Billing != nil {
+		if !g.Billing.Policy.Valid() || g.Billing.BudgetUnits < l.billingNormal || g.Billing.EmergencyBytes < l.billingEmergency {
+			return errors.New("invalid billing grant")
+		}
+		if !initial && (l.grant.Billing == nil || g.Billing.Protocol != l.grant.Billing.Protocol || g.Billing.Version < l.grant.Billing.Version || g.Billing.BudgetUnits < l.grant.Billing.BudgetUnits) {
+			return errors.New("non-monotonic billing grant")
+		}
+		if !initial && g.Billing.Version == l.grant.Billing.Version && g.Billing.Multiplier != l.grant.Billing.Multiplier {
+			return errors.New("billing changed without version")
+		}
+		retained := l.billingSegments[:0]
+		for _, segment := range l.billingSegments {
+			confirmed := false
+			for _, ack := range g.Billing.Acknowledged {
+				if segment.Equal(ack) && segment.Version != l.grant.Billing.Version {
+					confirmed = true
+				}
+			}
+			if !confirmed {
+				retained = append(retained, segment)
+			}
+		}
+		l.billingSegments = retained
+		if initial || g.Billing.Version != l.grant.Billing.Version {
+			l.billingSegments = append(l.billingSegments, billing.Segment{Version: g.Billing.Version, AppliedAt: now.UTC()})
+		}
+	} else if !initial && l.grant.Billing != nil {
+		return errors.New("billing authorization removed")
+	}
 	remaining := g.ExpiresAt.Sub(now)
 	// Network time is included in the 120-second local authorization ceiling.
 	ceiling := requestStart.Add(120 * time.Second).Sub(now)
@@ -186,6 +221,9 @@ func (l *connectionLease) acceptGrant(g LeaseGrant, requestStart time.Time, init
 		return errors.New("lease expired")
 	}
 	l.deadline = now.Add(remaining)
+	if g.Billing != nil {
+		l.billingSegments[len(l.billingSegments)-1].ValidUntil = now.Add(remaining).UTC()
+	}
 	if g.RateVersion != l.grant.RateVersion || g.BandwidthBytesPerSecond != l.grant.BandwidthBytesPerSecond || g.RatePending != l.grant.RatePending {
 		close(l.rateWake)
 		l.rateWake = make(chan struct{})
@@ -218,7 +256,7 @@ func (l *connectionLease) renew() error {
 		return errors.New("closed lease")
 	}
 	id := l.grant.LeaseID
-	usage := leaseUsage{UploadBytes: l.usedUp, DownloadBytes: l.usedDown, AppliedRateVersion: l.grant.RateVersion}
+	usage := leaseUsage{UploadBytes: l.usedUp, DownloadBytes: l.usedDown, AppliedRateVersion: l.grant.RateVersion, Billing: append([]billing.Segment(nil), l.billingSegments...)}
 	deadline := l.deadline
 	l.mu.Unlock()
 	if !time.Now().Before(deadline) {
@@ -352,13 +390,13 @@ func (l *connectionLease) consumeChunk(upload bool, n int64) error {
 				return l.consume(upload, int(n))
 			}
 		}
-		if n > l.grant.BudgetBytes-l.usedUp-l.usedDown {
+		if n > l.grant.BudgetBytes-l.usedUp-l.usedDown || !l.billingAllows(n) {
 			l.mu.Unlock()
 			if err := l.renew(); err != nil {
 				return err
 			}
 			l.mu.Lock()
-			enough := n <= l.grant.BudgetBytes-l.usedUp-l.usedDown
+			enough := n <= l.grant.BudgetBytes-l.usedUp-l.usedDown && l.billingAllows(n)
 			l.mu.Unlock()
 			if !enough {
 				l.fail()
@@ -411,10 +449,11 @@ func (l *connectionLease) consumeChunk(upload bool, n int64) error {
 			l.fail()
 			return errors.New("lease expired")
 		}
-		if n > l.grant.BudgetBytes-l.usedUp-l.usedDown {
+		if n > l.grant.BudgetBytes-l.usedUp-l.usedDown || !l.billingAllows(n) {
 			l.mu.Unlock()
 			continue
 		}
+		l.chargeBilling(upload, n)
 		if upload {
 			l.usedUp += n
 		} else {
@@ -438,7 +477,7 @@ func (l *connectionLease) finish() {
 		defer l.renewMu.Unlock()
 		l.mu.Lock()
 		id := l.grant.LeaseID
-		usage := leaseUsage{UploadBytes: l.usedUp, DownloadBytes: l.usedDown, Closed: true, AppliedRateVersion: l.grant.RateVersion}
+		usage := leaseUsage{UploadBytes: l.usedUp, DownloadBytes: l.usedDown, Closed: true, AppliedRateVersion: l.grant.RateVersion, Billing: append([]billing.Segment(nil), l.billingSegments...)}
 		l.mu.Unlock()
 		// The Agent durably queues a received final before central delivery.
 		// No reservation may be reused if the Agent never received this report.

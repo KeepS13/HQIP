@@ -53,7 +53,7 @@ func TestServerEnrollmentNodeOwnershipAndDeletionAPI(t *testing.T) {
 	i := &managedInstaller{}
 	s.runner = i
 	cookie, csrf := loginAdmin(t, s, h)
-	body := map[string]any{"name": "VPS", "sshHost": "203.0.113.10", "sshPort": 22, "sshUser": "root", "password": "ephemeral-secret"}
+	body := map[string]any{"name": "VPS", "sshHost": "8.8.8.10", "sshPort": 22, "sshUser": "root", "password": "ephemeral-secret"}
 	body["expiresAt"] = s.Store.Now().Add(30 * 24 * time.Hour).Truncate(time.Hour).Format(time.RFC3339)
 	if w := request(h, "POST", "/api/v1/servers", body, cookie, ""); w.Code != 403 {
 		t.Fatalf("missing csrf: %d", w.Code)
@@ -67,7 +67,7 @@ func TestServerEnrollmentNodeOwnershipAndDeletionAPI(t *testing.T) {
 	}
 	var server model.Server
 	json.Unmarshal(w.Body.Bytes(), &server)
-	w = request(h, "POST", "/api/v1/servers/"+server.ID+"/addresses", map[string]string{"publicIp": "203.0.113.11"}, cookie, csrf)
+	w = request(h, "POST", "/api/v1/servers/"+server.ID+"/addresses", map[string]string{"publicIp": "8.8.8.11"}, cookie, csrf)
 	if w.Code != 201 {
 		t.Fatal(w.Body.String())
 	}

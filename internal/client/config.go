@@ -11,7 +11,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/rules"
 )
 
-const CoreSHA256 = "8f30682ee198855440d2a7fe070d5d3653793b2d01bb8c85eea88f93bbe7c8b9"
+const CoreSHA256 = "1fc5e70e367621aa95bcc70847f504a819f40f775a859ac95be98e83016c80a0"
 
 type ConfigOptions struct {
 	Profile   Profile
@@ -22,6 +22,7 @@ type ConfigOptions struct {
 	MixedPort int
 	ProbePort int
 	APIPort   int
+	StatsPort int
 	APISecret string
 	GeoPath   string
 	ServerURL string
@@ -131,6 +132,9 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 		"inbounds": inbounds, "outbounds": out,
 		"route":        map[string]any{"auto_detect_interface": true, "default_domain_resolver": "local", "rules": routeRules, "final": "proxy", "rule_set": ruleSets},
 		"experimental": map[string]any{"clash_api": map[string]any{"external_controller": net.JoinHostPort("127.0.0.1", portString(o.APIPort)), "secret": o.APISecret}},
+	}
+	if o.StatsPort > 0 {
+		config["experimental"].(map[string]any)["v2ray_api"] = map[string]any{"listen": net.JoinHostPort("127.0.0.1", portString(o.StatsPort)), "stats": map[string]any{"enabled": true, "outbounds": []string{"proxy"}}}
 	}
 	return json.MarshalIndent(config, "", "  ")
 }

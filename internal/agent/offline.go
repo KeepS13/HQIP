@@ -59,7 +59,13 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 		if json.Unmarshal(data, &g) != nil || g.ID != s.Grant.ID || g.NodeID != s.Grant.NodeID || g.CredentialHash != s.Grant.CredentialHash || g.UserID != s.Grant.UserID || g.SubscriptionID != s.Grant.SubscriptionID || g.SessionID != s.Grant.SessionID || g.AuthorizedAt.Before(s.Grant.AuthorizedAt) || g.OfflineUntil.Before(s.Grant.OfflineUntil) || g.ReportVersion != u.Version || g.UploadBytes != u.UploadBytes || g.DownloadBytes != u.DownloadBytes || g.EmergencyUsedBytes != u.EmergencyUsedBytes || g.Closed != u.Closed || g.NormalBudgetBytes < s.Grant.NormalBudgetBytes || g.EmergencyBudgetBytes != s.Grant.EmergencyBudgetBytes || g.RateVersion < s.Grant.RateVersion || g.NormalUnlimited != s.Grant.NormalUnlimited || (!g.Closed && !g.Revoked && !validOfflineGrant(g, a.cfg.NodeID, g.CredentialHash, now)) {
 			err = &admissionProtocolError{}
 		} else {
+			if s.Grant.Billing != nil && (g.Billing == nil || g.Billing.Protocol != s.Grant.Billing.Protocol || g.Billing.Version < s.Grant.Billing.Version || g.Billing.BudgetUnits < s.Grant.Billing.BudgetUnits) {
+				return &admissionProtocolError{}
+			}
 			s.Grant = g
+			if err = s.rememberBilling(); err != nil {
+				return err
+			}
 			s.Pending = nil
 			s.Online = true
 			s.Failures = 0
@@ -83,12 +89,20 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 	return nil
 }
 
-func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection, password string) {
+func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection, password string, protocols ...string) {
+	protocol := ""
+	if len(protocols) > 0 {
+		protocol = protocols[0]
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), admissionControlTimeout)
 	defer cancel()
 	a.offlineMu.Lock()
 	defer a.offlineMu.Unlock()
 	now, hash := a.now(), secure.Hash(password)
+	requestHash := hash
+	if protocol != "" {
+		requestHash = protocol + ":" + hash
+	}
 	if a.offlineIssued == nil {
 		a.offlineIssued = map[string]time.Time{}
 		a.offlineBoot = time.Now()
@@ -106,7 +120,8 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 	var selected *offlineState
 	for i := range states {
 		s := &states[i]
-		if s.Grant.CredentialHash == hash && !s.Grant.Closed && !s.Denied && !s.Grant.Revoked && now.Before(s.Grant.OfflineUntil) {
+		matchesProtocol := s.Grant.Billing == nil && protocol == "" || s.Grant.Billing != nil && s.Grant.Billing.Protocol == protocol
+		if matchesProtocol && s.Grant.CredentialHash == hash && !s.Grant.Closed && !s.Denied && !s.Grant.Revoked && now.Before(s.Grant.OfflineUntil) {
 			a.reconcileOfflineChildren(ctx, s, coreGeneration)
 			if err = a.ledger.saveOffline(*s); err != nil {
 				http.Error(w, "offline reconciliation persistence failed", 503)
@@ -132,21 +147,26 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 		// Persist a credential-scoped request key before dispatch. Retrying a lost
 		// grant response must not reserve a second slot for another QUIC dial.
 		a.ledger.mu.Lock()
-		_, err = a.ledger.db.Exec("INSERT OR IGNORE INTO offline_requests(hash,request_id) VALUES(?,?)", hash, connection)
+		_, err = a.ledger.db.Exec("INSERT OR IGNORE INTO offline_requests(hash,request_id) VALUES(?,?)", requestHash, connection)
 		var requestID string
 		if err == nil {
-			err = a.ledger.db.QueryRow("SELECT request_id FROM offline_requests WHERE hash=?", hash).Scan(&requestID)
+			err = a.ledger.db.QueryRow("SELECT request_id FROM offline_requests WHERE hash=?", requestHash).Scan(&requestID)
 		}
 		a.ledger.mu.Unlock()
 		if err != nil {
 			http.Error(w, "offline request persistence failed", 503)
 			return
 		}
-		status, data, requestErr := a.requestAdmission(ctx, "/api/v1/agents/offline-grants", map[string]string{"connectionId": requestID, "password": password})
+		body := map[string]string{"connectionId": requestID, "password": password}
+		if protocol != "" {
+			body["billingProtocol"] = protocol
+			body["billingCapability"] = "traffic-billing-v1"
+		}
+		status, data, requestErr := a.requestAdmission(ctx, "/api/v1/agents/offline-grants", body)
 		if requestErr != nil || status != 200 {
 			if !offlineRetryable(status, requestErr) {
 				a.ledger.mu.Lock()
-				_, _ = a.ledger.db.Exec("DELETE FROM offline_requests WHERE hash=?", hash)
+				_, _ = a.ledger.db.Exec("DELETE FROM offline_requests WHERE hash=?", requestHash)
 				a.ledger.mu.Unlock()
 			}
 			_ = writeAdmissionResponse(w, status, data, requestErr)
@@ -158,12 +178,16 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			return
 		}
 		s := offlineState{Grant: g, Children: map[string]offlineChild{}, Online: true, LastWall: now, NextVersion: g.ReportVersion, RetryAt: now.Add(5 * time.Second)}
+		if err = s.rememberBilling(); err != nil {
+			http.Error(w, "invalid billing grant", 503)
+			return
+		}
 		if err = a.ledger.saveOffline(s); err != nil {
 			http.Error(w, "offline grant persistence failed", 503)
 			return
 		}
 		a.ledger.mu.Lock()
-		_, err = a.ledger.db.Exec("DELETE FROM offline_requests WHERE hash=?", hash)
+		_, err = a.ledger.db.Exec("DELETE FROM offline_requests WHERE hash=?", requestHash)
 		a.ledger.mu.Unlock()
 		if err != nil {
 			http.Error(w, "offline request persistence failed", 503)
@@ -229,6 +253,9 @@ func (a *Agent) offlineRenew(w http.ResponseWriter, r *http.Request, id string, 
 	// unavailable before deciding whether the emergency tail may be used.
 	child := s.Children[id]
 	force := s.Online && child.Normal-child.Upload-child.Download < model.OfflineChunkBytes/4
+	if s.Grant.Billing != nil {
+		force = s.Online && (child.Normal-child.NormalUsed)/s.Grant.Billing.Multiplier < model.OfflineChunkBytes/4
+	}
 	err = a.syncOfflineState(ctx, &s, force)
 	if u.Closed {
 		delete(a.offlineIssued, id)

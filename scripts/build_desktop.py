@@ -1,13 +1,13 @@
 """Build the Windows desktop bundle with pinned, verified sing-box binaries."""
 from __future__ import annotations
 import argparse,hashlib,json,os,pathlib,subprocess,tempfile,urllib.request,zipfile,shutil
+from build_billing_core import build as build_billing_core, CORE_HASH, TAGS, TOOLCHAIN
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 OUT=ROOT/'dist/desktop'
 VERSION='1.14.4'
-DESKTOP_VERSION='4.7.1'
+DESKTOP_VERSION='4.8.0'
 ZIP_HASH='99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df'
-CORE_HASH='8f30682ee198855440d2a7fe070d5d3653793b2d01bb8c85eea88f93bbe7c8b9'
 RESOURCE_TOOL=ROOT/'desktop/build/windows'
 PACKAGE_FILES=(
     'HQIP.exe', 'hqip-helper.exe', 'sing-box.exe', 'libcronet.dll',
@@ -31,9 +31,10 @@ def main():
         archive.with_suffix('.part').replace(archive)
     if sha(archive)!=ZIP_HASH:raise ValueError('sing-box archive checksum mismatch')
     with zipfile.ZipFile(archive) as z:
-        for filename in ['sing-box.exe','libcronet.dll','LICENSE']:
+        for filename in ['libcronet.dll','LICENSE']:
             target=out/('sing-box-LICENSE' if filename=='LICENSE' else filename)
             target.write_bytes(z.read(f'sing-box-{VERSION}-windows-amd64/{filename}'))
+    build_billing_core(out/'sing-box.exe')
     if sha(out/'sing-box.exe')!=CORE_HASH:raise ValueError('sing-box executable checksum mismatch')
     npm='npm.cmd' if os.name=='nt' else 'npm'
     if not args.skip_web:
@@ -60,6 +61,7 @@ def main():
     sources={'HQIP':f'https://github.com/KeepS13/HQIP/tree/{source_sha}','sing-box':f'https://github.com/SagerNet/sing-box/tree/v{VERSION}','Wails':'https://github.com/wailsapp/wails/tree/v3.1.0'}
     (out/'THIRD-PARTY-NOTICES.txt').write_text('HQIP Windows client\n\nsing-box '+VERSION+' (GPL-3.0-or-later): see sing-box-LICENSE.\nWails v3.1.0 (MIT).\nSource revisions:\n'+json.dumps(sources,indent=2)+'\nRouting data attribution is included in each authenticated rules bundle.\n',encoding='utf-8')
     manifest={'version':DESKTOP_VERSION,'sourceSHA':source_sha,'dirty':dirty,'singBox':VERSION,'wails':'3.1.0','sources':sources,'windowsResources':{'generator':'github.com/tc-hib/winres@v0.3.1','iconSha256':sha(icon),'groupId':3},'sha256':{n:sha(out/n) for n in ['HQIP.exe','hqip-helper.exe','sing-box.exe','libcronet.dll']}}
+    manifest.update(trafficBillingVersion=1, singBoxBuildTags=TAGS, singBoxToolchain=TOOLCHAIN)
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     readme=ROOT/'docs/client.md'
     if readme.exists():shutil.copyfile(readme,out/'使用说明.md')

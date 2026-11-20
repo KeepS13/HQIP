@@ -36,6 +36,7 @@ type Node struct {
 	SSHPort             int                `json:"sshPort"`
 	SSHUser             string             `json:"sshUser"`
 	PublicIP            string             `json:"publicIp"`
+	IPSwitch            *NodeIPSwitch      `json:"ipSwitch,omitempty"`
 	Domain              string             `json:"domain"`
 	Port                int                `json:"port"`
 	BandwidthMbps       *float64           `json:"bandwidthMbps"`
@@ -59,6 +60,13 @@ type Node struct {
 	DesiredRevision     int64              `json:"desiredRevision"`
 	AppliedRevision     int64              `json:"appliedRevision"`
 	CoreHealthy         bool               `json:"coreHealthy"`
+}
+
+// NodeIPSwitch reserves the old address and authorizes only this instance's
+// previous owner while an IP change is being installed or retried.
+type NodeIPSwitch struct {
+	FromIP        string `json:"fromIp"`
+	FromAddressID string `json:"fromAddressId"`
 }
 
 type Device struct {

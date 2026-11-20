@@ -69,9 +69,11 @@ class FullReleaseTests(unittest.TestCase):
         self.payload = {name: windows_image() if name in DESKTOP_BINARIES else b'package document'
                         for name in DESKTOP_FILES if name != 'manifest.json'}
         self.inner = {'version': self.version, 'sourceSHA': self.sha, 'dirty': False,
+                      'trafficBillingVersion': 1, 'singBoxBuildTags': 'with_v2ray_api',
                       'windowsResources': {'groupId': 3, 'iconSha256': digest(icon)},
                       'sha256': {name: hashlib.sha256(self.payload[name]).hexdigest() for name in DESKTOP_BINARIES}}
         self.nodes = {'sourceSHA': self.sha, 'dirty': False, 'hqipAdmissionVersion': 1,
+                      'trafficBillingVersion': 1,
                       'hysteriaSource': {'sha256': {'hqip-hysteria-linux-' + arch:
                       digest(self.root / ('dist/hysteria-linux-' + arch)) for arch in ('amd64', 'arm64')}},
                       'sha256': {name: digest(self.root / 'dist' / name) for name in NODE_ASSETS}}

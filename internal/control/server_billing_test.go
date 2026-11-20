@@ -16,7 +16,7 @@ func TestServerBillingAPIExpiryValidationRenewalCASAndAuthorization(t *testing.T
 	now := time.Date(2026, 11, 7, 10, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*3600))
 	s.Store.Now = func() time.Time { return now }
 	cookie, csrf := loginAdmin(t, s, h)
-	body := map[string]any{"name": "billing-vps", "sshHost": "203.0.113.70", "password": "only-for-enrollment"}
+	body := map[string]any{"name": "billing-vps", "sshHost": "8.8.8.70", "password": "only-for-enrollment"}
 	for _, expiry := range []any{nil, now.Format(time.RFC3339), now.Add(30 * time.Minute).Format(time.RFC3339)} {
 		body["expiresAt"] = expiry
 		if w := request(h, "POST", "/api/v1/servers", body, cookie, csrf); w.Code != 400 {

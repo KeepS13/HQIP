@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/apernet/hysteria/core/v2/billing"
 )
 
 func validSubscriptionTemplate(p model.SubscriptionTemplate) error {
@@ -228,8 +229,33 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	// Keep an already-authorized tail usable. Reserved bytes alone may belong
 	// to a dead lease awaiting settlement and must neither count as usage nor
 	// keep an unusable subscription active.
-	if err = q.QueryRow("SELECT COUNT(*),COALESCE(MAX(CASE WHEN revoked=0 AND budget>upload+download THEN 1 ELSE 0 END),0) FROM portal_leases WHERE subscription_id=? AND closed=0 AND expires>?", id, now.Unix()).Scan(&e.Occupied, &liveBudget); err != nil {
+	if err = q.QueryRow("SELECT COUNT(*),COALESCE(MAX(CASE WHEN l.revoked=0 AND ((b.state IS NULL AND l.budget>l.upload+l.download) OR (b.state IS NOT NULL AND (b.remaining_units>0 OR b.remaining_emergency>0))) THEN 1 ELSE 0 END),0) FROM portal_leases l LEFT JOIN traffic_lease_billing b ON b.lease_id=l.id WHERE l.subscription_id=? AND l.closed=0 AND l.expires>?", id, now.Unix()).Scan(&e.Occupied, &liveBudget); err != nil {
 		return nil, err
+	}
+	minimum := model.MinimumSubscriptionLeaseBytes
+	settings, err := readTrafficBilling(q)
+	if err != nil {
+		return nil, err
+	}
+	if settings.Enabled {
+		factor := settings.Hysteria2
+		for _, node := range e.NodeIDs {
+			var capability string
+			if err = q.QueryRow("SELECT capabilities FROM nodes WHERE id=?", node).Scan(&capability); err != nil {
+				return nil, err
+			}
+			if !strings.Contains(capability, billing.Capability) {
+				factor = min(factor, int64(100))
+			}
+			var reality int
+			if err = q.QueryRow("SELECT COUNT(*) FROM metadata WHERE key=?", "vless-reality:"+node).Scan(&reality); err != nil {
+				return nil, err
+			}
+			if reality > 0 {
+				factor = min(factor, settings.VLESS)
+			}
+		}
+		minimum = billing.Ceiling(model.MinimumSubscriptionLeaseBytes * factor)
 	}
 	switch {
 	case revoked:
@@ -238,7 +264,7 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 		e.Status = "disabled"
 	case expires <= now.Unix():
 		e.Status = "expired"
-	case e.QuotaBytes != nil && (e.UsedBytes >= *e.QuotaBytes || !liveBudget && *e.QuotaBytes-e.UsedBytes < model.MinimumSubscriptionLeaseBytes):
+	case e.QuotaBytes != nil && (e.UsedBytes >= *e.QuotaBytes || !liveBudget && *e.QuotaBytes-e.UsedBytes < minimum):
 		e.Status = "exhausted"
 	}
 	return e, nil

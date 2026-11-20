@@ -16,11 +16,11 @@ func serverPair(t *testing.T, s *Store) (model.Server, model.Node, model.Node) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := s.CreateAddress(v.ID, "203.0.113.11")
+	a, err := s.CreateAddress(v.ID, "8.8.8.11")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.CreateAddress(v.ID, "203.0.113.12")
+	b, err := s.CreateAddress(v.ID, "8.8.8.12")
 	if err != nil {
 		t.Fatal(err)
 	}

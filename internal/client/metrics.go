@@ -17,6 +17,7 @@ type MetricPoint struct {
 }
 
 type Dashboard struct {
+	BillingEstimated       bool          `json:"billingEstimated"`
 	Available              bool          `json:"available"`
 	Stale                  bool          `json:"stale"`
 	UploadRate             int64         `json:"uploadRate"`
@@ -34,6 +35,7 @@ type Dashboard struct {
 }
 
 type CoreSample struct {
+	ProxyOnly     bool
 	UploadRate    int64
 	DownloadRate  int64
 	UploadTotal   int64
@@ -120,7 +122,21 @@ func (c *Core) Sample(ctx context.Context) (CoreSample, error) {
 	if snapshot.Upload < 0 || snapshot.Download < 0 || traffic.Up < 0 || traffic.Down < 0 {
 		return CoreSample{}, errors.New("内核指标响应无效")
 	}
-	return CoreSample{traffic.Up, traffic.Down, snapshot.Upload, snapshot.Download, len(snapshot.Connections), max(0, snapshot.Memory)}, nil
+	c.mu.Lock()
+	statsPort := c.statsPort
+	c.mu.Unlock()
+	if statsPort > 0 {
+		upload, download, err := readProxyStats(requestCtx, statsPort)
+		if err != nil {
+			return CoreSample{}, err
+		}
+		newPort, newSecret, err = c.metricsEndpoint()
+		if err != nil || newPort != port || newSecret != secret {
+			return CoreSample{}, errors.New("内核已切换")
+		}
+		return CoreSample{ProxyOnly: true, UploadTotal: upload, DownloadTotal: download, Connections: len(snapshot.Connections), Memory: max(0, snapshot.Memory)}, nil
+	}
+	return CoreSample{}, errors.New("内核缺少代理出口计费统计能力")
 }
 
 func (c *Core) Delay(ctx context.Context) (int64, error) {
@@ -145,12 +161,16 @@ func (c *Core) Delay(ctx context.Context) (int64, error) {
 func (c *Controller) beginMetricsLocked() {
 	now := time.Now()
 	c.view.Metrics = Dashboard{ConnectedAt: &now, History: []MetricPoint{}}
+	c.billingMetrics = billingMetrics{}
 }
 
 func (c *Controller) runMetrics(ctx context.Context) {
 	if _, ok := c.engine.(metricsEngine); !ok {
 		return
 	}
+	billingDone := make(chan struct{})
+	go func() { defer close(billingDone); c.runBillingSync(ctx) }()
+	defer func() { <-billingDone }()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -192,24 +212,13 @@ func (c *Controller) sampleMetrics(ctx context.Context) {
 		c.view.Metrics.ApplicationConnections = 0
 		return
 	}
-	m := &c.view.Metrics
-	m.Available, m.Stale = true, false
-	m.UploadRate, m.DownloadRate = sample.UploadRate, sample.DownloadRate
-	m.UploadBytes, m.DownloadBytes = sample.UploadTotal, sample.DownloadTotal
-	m.ApplicationConnections, m.MemoryBytes = sample.Connections, sample.Memory
-	now := time.Now()
-	m.UpdatedAt = &now
-	points := make([]MetricPoint, 0, 60)
-	for _, point := range m.History {
-		if now.Sub(point.At) < 60*time.Second {
-			points = append(points, point)
-		}
+	if sample.ProxyOnly {
+		c.applyBillingSample(sample, time.Now())
+		return
 	}
-	points = append(points, MetricPoint{now, sample.UploadRate, sample.DownloadRate})
-	if len(points) > 60 {
-		points = points[len(points)-60:]
-	}
-	m.History = points
+	c.view.Metrics.Available = false
+	c.view.Metrics.Stale = true
+	c.view.Metrics.UploadRate, c.view.Metrics.DownloadRate = 0, 0
 }
 
 func (c *Controller) MeasureDelay() error {
