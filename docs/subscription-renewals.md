@@ -16,9 +16,9 @@
 
 管理员调整到期时间只修改最后一期终点，不能移动既有周期边界或截断已预付周期。恢复核账时，若多周期订阅存在累计差额，恢复请求中的该订阅必须携带 `periodAdjustments: [{periodId, additionalUsedBytes}]`，各项之和等于累计差额；不能把无法归属的历史流量直接扣到当前期。恢复查询返回周期列表供核对。
 
-## 后续上线与回退
+## 上线与回退
 
-本次只准备本地代码和测试，不执行部署或生产迁移。
+2026-11-21 已部署提交 `b8c968f8188b62575d3e8c9364977466fa3ad515`，完成 PostgreSQL 周期迁移及全部 15 个活动节点的 Agent 升级。自动验收与真实代理核心的隔离跨期测试通过；本次未执行生产真实付款验收，范围和证据见[续费部署记录](incidents/2026-11-21-subscription-renewals.md)。
 
 数据库新增 `subscription_periods`、`subscription_lease_periods`、`payment_renewals`，能力标记为 `subscription_renewals_version=1`，发布清单和 `storage-info` 声明 `subscriptionRenewalsVersion=1`。旧订阅初始化为一期，保留用量、预留、计费余量及旧租约归属；重复迁移不会重置任何账本。
 
