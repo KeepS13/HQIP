@@ -63,6 +63,10 @@ export interface PaymentInfo {
 }
 
 export interface PaymentOrder {
+	orderType: "purchase" | "renewal";
+	renewalSubscriptionId?: string;
+	periodStartsAt?: string;
+	periodEndsAt?: string;
   id: string;
   orderNo: string;
   templateId: string;
