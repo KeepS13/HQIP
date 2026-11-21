@@ -10,6 +10,7 @@
 | node-metering | Agent / internal/agent，runtime/hysteria/core/server | 本地持久化子租约、协议计费段 |
 | traffic-billing | store、model、runtime billing | 固定点倍率与幂等累计报告 |
 | client-presentation | internal/client、desktop、user-web | 用户余额与原始链路统计 |
+| subscription-admission / 第三方导入 | internal/store/portal_import_links.go、internal/control/portal_import_export.go、user-web | [subscription-admission.import-links v1](contracts/subscription-import-links.md)：默认合并复制、单份复制与凭据轮换 |
 
 本次边界变更的规范见 [节点额度契约](contracts/node-quota.md)，已有行为见 [离线授权](offline-admission.md) 和 [部署](automatic-deployment.md)。数据库仅存业务状态，操作证据保存在 docs/incidents 或库外诊断记录。
 

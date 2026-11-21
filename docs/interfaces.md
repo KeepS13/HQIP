@@ -30,9 +30,14 @@
 | `GET /api/v1/user/subscriptions` | 用户查看本人多份实例 |
 | `GET /api/v1/user/subscriptions/{id}` | 查看单份详情与允许节点 |
 | `POST /api/v1/user/subscriptions/{id}/import-link[/rotate\|/revoke]` | 管理该实例的第三方导入入口 |
+| `GET /api/v1/user/subscriptions/{id}/import-link` | 只读取得单份链接，不生成节点配置 |
+| `GET/POST /api/v1/user/import-link` | 读取／幂等准备当前全部有效订阅的合并链接 |
+| `POST /api/v1/user/import-link/rotate`、`POST /api/v1/user/import-link/revoke` | 原子轮换／撤销账户下全部第三方导入链接及节点凭据 |
 | `/api/v3/client/*` | Windows 客户端授权、同步、订阅选择、状态和连接收尾 |
 | `GET /usub/{token}` | 无浏览器会话的第三方订阅；默认或 `format=clash` 返回 Clash YAML，`format=v2ray` 返回 Base64 节点列表，`format=singbox` 返回完整 sing-box JSON |
 | `GET /usub/{token}?format=…&download=1` | 相同授权及响应内容，成功时附加 `Content-Disposition: attachment`，按格式下载 `.yaml`、`.txt` 或 `.json` |
+
+导入链接接口返回 `{url: string}`；缺失或无有效订阅时 GET 返回空字符串，不产生写入。合并配置使用既有 `/usub/{token}` 格式入口，逐份保留额度；合并链接是当前订阅集合的快照。鉴权、轮换与在途响应保护见 [subscription-admission.import-links v1](contracts/subscription-import-links.md)。
 
 管理和用户写请求均执行各自会话授权、CSRF、修订版本冲突检查和审计。用户实例查询始终从认证会话解析 userId；不得使用请求体中的用户 ID 决定访问权限。同一个下单请求 ID 的重试返回原订单，不重复向支付平台下单；用户明确再次购买使用新 ID。收款状态与开通状态独立，按唯一 `payment:{orderId}` 原子发放，浏览器回跳参数不构成付款证明。完整配置、异常处理与迁移说明见 [支付 FM](payments.md)。
 

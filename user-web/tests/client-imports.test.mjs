@@ -50,7 +50,8 @@ test("subscription selection never substitutes another user's intended package",
   const active = { id: "active", status: "active" };
   const expired = { id: "expired", status: "expired" };
   const other = { id: "other", status: "active" };
-  assert.equal(selectedImportSubscription([active, expired], null), active);
+  assert.equal(selectedImportSubscription([active, expired], null), null);
+  assert.equal(selectedImportSubscription([active], null), null);
   assert.equal(selectedImportSubscription([active, other], null), null);
   assert.equal(selectedImportSubscription([expired], null), null);
   assert.equal(selectedImportSubscription([], null), null);

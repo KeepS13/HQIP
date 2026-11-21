@@ -338,3 +338,17 @@
     font-size: 28px;
   }
 }
+
+.portal-start-community {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  padding: 22px 15px;
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+}
+.portal-start-community > span {
+  color: var(--text);
+  padding: 14px;
+}
+.portal-start-community .button { margin-top: 10px; }

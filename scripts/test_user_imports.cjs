@@ -22,6 +22,10 @@ const createSubscription = (id, status = 'active') => ({
 });
 const subscriptions = [createSubscription('fixture-sub-a'), createSubscription('fixture-sub-b'), createSubscription('fixture-expired', 'expired')];
 const tokens = new Map(subscriptions.map((s) => [s.id, `${apiOrigin}/usub/${s.id}-1`]));
+const combinedURL = () => {
+  const current = visibleSubscriptions.filter((s) => s.status === 'active');
+  return !current.length || current.some((s) => !tokens.get(s.id)) ? '' : `${apiOrigin}/usub/${current.map((s) => tokens.get(s.id).split('/').pop()).join('.')}`;
+};
 let visibleSubscriptions = subscriptions;
 let authenticated = true;
 let tokenVersion = 1;
@@ -52,7 +56,8 @@ async function main() {
       const headers = { 'access-control-allow-origin': req.headers().origin || origin, 'access-control-allow-credentials': 'true', 'access-control-allow-headers': 'Content-Type,X-CSRF-Token', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
       if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
       const p = url.pathname;
-      const match = /^\/api\/v1\/user\/subscriptions\/([^/]+)(\/import-link(?:\/(rotate|revoke))?)?$/.exec(p);
+      const combined = /^\/api\/v1\/user\/import-link(?:\/(rotate|revoke))?$/.exec(p);
+      const match = /^\/api\/v1\/user\/subscriptions\/([^/]+)(\/import-link(?:\/(rotate|revoke))?)?$/.exec(p) || (combined && [p, 'all', '/import-link', combined[1]]);
       let body, status = 200;
       if (p === '/api/v1/user/session') body = { authenticated, user, csrfToken: 'fixture-csrf' };
       else if (p === '/api/v1/user/config') body = { portalEnabled: true, registrationEnabled: true, turnstileConfigured: true, turnstileSiteKey: 'fixture-site-key' };
@@ -60,10 +65,12 @@ async function main() {
       else if (p === '/api/v1/user/login' && req.method() === 'POST') {
         authenticated = true;
         body = { authenticated, user, csrfToken: 'fixture-csrf' };
-      } else if (match && req.method() === 'GET' && !match[2]) {
+      } else if (match && req.method() === 'GET') {
         const id = decodeURIComponent(match[1]);
         const subscription = visibleSubscriptions.find((s) => s.id === id);
-        if (!subscription) { status = 404; body = { error: '订阅不存在' }; }
+        if (id === 'all') body = { url: combinedURL() };
+        else if (!subscription) { status = 404; body = { error: '订阅不存在' }; }
+        else if (match[2]) body = { url: subscription.status === 'active' ? tokens.get(id) || '' : '' };
         else body = structuredClone({ subscription, nodes, subscriptionUrl: tokens.get(id) || '' });
         if (failNextRead) { failNextRead = false; status = 503; body = { error: '测试读取失败' }; }
         if (readToHold === id) {
@@ -80,9 +87,12 @@ async function main() {
         }
         if (failNextWrite) { failNextWrite = false; status = 500; body = { error: '测试写入失败' }; }
         else {
-          const next = match[3] === 'revoke' ? '' : `${apiOrigin}/usub/${id}-${++tokenVersion}`;
-          tokens.set(id, next);
-          body = { url: next };
+          const ids = id === 'all' ? visibleSubscriptions.filter((s) => s.status === 'active').map((s) => s.id) : [id];
+          for (const item of ids) {
+            if (match[3] === 'revoke') tokens.set(item, '');
+            else if (match[3] === 'rotate' || !tokens.get(item)) tokens.set(item, `${apiOrigin}/usub/${item}-${++tokenVersion}`);
+          }
+          body = { url: id === 'all' ? combinedURL() : tokens.get(id) };
         }
       } else if (p.startsWith('/usub/') && url.searchParams.get('download') === '1') {
         const format = url.searchParams.get('format') || 'clash';
@@ -126,12 +136,27 @@ async function main() {
     await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true, animations: 'disabled' });
   }
   try {
+    tokens.delete('fixture-sub-b');
     await page.goto(`${origin}/imports`);
     await select.waitFor();
-    assert.equal(await select.inputValue(), '', 'multiple active subscriptions need explicit selection');
-    assert.equal(await masked.count(), 0);
+    assert.equal(await select.inputValue(), 'all', 'default must be all subscriptions');
+    await page.waitForFunction(() => !!document.querySelector('[aria-label="此订阅的导入链接"]')?.value);
+    await value(combinedURL());
+    assert.equal(writes.length, 1, 'entry must automatically prepare missing links once');
+    assert.equal(writes[0].id, 'all');
+    assert.equal(await page.getByRole('button', { name: '创建导入链接', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '复制链接', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.fixtureClipboard), combinedURL());
+    const oldCombined = combinedURL();
+    await page.getByRole('button', { name: '轮换链接', exact: true }).click();
+    await page.getByRole('dialog').getByText('正在使用的相关连接会被断开', { exact: false }).waitFor();
+    await page.getByRole('button', { name: '确认轮换', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await value(combinedURL());
+    assert.notEqual(combinedURL(), oldCombined);
+    writes.length = 0;
     const nav = await page.locator('aside nav a').allTextContents();
-    assert.equal(nav.indexOf('订阅导入导出'), nav.indexOf('我的订阅') + 1);
+    assert.equal(nav.indexOf('复制订阅链接'), nav.indexOf('我的订阅') + 1);
     await select.selectOption('fixture-sub-a');
     await value(tokens.get('fixture-sub-a'));
     const cases = [
@@ -203,13 +228,15 @@ async function main() {
     await page.getByRole('button', { name: '撤销导入链接', exact: true }).click();
     await page.getByRole('button', { name: '确认撤销', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
-    await page.getByRole('button', { name: '创建导入链接', exact: true }).waitFor();
+    await page.getByRole('button', { name: '复制链接', exact: true }).waitFor();
     releaseRead();
     await page.waitForTimeout(80);
     assert.equal(await masked.count(), 0);
-    await page.getByRole('button', { name: '创建导入链接', exact: true }).click();
-    await page.getByRole('button', { name: '确认创建', exact: true }).click();
-    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await refresh.click();
+    await page.waitForTimeout(80);
+    assert.equal(await masked.count(), 0, 'poll must not resurrect a revoked link');
+    await page.getByRole('button', { name: '复制链接', exact: true }).click();
+    await page.waitForFunction(() => !!document.querySelector('[aria-label="此订阅的导入链接"]')?.value);
     await value(tokens.get('fixture-sub-b'));
     assert.ok(writes.every((write) => write.csrf === 'fixture-csrf'));
     assert.ok(writes.every((write) => write.id === 'fixture-sub-b'));
@@ -225,11 +252,13 @@ async function main() {
     await page.getByRole('button', { name: '确认轮换', exact: true }).click();
     await page.getByText('测试写入失败', { exact: false }).waitFor();
     await page.getByRole('button', { name: '取消', exact: true }).click();
+    await refresh.click();
     await value(tokens.get('fixture-sub-b'));
     assert.equal(await select.isDisabled(), false);
 
     await select.selectOption('fixture-expired');
-    await value(tokens.get('fixture-expired'));
+    await page.getByText('这份订阅已到期', { exact: false }).waitFor();
+    assert.equal(await masked.count(), 0);
     assert.equal(await page.getByRole('button', { name: '复制链接', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: '轮换链接', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('link', { name: '导出配置', exact: true }).count(), 0);
@@ -239,7 +268,7 @@ async function main() {
     await page.getByText('指定的订阅不存在或已不可访问', { exact: false }).waitFor();
     assert.equal(await select.inputValue(), '');
     assert.equal(await masked.count(), 0);
-    // A response slower than the five-second poll interval must still render.
+    // Slow link reads still render while the separate profile poll continues.
     detailDelayMs = 6000;
     await page.goto(`${origin}/imports?subscription=fixture-sub-a`);
     await value(tokens.get('fixture-sub-a'));
@@ -265,9 +294,17 @@ async function main() {
     visibleSubscriptions = [subscriptions[0]];
     await page.goto(`${origin}/imports`);
     await value(tokens.get('fixture-sub-a'));
-    assert.equal(new URL(page.url()).searchParams.get('subscription'), 'fixture-sub-a');
+    assert.equal(new URL(page.url()).searchParams.get('subscription'), null);
+    assert.equal(await select.inputValue(), 'all');
+    await page.goto(`${origin}/`);
+    await page.getByRole('button', { name: '复制群号', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.fixtureClipboard), '383590149');
+    await snapshot('overview');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await snapshot('overview-mobile');
+    await page.setViewportSize({ width: 1440, height: 1100 });
     visibleSubscriptions = [];
-    await page.reload();
+    await page.goto(`${origin}/imports`);
     await page.getByText('还没有开通订阅', { exact: true }).waitFor();
     assert.equal(await select.count(), 0);
 
@@ -282,7 +319,7 @@ async function main() {
     await value(tokens.get('fixture-sub-b'));
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpected, []);
-    console.log(JSON.stringify({ passed: true, clients: cases.length, checks: ['navigation', 'formats', 'schemes', 'download', 'subscription-selection', 'history', 'late-read', 'rotation-race', 'revocation-race', 'slow-response', 'request-errors', 'inactive', 'invalid-selection', 'responsive', 'empty', 'login-return'], screenshots: output }));
+    console.log(JSON.stringify({ passed: true, clients: cases.length, checks: ['default-combined', 'automatic-prepare', 'combined-rotation', 'qq-copy', 'navigation', 'formats', 'schemes', 'download', 'subscription-selection', 'history', 'late-read', 'rotation-race', 'revocation-race', 'slow-response', 'request-errors', 'inactive', 'invalid-selection', 'responsive', 'empty', 'login-return'], screenshots: output }));
   } catch (error) {
     await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => {});
     throw error;

@@ -54,7 +54,6 @@ export function clientImportScheme(client: ImportClientID, url: string, name: st
 }
 
 export function selectedImportSubscription(subscriptions: readonly UserSubscription[], requested: string | null) {
-  if (requested !== null) return subscriptions.find((item) => item.id === requested) || null;
-  const active = subscriptions.filter((item) => item.status === "active");
-  return active.length === 1 ? active[0] : null;
+  // Missing parameter means all; invalid explicit IDs never widen access.
+  return requested === null ? null : subscriptions.find((item) => item.id === requested) || null;
 }

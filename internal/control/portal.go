@@ -1,82 +1,15 @@
 package control
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/secure"
 	"github.com/KeepS13/HQIP/internal/store"
-	"gopkg.in/yaml.v3"
 )
-
-func (s *Server) registerPortalAdmin(m *http.ServeMux) {
-	s.registerPaymentAdmin(m)
-	for pattern, handler := range map[string]http.HandlerFunc{
-		"GET /api/v1/settings/traffic-billing": s.trafficBillingSettings, "PUT /api/v1/settings/traffic-billing": s.trafficBillingSettings,
-		"GET /api/v1/subscription-templates": s.subscriptionTemplates, "POST /api/v1/subscription-templates": s.saveSubscriptionTemplate, "PUT /api/v1/subscription-templates/{id}": s.saveSubscriptionTemplate, "POST /api/v1/subscription-templates/{id}/preview": s.previewSubscriptionTemplate,
-		"GET /api/v1/subscription-requests": s.adminSubscriptionRequests, "POST /api/v1/subscription-requests/{id}/approve": stoppedApplication, "POST /api/v1/subscription-requests/{id}/reject": stoppedApplication,
-		"GET /api/v1/users/{id}/subscriptions": s.adminUserSubscriptions, "POST /api/v1/users/{id}/subscriptions": s.adminAssignSubscription, "DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}": s.adminRemoveSubscription,
-		"PATCH /api/v1/users/{id}/subscriptions/{subscriptionId}/expiry": s.adminSubscriptionExpiry,
-		"GET /api/v1/users/{id}/subscriptions/{subscriptionId}/nodes":    s.adminSubscriptionNodes,
-		"PATCH /api/v1/users/{id}/subscriptions/{subscriptionId}/nodes":  s.adminSubscriptionNodes,
-		"GET /api/v1/users": s.portalUsers, "GET /api/v1/users/{id}": s.portalAdminUser, "PATCH /api/v1/users/{id}": s.portalAdminEnabled, "POST /api/v1/users/{id}/password": s.portalAdminPassword,
-		"POST /api/v1/users/{id}/sessions/{sessionId}/revoke": s.portalAdminRevokeSession, "POST /api/v1/users/{id}/connections/{leaseId}/revoke": s.portalAdminRevokeConnection,
-		"GET /api/v1/settings/turnstile": s.portalTurnstileSettings, "PUT /api/v1/settings/turnstile": s.portalTurnstileSettings, "GET /api/v1/settings/portal": s.portalSettings, "PUT /api/v1/settings/portal": s.portalSettings, "POST /api/v1/settings/portal/activate": s.portalActivate,
-		"GET /api/v1/settings/portal/recovery": s.portalRecovery, "POST /api/v1/settings/portal/recovery/resume": s.portalResume,
-	} {
-		m.Handle(pattern, s.auth(handler, false))
-	}
-}
-func (s *Server) registerPortalPublic(m *http.ServeMux) {
-	s.registerPaymentPublic(m)
-	m.HandleFunc("GET /api/v1/user/config", s.portalConfig)
-	m.HandleFunc("POST /api/v1/user/register", s.portalRegister)
-	m.HandleFunc("POST /api/v1/user/login", s.portalLogin)
-	m.HandleFunc("GET /api/v1/user/session", s.portalSession)
-	m.HandleFunc("GET /api/v1/user/releases", s.portalReleases)
-	m.HandleFunc("GET /api/v1/user/download", s.portalDownloadInfo)
-	m.HandleFunc("GET /downloads/HQIP-Windows-x64.zip", s.portalDownload)
-	m.HandleFunc("GET /downloads/{sha256}/HQIP-Windows-x64.zip", s.portalDownload)
-	for pattern, handler := range map[string]portalHandler{
-		"GET /api/v1/user/profile": s.portalProfile, "POST /api/v1/user/logout": s.portalLogout, "POST /api/v1/user/password": s.portalPassword,
-		"GET /api/v1/user/catalog": s.userCatalog, "GET /api/v1/user/subscription-requests": s.userSubscriptionRequests,
-		"GET /api/v1/user/subscriptions": s.userSubscriptions, "GET /api/v1/user/subscriptions/{id}": s.userSubscriptionDetail,
-		"POST /api/v1/user/subscriptions/{id}/import-link": s.portalSubscription, "POST /api/v1/user/subscriptions/{id}/import-link/rotate": s.portalSubscription, "POST /api/v1/user/subscriptions/{id}/import-link/revoke": s.portalSubscription,
-		"GET /api/v1/user/sessions": s.portalSessions, "POST /api/v1/user/sessions/{id}/revoke": s.portalRevokeSession,
-		"GET /api/v1/user/authorize/{id}": s.portalAuthorize, "POST /api/v1/user/authorize/{id}": s.portalAuthorize,
-	} {
-		m.Handle(pattern, s.portalAuth("browser", handler))
-	}
-	m.HandleFunc("GET /usub/{token}", s.portalYAML)
-	m.HandleFunc("/api/v2/client/", func(w http.ResponseWriter, r *http.Request) {
-		fail(w, http.StatusUpgradeRequired, "请升级 HQIP 多订阅客户端后重新登录")
-	})
-	m.HandleFunc("POST /api/v3/client/authorize", s.nativeBegin)
-	m.HandleFunc("POST /api/v3/client/token", s.nativeToken)
-	m.HandleFunc("POST /api/v3/client/refresh", s.nativeRefresh)
-	for pattern, handler := range map[string]portalHandler{
-		"POST /api/v3/client/logout": s.portalLogout, "GET /api/v3/client/profile": s.nativeProfile, "POST /api/v3/client/subscription": s.nativeSelectSubscription, "POST /api/v3/client/status": s.nativeStatus, "GET /api/v3/client/rules/{hash}": s.nativeRules,
-		"GET /api/v3/client/connections": s.portalConnections, "POST /api/v3/client/connections/drain": s.nativeDrain,
-		"GET /api/v3/client/billing": s.nativeBilling,
-	} {
-		m.Handle(pattern, s.portalAuth("native", handler))
-	}
-	m.HandleFunc("POST /api/v1/agents/offline-grants", s.agentOfflineAdmission)
-	m.HandleFunc("POST /api/v1/agents/offline-grants/{id}/report", s.agentOfflineReport)
-	m.HandleFunc("POST /api/v1/agents/admission", s.agentAdmission)
-	m.HandleFunc("POST /api/v1/agents/reality-credential", s.agentRealityCredential)
-	m.HandleFunc("POST /api/v1/agents/leases/{id}/renew", s.agentLeaseRenew)
-}
 
 type portalHandler func(http.ResponseWriter, *http.Request, string, string)
 
@@ -146,107 +79,6 @@ func portalResult(w http.ResponseWriter, v any, err error) {
 	default:
 		fail(w, 400, "操作失败，请检查输入或稍后重试")
 	}
-}
-func (s *Server) portalConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, _ := s.Store.TurnstileSettings()
-	reply(w, 200, map[string]any{"registrationEnabled": s.Store.PortalSetting("portal_registration") == "true", "portalEnabled": s.Store.PortalEnabled(), "recoveryHold": s.Store.PortalSetting("portal_recovery_hold") == "true", "turnstileSiteKey": cfg.SiteKey, "turnstileConfigured": cfg.SecretConfigured})
-}
-func (s *Server) portalSettings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "PUT" {
-		var b struct {
-			RegistrationEnabled bool `json:"registrationEnabled"`
-		}
-		if !readJSON(w, r, &b) {
-			return
-		}
-		value := "false"
-		if b.RegistrationEnabled {
-			value = "true"
-		}
-		if err := s.Store.SetPortalSetting("portal_registration", value); err != nil {
-			portalResult(w, nil, err)
-			return
-		}
-	}
-	s.portalConfig(w, r)
-}
-func (s *Server) portalTurnstileSettings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "PUT" {
-		var b struct {
-			SiteKey          string   `json:"siteKey"`
-			SecretKey        *string  `json:"secretKey"`
-			AllowedHostnames []string `json:"allowedHostnames"`
-			ExpectedRevision int64    `json:"expectedRevision"`
-		}
-		if !readJSON(w, r, &b) {
-			return
-		}
-		if len(b.AllowedHostnames) == 0 {
-			base, _ := url.Parse(s.opts.UserOrigin)
-			b.AllowedHostnames = []string{base.Hostname()}
-		}
-		v, err := s.Store.SaveTurnstile(b.SiteKey, b.AllowedHostnames, b.SecretKey, b.ExpectedRevision)
-		portalResult(w, v, err)
-		return
-	}
-	v, e := s.Store.TurnstileSettings()
-	portalResult(w, v, e)
-}
-func (s *Server) verifyTurnstile(ctx context.Context, token, ip, action string) bool {
-	if len(token) < 1 || len(token) > 2048 {
-		return false
-	}
-	settings, secret, err := s.Store.TurnstileVerificationConfig()
-	if err != nil || secret == "" || settings.SiteKey == "" {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	form := url.Values{"secret": {secret}, "response": {token}, "remoteip": {ip}}
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://challenges.cloudflare.com/turnstile/v0/siteverify", strings.NewReader(form.Encode()))
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	client := s.opts.TurnstileClient
-	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		client = &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
-	res, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		return false
-	}
-	var answer struct {
-		Success     bool      `json:"success"`
-		Hostname    string    `json:"hostname"`
-		Action      string    `json:"action"`
-		ChallengeTS time.Time `json:"challenge_ts"`
-	}
-	if json.NewDecoder(io.LimitReader(res.Body, 32768)).Decode(&answer) != nil {
-		return false
-	}
-	base, _ := url.Parse(s.opts.UserOrigin)
-	now := s.Store.Now()
-	allowed := settings.AllowedHostnames
-	if len(allowed) == 0 {
-		allowed = []string{base.Hostname()}
-	}
-	hostOK := false
-	for _, h := range allowed {
-		if strings.EqualFold(h, answer.Hostname) {
-			hostOK = true
-		}
-	}
-	if !answer.Success || !hostOK || answer.Action != action || answer.ChallengeTS.Before(now.Add(-5*time.Minute)) || answer.ChallengeTS.After(now.Add(time.Minute)) {
-		return false
-	}
-	return s.Store.ConsumeTurnstile(token)
 }
 
 type portalLoginBody struct {
@@ -390,13 +222,22 @@ func (s *Server) portalProfileData(user, session string) (map[string]any, error)
 }
 func (s *Server) portalSubscription(w http.ResponseWriter, r *http.Request, user, session string) {
 	action := "create"
+	if r.Method == http.MethodGet {
+		action = "get"
+	}
 	if strings.HasSuffix(r.URL.Path, "/rotate") {
 		action = "rotate"
 	}
 	if strings.HasSuffix(r.URL.Path, "/revoke") {
 		action = "revoke"
 	}
-	link, err := s.Store.PortalSubscription(user, r.PathValue("id"), action)
+	var link string
+	var err error
+	if id := r.PathValue("id"); id != "" {
+		link, err = s.Store.PortalSubscription(user, id, action)
+	} else {
+		link, err = s.Store.PortalAllSubscriptions(user, action)
+	}
 	portalResult(w, map[string]string{"url": link}, err)
 }
 func (s *Server) portalSessions(w http.ResponseWriter, r *http.Request, user, session string) {
@@ -446,258 +287,4 @@ func (s *Server) portalAuthorize(w http.ResponseWriter, r *http.Request, user, s
 	}
 	redirect, err := s.Store.ApprovePortalAuthorization(r.PathValue("id"), user, session)
 	portalResult(w, map[string]string{"redirectUrl": redirect}, err)
-}
-func (s *Server) nativeBegin(w http.ResponseWriter, r *http.Request) {
-	if !s.allowLogin(w, r, "native-authorize:"+clientIP(r)) {
-		return
-	}
-	var b struct {
-		CodeChallenge  string `json:"codeChallenge"`
-		RedirectURI    string `json:"redirectUri"`
-		State          string `json:"state"`
-		ClientName     string `json:"clientName"`
-		InstallationID string `json:"installationId"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	id, expires, err := s.Store.BeginPortalAuthorization(b.CodeChallenge, b.RedirectURI, b.State, b.ClientName, b.InstallationID)
-	portalResult(w, map[string]any{"requestId": id, "authorizationUrl": s.opts.UserOrigin + "/authorize?request=" + id, "expiresAt": expires}, err)
-}
-func (s *Server) nativeToken(w http.ResponseWriter, r *http.Request) {
-	if !s.allowLogin(w, r, "native-token:"+clientIP(r)) {
-		return
-	}
-	var b struct {
-		Code           string `json:"code"`
-		CodeVerifier   string `json:"codeVerifier"`
-		RedirectURI    string `json:"redirectUri"`
-		InstallationID string `json:"installationId"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	t, e := s.Store.ExchangePortalCode(b.Code, b.CodeVerifier, b.RedirectURI, b.InstallationID)
-	if e == nil {
-		setOperationActor(r, "user", t.User.ID, t.User.Email, "native")
-	}
-	portalResult(w, t, e)
-}
-func (s *Server) nativeRefresh(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		RefreshToken string `json:"refreshToken"`
-		RequestID    string `json:"requestId"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	t, e := s.Store.PortalRefreshRequest(b.RefreshToken, b.RequestID)
-	if e != nil && !errors.Is(e, store.ErrUnauthorized) {
-		w.Header().Set("Retry-After", "5")
-		fail(w, 503, "账户服务暂时不可用，请稍后重试")
-		return
-	}
-	portalResult(w, t, e)
-}
-func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, session string) {
-	id, selectionRevision, err := s.Store.SelectedSubscription(user, session)
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	p, e, err := s.Store.PortalClientProfile(user, session, id)
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	u, err := s.Store.PortalUser(user)
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	p.SubscriptionID = id
-	p.SelectionRevision = selectionRevision
-	availableNodes, err := s.Store.ClientNodeCatalog(u.Subscriptions)
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	// Older native clients interpret every endpoint as HY2. Their existing
-	// sessions keep the old shape until the client advertises protocol support.
-	if r.URL.Query().Get("protocols") != model.RealityCapability {
-		filtered := p.Nodes[:0]
-		for _, n := range p.Nodes {
-			if n.Protocol != "vless" {
-				filtered = append(filtered, n)
-			}
-		}
-		p.Nodes = filtered
-		catalog := availableNodes[:0]
-		for _, n := range availableNodes {
-			if n.Protocol != "vless" {
-				catalog = append(catalog, n)
-			}
-		}
-		availableNodes = catalog
-	}
-	latestID, latestSelection, err := s.Store.SelectedSubscription(user, session)
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	if latestID != id || latestSelection != selectionRevision {
-		portalResult(w, nil, store.ErrConflict)
-		return
-	}
-	v := struct {
-		model.ClientProfile
-		User           model.PortalUser           `json:"user"`
-		Subscription   *model.UserSubscription    `json:"subscription"`
-		Subscriptions  []model.UserSubscription   `json:"subscriptions"`
-		AvailableNodes []model.ClientNodeEndpoint `json:"availableNodes"`
-	}{p, u, e, u.Subscriptions, availableNodes}
-	raw, _ := json.Marshal(v)
-	sum := sha256.Sum256(raw)
-	etag := "\"" + hex.EncodeToString(sum[:]) + "\""
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(304)
-		return
-	}
-	reply(w, 200, v)
-}
-func (s *Server) nativeStatus(w http.ResponseWriter, r *http.Request, user, session string) {
-	var b model.ClientStatus
-	if !readJSON(w, r, &b) {
-		return
-	}
-	if len(b.LastError) > 2000 || len(b.CoreVersion) > 100 || len(b.RunState) > 40 {
-		fail(w, 400, "状态字段过长")
-		return
-	}
-	raw, _ := json.Marshal(b)
-	_, err := s.Store.DB.Exec("UPDATE portal_sessions SET status=? WHERE id=? AND user_id=?", string(raw), session, user)
-	portalResult(w, map[string]bool{"ok": true}, err)
-}
-func (s *Server) nativeRules(w http.ResponseWriter, r *http.Request, user, session string) {
-	raw, err := s.Store.RuleBytes(r.PathValue("hash"))
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(raw)
-}
-func (s *Server) nativeDrain(w http.ResponseWriter, r *http.Request, user, session string) {
-	var b struct {
-		SubscriptionID   string `json:"subscriptionId"`
-		ExpectedRevision int64  `json:"expectedRevision"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	portalResult(w, map[string]bool{"ok": true}, s.Store.DrainSubscriptionSession(user, session, b.SubscriptionID, b.ExpectedRevision))
-}
-func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
-	format, err := portalExportFormat(r.URL.RawQuery)
-	if err != nil {
-		fail(w, 400, "不支持的订阅格式")
-		return
-	}
-	if !s.Store.PortalEnabled() {
-		fail(w, 404, "订阅不可用")
-		return
-	}
-	user, subscription, err := s.Store.ResolvePortalSubscription(r.PathValue("token"))
-	if err != nil {
-		fail(w, 404, "订阅不存在或已撤销")
-		return
-	}
-	p, e, err := s.Store.PortalClientProfile(user, "subscription", subscription)
-	if err != nil {
-		currentUser, currentSubscription, tokenErr := s.Store.ResolvePortalSubscription(r.PathValue("token"))
-		if tokenErr != nil || currentUser != user || currentSubscription != subscription {
-			fail(w, 404, "订阅不存在或已撤销")
-			return
-		}
-		portalResult(w, nil, err)
-		return
-	}
-	if e == nil || e.Status != "active" {
-		fail(w, 403, "此订阅已失效")
-		return
-	}
-	proxies := []map[string]any{}
-	names := []string{}
-	defaultReady := false
-	for _, n := range p.Nodes {
-		if !n.Ready {
-			continue
-		}
-		name := n.Name + " · " + n.ID
-		proxy, proxyErr := n.ClashProxy(name)
-		if proxyErr != nil {
-			portalResult(w, nil, proxyErr)
-			return
-		}
-		if n.ID == p.DefaultNodeID {
-			defaultReady = true
-			names = append([]string{name}, names...)
-			proxies = append([]map[string]any{proxy}, proxies...)
-		} else {
-			names = append(names, name)
-			proxies = append(proxies, proxy)
-		}
-	}
-	if !defaultReady {
-		fail(w, 503, errPortalDefaultNodeUnavailable.Error())
-		return
-	}
-	var body []byte
-	contentType := "text/yaml; charset=utf-8"
-	if format == "v2ray" {
-		body, err = portalV2RaySubscription(p)
-		contentType = "text/plain; charset=utf-8"
-	} else if format == "singbox" {
-		v, rulesErr := s.Store.Rules()
-		if rulesErr != nil {
-			portalResult(w, nil, rulesErr)
-			return
-		}
-		body, err = portalSingBoxSubscription(p, v.Bundle, s.opts.PublicURL, s.opts.UserOrigin)
-		contentType = "application/json; charset=utf-8"
-	} else {
-		v, rulesErr := s.Store.Rules()
-		if rulesErr != nil {
-			portalResult(w, nil, rulesErr)
-			return
-		}
-		rules, rulesErr := v.Bundle.ClashRules("节点选择", "DIRECT")
-		if rulesErr != nil {
-			portalResult(w, nil, rulesErr)
-			return
-		}
-		groups := []map[string]any{}
-		groups = append([]map[string]any{{"name": "节点选择", "type": "select", "proxies": names}}, groups...)
-		body, err = yaml.Marshal(map[string]any{"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": groups, "rules": rules})
-	}
-	if err != nil {
-		portalResult(w, nil, err)
-		return
-	}
-	// Profile construction can span a subscription rotation. Never deliver
-	// replacement credentials to a request authenticated by the previous URL.
-	current, currentSubscription, err := s.Store.ResolvePortalSubscription(r.PathValue("token"))
-	if err != nil || current != user || currentSubscription != subscription {
-		fail(w, 404, "订阅不存在或已撤销")
-		return
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Profile-Update-Interval", "1")
-	if r.URL.Query().Get("download") == "1" {
-		extension := map[string]string{"clash": "yaml", "v2ray": "txt", "singbox": "json"}[format]
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "hqip-" + format + "." + extension}))
-	}
-	_, _ = w.Write(body)
 }
