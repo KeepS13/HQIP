@@ -119,6 +119,7 @@ def verify_agent_assets(release,old,manifest):
 
 def require_billing_compatible(manifest):
  if postgres_enabled():
+  if manifest.get('subscriptionRenewalsVersion',0)<postgres_info().get('subscriptionRenewalsVersion',0):raise ValueError('Subscription periods require a renewal-compatible release; live usage is preserved')
   if manifest.get('trafficBillingVersion',0)<postgres_info().get('trafficBillingVersion',0):raise ValueError('Traffic billing ledger requires a compatible release; fix forward without repricing usage')
   if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
   if manifest.get('offlineAdmissionVersion',0)<postgres_info().get('offlineAdmissionVersion',0):raise ValueError('Offline grants require a compatible release; reservations and unsettled usage are preserved')
@@ -129,6 +130,8 @@ def require_billing_compatible(manifest):
   return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
   has_metadata=db.execute("SELECT 1 FROM sqlite_master WHERE name='metadata'").fetchone()
+  renewal_version=db.execute("SELECT value FROM metadata WHERE key='subscription_renewals_version'").fetchone() if has_metadata else None
+  if renewal_version and manifest.get('subscriptionRenewalsVersion',0)<int(renewal_version[0]):raise ValueError('Subscription periods require a renewal-compatible release; live usage is preserved')
   billing_version=db.execute("SELECT value FROM metadata WHERE key='traffic_billing_version'").fetchone() if has_metadata else None
   if billing_version and manifest.get('trafficBillingVersion',0)<int(billing_version[0]):raise ValueError('Traffic billing ledger requires a compatible release; live usage is preserved')
   reality_version=db.execute("SELECT value FROM metadata WHERE key='vless_reality_version'").fetchone() if has_metadata else None
@@ -175,6 +178,8 @@ def rollback(state):
  active=(control.BASE/'current').resolve(strict=True)
  if active not in [Path(info['previous']),Path(info['release'])]:raise ValueError('Refusing rollback over a later release')
  _,previous_manifest=control.verify_release(Path(info['previous']))
+ if info.get('renewalMigrationAttempted') and previous_manifest.get('subscriptionRenewalsVersion',0)<info.get('renewalTarget',0):
+  raise ValueError('Subscription renewal migration prevents rollback to an older controller; fix forward with current data')
  if info.get('allocationMigrationAttempted') and previous_manifest.get('subscriptionAllocationsVersion',0)<info.get('allocationTarget',0):
   raise ValueError('Subscription allocation migration prevents rollback to an older controller; fix forward with current data')
  require_billing_compatible(previous_manifest)
@@ -210,6 +215,8 @@ def upgrade(release,state,defer_protection=False):
  offline_env=prepare_offline(sys.modules[__name__],manifest)
  from traffic_billing_deployment import prepare as prepare_billing, migrate as migrate_billing
  billing_env=prepare_billing(sys.modules[__name__],manifest)
+ from subscription_renewal_deployment import prepare as prepare_renewals, migrate as migrate_renewals
+ renewal_env=prepare_renewals(sys.modules[__name__],manifest)
  if SITE.is_symlink() or UNIT.is_symlink():raise ValueError('Unexpected configuration symlink')
  state.mkdir(mode=0o700,exist_ok=False)
  shutil.copyfile(SITE,state/'nginx.before.conf');shutil.copyfile(UNIT,state/'unit.before.service')
@@ -257,6 +264,7 @@ def upgrade(release,state,defer_protection=False):
   # Backups can be larger than the uploaded release. Check actual remaining
   # space after backup and before changing the active code or service files.
   require_free_space(release,state,control.DATA,Path('/etc/hqip-storage'),Path('/var/lib/docker'))
+  migrate_renewals(release,renewal_env,state,info)
   migrate_allocations(release,migration_env,state,info)
   control.point_current(release)
   shutil.copyfile(release/'deploy/hqip-control.service',UNIT);UNIT.chmod(0o644)
@@ -267,6 +275,9 @@ def upgrade(release,state,defer_protection=False):
   if protection:install_protection(release,control.run,control.DATA)
   if data_identity()!=info['masterSHA256']:raise ValueError('Live data identity changed')
  except Exception:
+  if info.get('renewalMigrationAttempted'):
+   info['phase']='failed-renewal-migration-data-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
+   raise RuntimeError('Subscription renewal migration was attempted; refusing an incompatible controller rollback. Fix forward with this data.') from None
   if info.get('allocationMigrationAttempted'):
    info['phase']='failed-allocation-migration-data-preserved';(state/'domains-state.json').write_text(json.dumps(info,indent=2))
    raise RuntimeError('Subscription allocation migration was attempted; refusing an incompatible controller rollback. Fix forward with this data.') from None
