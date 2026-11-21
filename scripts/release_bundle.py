@@ -65,6 +65,9 @@ def validate_manifest(manifest, *, allow_legacy=False):
     offline = manifest.get('offlineAdmissionVersion', 0)
     billing = manifest.get('trafficBillingVersion', 0)
     quota = manifest.get('nodeQuotaVersion', 0)
+    slots = manifest.get('connectionSlotsVersion', 0)
+    if type(slots) is not int or slots not in (0, 1) or slots == 1 and quota != 1:
+        raise ValueError('Unsupported connection slots capability')
     if type(quota) is not int or quota not in (0, 1) or quota == 1 and (billing != 1 or offline != 1):
         raise ValueError('Unsupported node quota capability')
     if type(billing) is not int or billing not in (0, 1):
@@ -236,6 +239,8 @@ def verify_full_release(release, manifest=None, *, allow_legacy=False):
     core = nodes.get('hysteriaSource', {})
     if nodes.get('nodeQuotaVersion', 0) != manifest.get('nodeQuotaVersion', 0):
         raise ValueError('Node quota capability mismatch')
+    if nodes.get('connectionSlotsVersion', 0) != manifest.get('connectionSlotsVersion', 0):
+        raise ValueError('Connection slots capability mismatch')
     if manifest.get('trafficBillingVersion', 0) == 1 and nodes.get('trafficBillingVersion') != 1:
         raise ValueError('Node package lacks protocol billing capability')
     for arch in ('amd64', 'arm64'):

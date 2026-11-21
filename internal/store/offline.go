@@ -68,6 +68,13 @@ func loadOfflineGrant(q portalQuery, node, id string) (model.OfflineGrant, error
 		if state != nil {
 			g.Billing = &state.Grant
 			g.NodeQuota = state.NodeQuota
+			if state.NodeQuota != nil {
+				g.ConnectionSlotsVersion = 1
+				g.SlotReleased = state.SlotReleased
+				if !state.AuthorizationUntil.IsZero() {
+					g.OfflineUntil = state.AuthorizationUntil
+				}
+			}
 		}
 	}
 	return g, notFound(err)
@@ -181,6 +188,9 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			}
 		}
 		now := s.Now()
+		if err = releaseOfflineSlot(tx, &g, billingState, u, now); err != nil {
+			return empty, err
+		}
 		e, err := userSubscription(tx, g.UserID, g.SubscriptionID, now)
 		if err != nil {
 			return empty, err
@@ -263,6 +273,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 				}
 			}
 		}
+		acquireOfflineSlot(&g, billingState, u, e)
 		budget := g.NormalBudgetBytes + g.EmergencyBudgetBytes
 		if g.NormalUnlimited {
 			budget = total
@@ -287,7 +298,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 				return empty, err
 			}
 		}
-		if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,budget=?,expires=?,closed=?,revoked=?,revision=? WHERE id=?", u.UploadBytes, u.DownloadBytes, budget, g.OfflineUntil.Unix(), u.Closed, g.Revoked, e.Revision, id); err != nil {
+		if _, err = tx.Exec("UPDATE portal_leases SET upload=?,download=?,budget=?,expires=?,closed=?,revoked=?,revision=? WHERE id=?", u.UploadBytes, u.DownloadBytes, budget, offlineSlotExpiry(g, now), u.Closed, g.Revoked, e.Revision, id); err != nil {
 			return empty, err
 		}
 		lastActive := int64(0)

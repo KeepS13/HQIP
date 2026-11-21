@@ -10,9 +10,12 @@ const OfflineGrace = 24 * time.Hour
 const EmergencyAllowanceBytes int64 = 1 << 30
 const OfflineChunkBytes int64 = 16 << 20
 
-// OfflineGrant owns one centrally reserved slot. Child QUIC leases never own
-// another slot and may only spend this grant's durably delegated budgets.
+// OfflineGrant caches verified subscription identity and durable metering.
+// With connection-slots-v1 its authorization survives release of the online
+// slot; a released slot must be acquired again before issuing a child lease.
 type OfflineGrant struct {
+	ConnectionSlotsVersion  int                `json:"connectionSlotsVersion,omitempty"`
+	SlotReleased            bool               `json:"slotReleased,omitempty"`
 	NodeQuota               *NodeQuotaSnapshot `json:"nodeQuota,omitempty"`
 	Billing                 *billing.Grant     `json:"billing,omitempty"`
 	Version                 int                `json:"version"`
@@ -55,6 +58,9 @@ type NodeQuotaSnapshot struct {
 // Totals cover every child of a grant, including closed children. A replay of
 // the same version must have exactly the same content.
 type OfflineUsage struct {
+	// SlotAction is an explicit, replayable transition (release/acquire).
+	// Release proves all children ended; it never declares unknown usage final.
+	SlotAction string `json:"slotAction,omitempty"`
 	// RetainedNormalUnits retires a legacy parent and returns only never-issued
 	// budget. All closed and uncertain children remain counted, in 1/100 bytes.
 	RetainedNormalUnits *int64            `json:"retainedNormalUnits,omitempty"`

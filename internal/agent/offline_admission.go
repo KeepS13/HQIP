@@ -125,7 +125,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			return
 		}
 		selected = &s
-	} else if err = a.syncOfflineState(ctx, selected, false); err != nil {
+	} else if err = a.prepareOfflineSlot(ctx, selected); err != nil {
 		status := 503
 		if errors.Is(err, errOfflineDenied) {
 			status = 403

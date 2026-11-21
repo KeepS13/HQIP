@@ -39,6 +39,8 @@ func (c offlineChild) emergencyUsed() int64 {
 }
 
 type offlineState struct {
+	// A durable slot transition fences reuse until its exact report is ACKed.
+	SlotAction string `json:"slotAction,omitempty"`
 	// Computed under offlineMu from the complete ledger; never persisted as
 	// independent money that a restart or second protocol could spend again.
 	QuotaAvailableUnits int64                     `json:"-"`
@@ -132,7 +134,7 @@ func (s *offlineState) observe(now time.Time) error {
 		return errOfflineDenied
 	}
 	s.LastWall = now
-	if s.Denied || s.Grant.Closed || s.Grant.Revoked || !now.Before(s.Grant.OfflineUntil) {
+	if s.Denied || s.Grant.Closed || s.Grant.Revoked || s.Grant.SlotReleased || s.SlotAction != "" || !now.Before(s.Grant.OfflineUntil) {
 		return errOfflineDenied
 	}
 	return nil

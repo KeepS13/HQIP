@@ -108,6 +108,7 @@ func New(cfg model.AgentConfig, logger *slog.Logger) (*Agent, error) {
 	}
 	noRedirect := func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }
 	a := &Agent{
+		offlineBoot: time.Now(), offlineIssued: map[string]time.Time{},
 		cfg: cfg, log: logger, ledger: l, cache: cached,
 		controlClient: &http.Client{Timeout: 4 * time.Second, CheckRedirect: noRedirect},
 		statsClient: &http.Client{

@@ -91,7 +91,7 @@ func (a *Agent) sync(ctx context.Context) error {
 		report.Capabilities = append(report.Capabilities, "admission-v1")
 		if coreCapabilities.TrafficBillingVersion == 1 {
 			report.Capabilities = append(report.Capabilities, "traffic-billing-v1")
-			report.Capabilities = append(report.Capabilities, model.NodeQuotaCapability)
+			report.Capabilities = append(report.Capabilities, model.NodeQuotaCapability, "connection-slots-v1")
 		}
 		if endpoint := a.realityReport(); endpoint != nil {
 			report.Reality = endpoint

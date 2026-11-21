@@ -44,6 +44,7 @@ func (e *AgentUpgradeError) Error() string {
 }
 
 type AgentRelease struct {
+	ConnectionSlotsVersion  int               `json:"connectionSlotsVersion,omitempty"`
 	NodeQuotaVersion        int               `json:"nodeQuotaVersion,omitempty"`
 	TrafficBillingVersion   int               `json:"trafficBillingVersion,omitempty"`
 	VLESSRealityVersion     int               `json:"vlessRealityVersion,omitempty"`
@@ -54,6 +55,7 @@ type AgentRelease struct {
 
 func (r *Runner) AgentRelease() (AgentRelease, error) {
 	var raw struct {
+		ConnectionSlotsVersion  int               `json:"connectionSlotsVersion"`
 		NodeQuotaVersion        int               `json:"nodeQuotaVersion"`
 		TrafficBillingVersion   int               `json:"trafficBillingVersion"`
 		VLESSRealityVersion     int               `json:"vlessRealityVersion"`
@@ -75,11 +77,11 @@ func (r *Runner) AgentRelease() (AgentRelease, error) {
 	if len(raw.SourceSHA) != 40 {
 		return AgentRelease{}, errors.New("Agent 发布版本无效")
 	}
-	return AgentRelease{NodeQuotaVersion: raw.NodeQuotaVersion, SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion, TrafficBillingVersion: raw.TrafficBillingVersion}, nil
+	return AgentRelease{ConnectionSlotsVersion: raw.ConnectionSlotsVersion, NodeQuotaVersion: raw.NodeQuotaVersion, SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion, TrafficBillingVersion: raw.TrafficBillingVersion}, nil
 }
 
 func (release AgentRelease) upgradeManifest(arch, hash string) []byte {
-	data, _ := json.Marshal(map[string]any{"nodeQuotaVersion": release.NodeQuotaVersion, "agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "trafficBillingVersion": release.TrafficBillingVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
+	data, _ := json.Marshal(map[string]any{"connectionSlotsVersion": release.ConnectionSlotsVersion, "nodeQuotaVersion": release.NodeQuotaVersion, "agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "trafficBillingVersion": release.TrafficBillingVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
 	return data
 }
 

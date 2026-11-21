@@ -78,6 +78,7 @@ def package_release(root, sha, previous_sha=None):
                 'sha256': hashes}
     manifest['trafficBillingVersion'] = 1
     manifest['nodeQuotaVersion'] = nodes.get('nodeQuotaVersion', 0)
+    manifest['connectionSlotsVersion'] = nodes.get('connectionSlotsVersion', 0)
     if previous_sha:
         manifest['previousSourceSHA'] = previous_sha  # Deployment guard, never a source of files.
     (out / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

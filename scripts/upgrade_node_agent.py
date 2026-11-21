@@ -53,6 +53,20 @@ def require_node_quota_compatible(ledger, version):
                     raise ValueError('Node-owned quota requires a compatible Agent; preserve its ledger and fix forward')
 
 
+def require_connection_slots_compatible(ledger, version):
+    """A cached or in-flight slot release cannot be reinterpreted as held."""
+    if version == 1:
+        return
+    with closing(sqlite3.connect(ledger.as_uri() + '?mode=ro', uri=True)) as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='offline_grants'").fetchone():
+            for raw, in db.execute('SELECT state FROM offline_grants'):
+                state = json.loads(raw)
+                grant = state.get('grant', {})
+                if (grant.get('connectionSlotsVersion', 0) or grant.get('slotReleased')
+                        or state.get('slotAction') or (state.get('pending') or {}).get('slotAction')):
+                    raise ValueError('Connection slots require a compatible Agent; preserve its ledger and fix forward')
+
+
 def previous_offline_version(override, capability='offline'):
     if not override.exists():
         return 0
@@ -207,6 +221,7 @@ def upgrade(node, artifacts):
     require_offline_compatible(ledger, manifest.get('offlineAdmissionVersion', 0))
     require_traffic_billing_compatible(ledger, manifest.get('trafficBillingVersion', 0))
     require_node_quota_compatible(ledger, manifest.get('nodeQuotaVersion', 0))
+    require_connection_slots_compatible(ledger, manifest.get('connectionSlotsVersion', 0))
     if cfg.get('reality') and manifest.get('vlessRealityVersion') != 1:
         raise ValueError('Reality nodes require a compatible Agent')
     before_config = node_ops.regular(config / 'agent.json').read_text()
@@ -243,6 +258,11 @@ def upgrade(node, artifacts):
         raise ValueError('Unsafe Agent capability marker')
     quota_path.write_text(json.dumps({'sha256': expected, 'version': manifest.get('nodeQuotaVersion', 0)}))
     quota_path.chmod(0o644)
+    slots_path = target.parent / 'connection-slots-capability.json'
+    if slots_path.is_symlink():
+        raise ValueError('Unsafe Agent capability marker')
+    slots_path.write_text(json.dumps({'sha256': expected, 'version': manifest.get('connectionSlotsVersion', 0)}))
+    slots_path.chmod(0o644)
     override = override_path(units)
     if override.is_symlink() or override.parent.is_symlink():
         raise ValueError('Unsafe Agent override')
@@ -257,6 +277,7 @@ def upgrade(node, artifacts):
             'coreInvocation': invocation, 'beforeOfflineAdmissionVersion': previous_offline_version(override), 'phase': 'prepared'}
     info['beforeTrafficBillingVersion'] = previous_offline_version(override, 'traffic-billing')
     info['beforeNodeQuotaVersion'] = previous_offline_version(override, 'node-quota')
+    info['beforeConnectionSlotsVersion'] = previous_offline_version(override, 'connection-slots')
     firewall_rules = []
     if next_cfg.get('reality'):
         firewall_rules = [{'ip': cfg['publicIp'], 'port': next_cfg['reality']['port'], 'proto': 'tcp'}]
@@ -277,6 +298,7 @@ def upgrade(node, artifacts):
         require_offline_compatible(ledger, manifest.get('offlineAdmissionVersion', 0))
         require_traffic_billing_compatible(ledger, manifest.get('trafficBillingVersion', 0))
         require_node_quota_compatible(ledger, manifest.get('nodeQuotaVersion', 0))
+        require_connection_slots_compatible(ledger, manifest.get('connectionSlotsVersion', 0))
         atomic_agent_config(config / 'agent.json', installed_config)
         atomic_override(override, text)
         node_ops.command('systemctl', 'daemon-reload')
@@ -314,6 +336,7 @@ def rollback(backup):
     require_offline_compatible(Path(cfg['statePath']), info.get('beforeOfflineAdmissionVersion', 0))
     require_traffic_billing_compatible(Path(cfg['statePath']), info.get('beforeTrafficBillingVersion', 0))
     require_node_quota_compatible(Path(cfg['statePath']), info.get('beforeNodeQuotaVersion', 0))
+    require_connection_slots_compatible(Path(cfg['statePath']), info.get('beforeConnectionSlotsVersion', 0))
     units = node_ops.node_units(info['nodeId'])
     node_ops.verify_units(info['nodeId'], config, units, check_effective=False)
     override = override_path(units)
@@ -329,6 +352,7 @@ def rollback(backup):
         require_offline_compatible(Path(cfg['statePath']), info.get('beforeOfflineAdmissionVersion', 0))
         require_traffic_billing_compatible(Path(cfg['statePath']), info.get('beforeTrafficBillingVersion', 0))
         require_node_quota_compatible(Path(cfg['statePath']), info.get('beforeNodeQuotaVersion', 0))
+        require_connection_slots_compatible(Path(cfg['statePath']), info.get('beforeConnectionSlotsVersion', 0))
     except Exception:
         node_ops.command('systemctl', 'start', units['agent'])
         raise

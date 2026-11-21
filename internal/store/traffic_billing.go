@@ -12,13 +12,17 @@ import (
 )
 
 type leaseBilling struct {
-	NodeQuota     *model.NodeQuotaSnapshot  `json:"nodeQuota,omitempty"`
-	Grant         billing.Grant             `json:"grant"`
-	Policies      map[int64]billing.Policy  `json:"policies"`
-	Segments      map[int64]billing.Segment `json:"segments"`
-	Reserved      int64                     `json:"reserved"`
-	NormalUsed    int64                     `json:"normalUsed"`
-	EmergencyUsed int64                     `json:"emergencyUsed"`
+	// Once slot management is enabled, portal_leases.expires belongs to the
+	// online slot while AuthorizationUntil preserves the cached entitlement.
+	AuthorizationUntil time.Time                 `json:"authorizationUntil,omitempty"`
+	SlotReleased       bool                      `json:"slotReleased,omitempty"`
+	NodeQuota          *model.NodeQuotaSnapshot  `json:"nodeQuota,omitempty"`
+	Grant              billing.Grant             `json:"grant"`
+	Policies           map[int64]billing.Policy  `json:"policies"`
+	Segments           map[int64]billing.Segment `json:"segments"`
+	Reserved           int64                     `json:"reserved"`
+	NormalUsed         int64                     `json:"normalUsed"`
+	EmergencyUsed      int64                     `json:"emergencyUsed"`
 }
 
 func readTrafficBilling(query portalQuery) (model.TrafficBillingSettings, error) {

@@ -46,6 +46,7 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 		if err != nil {
 			return err
 		}
+		u.SlotAction = s.SlotAction
 		if a.nodeQuotaEnabled() {
 			u.RetainedNormalUnits, err = retainedLegacyUnits(s)
 			if err != nil {
@@ -65,6 +66,9 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 		if json.Unmarshal(data, &g) != nil || g.ID != s.Grant.ID || g.NodeID != s.Grant.NodeID || g.CredentialHash != s.Grant.CredentialHash || g.UserID != s.Grant.UserID || g.SubscriptionID != s.Grant.SubscriptionID || g.SessionID != s.Grant.SessionID || g.AuthorizedAt.Before(s.Grant.AuthorizedAt) || (g.OfflineUntil.Before(s.Grant.OfflineUntil) && u.RetainedNormalUnits == nil) || g.ReportVersion != u.Version || g.UploadBytes != u.UploadBytes || g.DownloadBytes != u.DownloadBytes || g.EmergencyUsedBytes != u.EmergencyUsedBytes || g.Closed != u.Closed || (g.NormalBudgetBytes < s.Grant.NormalBudgetBytes && u.RetainedNormalUnits == nil) || g.EmergencyBudgetBytes != s.Grant.EmergencyBudgetBytes || g.RateVersion < s.Grant.RateVersion || g.NormalUnlimited != s.Grant.NormalUnlimited || (!g.Closed && !g.Revoked && !validOfflineGrant(g, a.cfg.NodeID, g.CredentialHash, now)) {
 			err = &admissionProtocolError{}
 		} else {
+			if !slotAcknowledgementValid(s, g, u) {
+				return &admissionProtocolError{}
+			}
 			if (s.Grant.NodeQuota != nil) != (g.NodeQuota != nil) || g.NodeQuota != nil && (!validNodeQuotaSnapshot(g.NodeQuota) || g.NodeQuota.Revision < s.Grant.NodeQuota.Revision) {
 				return &admissionProtocolError{}
 			}
@@ -79,6 +83,9 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 				return err
 			}
 			s.Pending = nil
+			if u.SlotAction == s.SlotAction {
+				s.SlotAction = ""
+			}
 			s.Online = true
 			s.Failures = 0
 			s.RetryAt = now.Add(5 * time.Second)
@@ -130,8 +137,11 @@ func (a *Agent) offlineRenew(w http.ResponseWriter, r *http.Request, id string, 
 	if s.Grant.Billing != nil {
 		force = s.Online && (child.Normal-child.NormalUsed)/s.Grant.Billing.Multiplier < model.OfflineChunkBytes/4
 	}
-	err = a.syncOfflineState(ctx, &s, force)
+	err = a.syncOfflineState(ctx, &s, force || u.Closed)
 	if u.Closed {
+		if err == nil {
+			_ = a.releaseIdleOfflineSlot(ctx, &s)
+		}
 		delete(a.offlineIssued, id)
 		// Local durable receipt is sufficient for a child final. The parent
 		// report is retained until the control service confirms exact totals.
@@ -180,18 +190,19 @@ func (a *Agent) syncOfflineGrants(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// A changed core generation proves old transports ended, but cannot prove
-	// their final counters. Persist that distinction before reclaiming only the
-	// parent budget that was never delegated to any of those transports.
+	// A changed core generation or elapsed monotonic child lease proves the
+	// transport ended, not its final counters. Persist this before releasing
+	// slots; unknown byte allocations remain reserved in the local ledger.
 	if a.nodeQuotaEnabled() {
 		generation, generationErr := a.generation(ctx)
-		if generationErr == nil && generation != "" {
-			for i := range states {
-				if states[i].Grant.NodeQuota == nil && !states[i].Grant.Closed {
-					a.reconcileOfflineChildren(ctx, &states[i], generation)
-					if err = a.ledger.saveOffline(states[i]); err != nil {
-						return err
-					}
+		if generationErr != nil {
+			generation = ""
+		}
+		for i := range states {
+			if !states[i].Grant.Closed {
+				a.reconcileOfflineChildren(ctx, &states[i], generation)
+				if err = a.ledger.saveOffline(states[i]); err != nil {
+					return err
 				}
 			}
 		}
@@ -215,7 +226,9 @@ func (a *Agent) syncOfflineGrants(ctx context.Context) error {
 				return err
 			}
 		}
-		_ = a.syncOfflineState(ctx, s, false)
+		if err = a.syncOfflineState(ctx, s, false); err == nil {
+			_ = a.releaseIdleOfflineSlot(ctx, s)
+		}
 	}
 	return nil
 }
@@ -262,28 +275,23 @@ func (a *Agent) flushOfflineRetirement(ctx context.Context) error {
 	return nil
 }
 
-// A wall-clock expiry alone is not proof of closure: HY2 enforces monotonic
-// deadlines. Reconcile a stable core generation and an empty online snapshot,
-// after the last possible short lease has elapsed on our monotonic clock.
-// A confirmed core restart also proves the old transport is gone. Neither
-// observation returns its unconfirmed delegated bytes to the available pool.
+// The core caps every child at request-start + 120 seconds on its monotonic
+// clock. After our last issuance (or restart) plus 125 seconds without renewal,
+// that particular child cannot still forward, even when another child on the
+// same subscription is active. A core restart also proves termination. Neither
+// observation fabricates final counters or returns unknown delegated bytes.
 func (a *Agent) reconcileOfflineChildren(ctx context.Context, s *offlineState, generation string) {
 	for id, child := range s.Children {
 		if child.Closed || child.Ended {
 			continue
 		}
-		ended := child.CoreGeneration != "" && child.CoreGeneration != generation
+		ended := generation != "" && child.CoreGeneration != "" && child.CoreGeneration != generation
 		issued, ok := a.offlineIssued[id]
 		if !ok {
 			issued = a.offlineBoot
 		}
 		if !ended && !issued.IsZero() && time.Since(issued) >= 125*time.Second {
-			var online map[string]int
-			probe, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			err := a.statsJSON(probe, http.MethodGet, "/online", nil, &online)
-			after, generationErr := a.generation(probe)
-			cancel()
-			ended = err == nil && online != nil && online["subscription_"+s.Grant.SubscriptionID] == 0 && generationErr == nil && after == generation
+			ended = true
 		}
 		if ended {
 			child.Ended = true
