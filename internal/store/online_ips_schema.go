@@ -8,9 +8,11 @@ import (
 
 // Both SQL migrations and the SQLite-to-PostgreSQL importer use this DDL.
 // client_ip is runtime business identity; historical unknown peers stay empty.
+// Keep expiry out of the index so frequent renewals remain PostgreSQL HOT
+// updates. The partial index bounds IP lookups to unsettled connections.
 const onlineIPSchema = `
 ALTER TABLE portal_leases ADD COLUMN client_ip TEXT NOT NULL DEFAULT '';
-CREATE INDEX portal_lease_ip ON portal_leases(subscription_id,client_ip,closed,expires);
+CREATE INDEX portal_lease_ip ON portal_leases(subscription_id,client_ip) WHERE closed=0;
 `
 
 // migrateOnlineIPs extends the existing connection ledger. Historical rows
