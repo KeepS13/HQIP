@@ -71,6 +71,9 @@ func TestSubscriptionExpiryPreservesGrantAndOtherCopies(t *testing.T) {
 		}
 		expected := *current
 		expected.ExpiresAt, expected.Revision = updated.ExpiresAt, updated.Revision
+		expected.CurrentPeriodEndsAt = target
+		expected.Periods = append([]model.SubscriptionPeriod(nil), current.Periods...)
+		expected.Periods[len(expected.Periods)-1].EndsAt = target
 		if !reflect.DeepEqual(updated, expected) {
 			t.Fatal("other entitlement changed")
 		}

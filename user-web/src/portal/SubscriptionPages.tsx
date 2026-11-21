@@ -30,6 +30,7 @@ import { SubscriptionCard, SubscriptionStatus } from "./SubscriptionCard";
 import { MyRequests } from "./SubscriptionRequests";
 export { UserOverview } from "./UserOverview";
 import "./subscriptions.css";
+import { RenewalButton } from "./Renewal";
 
 export function OwnedSubscriptions() {
   const list = useUserData<UserSubscription[]>("/subscriptions", 5000);
@@ -149,6 +150,7 @@ export function UserSubscriptionDetail() {
         actions={
           <>
             <SubscriptionStatus status={value.status} />
+            <RenewalButton value={value} />
             <RefreshButton refresh={detail.refresh} />
           </>
         }
@@ -165,7 +167,7 @@ export function UserSubscriptionDetail() {
                 ? "不限量"
                 : bytes(Math.max(0, value.quotaBytes - value.usedBytes))}
             </strong>
-            <span>剩余总额度</span>
+            <span>本期剩余额度</span>
           </div>
           <Meter value={value.usedBytes} max={value.quotaBytes} />
           <div className="user-sub-usage">
@@ -197,9 +199,11 @@ export function UserSubscriptionDetail() {
               </dd>
             </div>
             <div>
-              <dt>到期时间</dt>
+              <dt>总到期时间</dt>
               <dd>{date(value.expiresAt)}</dd>
             </div>
+            <div><dt>本期结束</dt><dd>{date(value.currentPeriodEndsAt)}</dd></div>
+            {value.nextResetAt && <div><dt>下次流量重置</dt><dd>{date(value.nextResetAt)}</dd></div>}
           </dl>
           <small className="muted">
             HY2 每个在线客户端实例占一个名额，VLESS 按来源 IP 去重，两者合计。全部连接共享本订阅的上限、带宽与流量额度。
@@ -212,6 +216,13 @@ export function UserSubscriptionDetail() {
           ，不会自动使用其他流量包。请在客户端手动选择有效订阅。
         </Notice>
       )}
+      {value.periods?.length > 1 && <Panel title="订阅周期" subtitle="按顺序生效，每期单独计量；剩余流量不结转。">
+        <div className="user-request-list">{value.periods.map(period => <article key={period.id}>
+          <div className="user-request-heading"><strong>{period.id === value.currentPeriodId ? "本期" : Date.parse(period.startsAt) > Date.now() ? "待生效" : "已结束"}</strong>
+            {period.orderId && <Link className="text-link" to={`/orders/${encodeURIComponent(period.orderId)}`}>续费订单 →</Link>}</div>
+          <p>{date(period.startsAt)} — {date(period.endsAt)}</p>
+        </article>)}</div>
+      </Panel>}
       <Panel
         title="可选节点"
         subtitle="在 HQIP 客户端先选择这份订阅，再选择节点。网页查看不会改变设备选择。"

@@ -23,6 +23,12 @@ export interface SubscriptionTemplate {
   revision: number;
 }
 export interface UserSubscription {
+	currentPeriodId: string;
+	currentPeriodStartsAt: string;
+	currentPeriodEndsAt: string;
+	nextResetAt?: string;
+	renewable: boolean;
+	periods: { id: string; startsAt: string; endsAt: string; orderId?: string; uploadBytes: number; downloadBytes: number; reservedBytes: number }[];
   id: string;
   userId: string;
   templateId: string;

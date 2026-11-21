@@ -45,6 +45,8 @@ function OrderStatus({ order }: { order: PaymentOrder }) {
   const label =
     order.paymentState === "paid" && order.fulfillmentState === "blocked"
       ? "已付款，待处理"
+      : order.orderType === "renewal" && order.status === "fulfilled" ? "已续费"
+      : order.orderType === "renewal" && order.status === "paid_pending" ? "已付款，待续费"
       : orderLabels[order.status] || "待核实";
   return <Badge tone={tone}>{label}</Badge>;
 }
@@ -69,7 +71,7 @@ export function UserOrders() {
       <PageHeader
         eyebrow="MY ORDERS"
         title="我的订单"
-        description="查看付款与开通结果。每笔成功订单对应一份独立订阅。"
+        description="查看新购与续费记录，以及付款核验和处理结果。"
         actions={
           <Link to="/catalog" className="button button-primary">
             购买订阅 <ArrowRight size={16} />
@@ -91,8 +93,8 @@ export function UserOrders() {
         >
           <option value="">全部状态</option>
           <option value="pending">待付款</option>
-          <option value="paid_pending">已付款待开通</option>
-          <option value="fulfilled">已开通</option>
+          <option value="paid_pending">已付款待处理</option>
+          <option value="fulfilled">已完成</option>
           <option value="unknown">创建结果待核实</option>
           <option value="expired">付款入口已过期</option>
           <option value="closed">付款入口已关闭</option>
@@ -122,10 +124,10 @@ export function UserOrders() {
                 <ReceiptText size={22} />
               </span>
               <div className="commerce-order-title">
-                <h2>{order.templateName}</h2>
+                <h2>{order.templateName} · {order.orderType === "renewal" ? "续费" : "新购"}</h2>
                 <small>{order.orderNo}</small>
                 <span>
-                  {date(order.createdAt)} · 开通后 {order.validityDays} 天
+                  {date(order.createdAt)} · {order.orderType === "renewal" ? "续费" : "开通后"} {order.validityDays} 天
                 </span>
               </div>
               <div className="commerce-order-end">
@@ -267,7 +269,7 @@ export function UserOrderDetail() {
           <OrderStatus order={order} />
           <h2>
             {fulfilled
-              ? "你的新订阅已就绪"
+              ? order.orderType === "renewal" ? "套餐续费成功" : "你的新订阅已就绪"
               : paid
                 ? "付款已确认"
                 : order.status === "pending" && left > 0
@@ -278,9 +280,9 @@ export function UserOrderDetail() {
           </h2>
           <p>
             {fulfilled
-              ? "可在客户端手动选择这份订阅和节点，开始使用。"
+              ? order.orderType === "renewal" ? "总到期时间已延长，本期流量不变，下一期开始时重置。原节点与导入链接继续使用。" : "可在客户端手动选择这份订阅和节点，开始使用。"
               : paid
-                ? "订阅从实际开通时开始计时，请勿再次付款。"
+                ? order.orderType === "renewal" ? "续费付款已确认，请查看处理结果，勿再次付款。" : "订阅从实际开通时开始计时，请勿再次付款。"
                 : order.status === "unknown"
                   ? "尚不能确认支付订单是否创建成功。请稍后刷新结果，避免重复下单。"
                   : "付款结果以服务器核验为准，支付页面返回不会直接改变订单状态。"}
@@ -295,12 +297,14 @@ export function UserOrderDetail() {
           <dl className="commerce-detail-facts">
             <div>
               <dt>购买内容</dt>
-              <dd>{order.templateName} × 1</dd>
+              <dd>{order.templateName} × 1 · {order.orderType === "renewal" ? "续费" : "新购"}</dd>
             </div>
             <div>
               <dt>购买有效期</dt>
-              <dd>实际开通后 {order.validityDays} 天</dd>
+              <dd>{order.orderType === "renewal" ? "顺延" : "实际开通后"} {order.validityDays} 天</dd>
             </div>
+            {order.renewalSubscriptionId && <div><dt>续费目标</dt><dd><Link to={`/subscriptions/${encodeURIComponent(order.renewalSubscriptionId)}`}>#{order.renewalSubscriptionId.slice(-8)}</Link></dd></div>}
+            {order.periodStartsAt && <div><dt>续费周期</dt><dd>{date(order.periodStartsAt)} — {date(order.periodEndsAt)}</dd></div>}
             <div>
               <dt>订单金额</dt>
               <dd>{money(order.amountCents)}</dd>
@@ -321,13 +325,13 @@ export function UserOrderDetail() {
             )}
             {order.fulfilledAt && (
               <div>
-                <dt>订阅开通</dt>
+                <dt>{order.orderType === "renewal" ? "续费完成" : "订阅开通"}</dt>
                 <dd>{date(order.fulfilledAt)}</dd>
               </div>
             )}
           </dl>
         </Panel>
-        <Panel title={fulfilled ? "开始使用" : "付款与开通"}>
+        <Panel title={fulfilled ? "查看订阅" : "付款与处理结果"}>
           <div className="commerce-payment-actions">
             {canPay && (
               <>
@@ -372,7 +376,7 @@ export function UserOrderDetail() {
               >
                 {order.fulfillmentState === "blocked"
                   ? "本笔订单需要管理员处理。付款记录已保存，请提供订单号联系管理员。"
-                  : "付款已确认，正在开通订阅。此页会自动更新结果。"}
+                  : order.orderType === "renewal" ? "付款已确认，正在处理续费。此页会自动更新结果。" : "付款已确认，正在开通订阅。此页会自动更新结果。"}
               </Notice>
             )}
             {fulfilled && order.subscriptionId && (
@@ -380,7 +384,7 @@ export function UserOrderDetail() {
                 className="button button-primary full-width"
                 to={`/subscriptions/${encodeURIComponent(order.subscriptionId)}`}
               >
-                查看新订阅 <ArrowRight size={16} />
+                {order.orderType === "renewal" ? "查看已续费订阅" : "查看新订阅"} <ArrowRight size={16} />
               </Link>
             )}
             {canClose && (
@@ -414,7 +418,7 @@ export function UserOrderDetail() {
         >
           <p>
             关闭后不能从 HQIP
-            继续付款。这不会撤销支付平台订单；如果已经付款，有效通知到达后仍会开通订阅。
+            继续付款。这不会撤销支付平台订单；{confirmClose.orderType === "renewal" ? "如果已经付款，将继续核验处理。订阅到期后核验的收款转人工处理，不会恢复过期订阅。" : "如果已经付款，有效通知到达后仍会开通订阅。"}
           </p>
           <ErrorNotice message={error} />
           <div className="modal-actions">

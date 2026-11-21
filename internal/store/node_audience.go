@@ -128,13 +128,14 @@ func nodeOnlineAudience(q audienceQuery, now time.Time) (map[string]model.NodeAu
 func nodeSubscribedAudience(q audienceQuery, now time.Time, out map[string]model.NodeAudience) error {
 	// Match userSubscription's usable-quota policy, including a still-live
 	// authorized tail. Reservations alone never make an exhausted pack valid.
-	rows, err := q.Query(`SELECT s.id,s.user_id,s.template_id,t.config,a.node_ids,x.upload+x.download,COALESCE(l.live_budget,0)
+	rows, err := q.Query(`SELECT s.id,s.user_id,s.template_id,t.config,a.node_ids,CASE WHEN p.order_id='' THEN x.upload+x.download ELSE p.upload+p.download END,COALESCE(l.live_budget,0)
 	 FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id
 	 JOIN subscription_allocations a ON a.subscription_id=s.id
 	 JOIN portal_templates t ON t.id=s.template_id JOIN portal_usage x ON x.subscription_id=s.id
+	 JOIN subscription_periods p ON p.subscription_id=s.id AND p.starts_at<=? AND p.ends_at>?
 	 LEFT JOIN (SELECT subscription_id,MAX(CASE WHEN revoked=0 AND budget>upload+download THEN 1 ELSE 0 END) AS live_budget
 	 FROM portal_leases WHERE closed=0 AND expires>? GROUP BY subscription_id) l ON l.subscription_id=s.id
-	 WHERE s.revoked=0 AND s.expires>? AND u.enabled=1`, now.Unix(), now.Unix())
+	 WHERE s.revoked=0 AND s.expires>? AND u.enabled=1`, now.Unix(), now.Unix(), now.Unix(), now.Unix())
 	if err != nil {
 		return err
 	}

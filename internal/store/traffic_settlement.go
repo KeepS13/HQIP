@@ -5,7 +5,7 @@ import (
 	"github.com/apernet/hysteria/core/v2/billing"
 )
 
-func settleBilling(tx *sql.Tx, subscription string, state *leaseBilling, segments []billing.Segment, upload, download, emergency int64) (int64, int64, int64, error) {
+func settleBilling(tx *sql.Tx, subscription, period string, state *leaseBilling, segments []billing.Segment, upload, download, emergency int64) (int64, int64, int64, error) {
 	if len(segments) > 256 {
 		return 0, 0, 0, ErrConflict
 	}
@@ -73,13 +73,12 @@ func settleBilling(tx *sql.Tx, subscription string, state *leaseBilling, segment
 	if _, err = tx.Exec("INSERT INTO traffic_billing_remainders(subscription_id) VALUES(?) ON CONFLICT(subscription_id) DO NOTHING", subscription); err != nil {
 		return 0, 0, 0, err
 	}
-	var remainderUp, remainderDown int64
-	if err = tx.QueryRow("SELECT upload,download FROM traffic_billing_remainders WHERE subscription_id=?", subscription).Scan(&remainderUp, &remainderDown); err != nil {
+	var remainder int64
+	if err = tx.QueryRow("SELECT remainder FROM subscription_periods WHERE id=?", period).Scan(&remainder); err != nil {
 		return 0, 0, 0, err
 	}
-	// One subscription remainder across both directions: splitting a byte
+	// One period remainder across both directions: splitting a byte
 	// between upload/download must not change total billed usage.
-	remainder := remainderUp + remainderDown
 	up := deltaUpload/100 + (deltaUpload%100+remainder)/100
 	remainder = (deltaUpload%100 + remainder) % 100
 	down := deltaDownload/100 + (deltaDownload%100+remainder)/100
@@ -96,7 +95,7 @@ func settleBilling(tx *sql.Tx, subscription string, state *leaseBilling, segment
 	if _, err = billing.Add(usedUp, usedDown); err != nil {
 		return 0, 0, 0, err
 	}
-	if _, err = tx.Exec("UPDATE traffic_billing_remainders SET upload=?,download=0 WHERE subscription_id=?", (deltaDownload%100+remainder)%100, subscription); err != nil {
+	if _, err = tx.Exec("UPDATE subscription_periods SET remainder=? WHERE id=?", (deltaDownload%100+remainder)%100, period); err != nil {
 		return 0, 0, 0, err
 	}
 	reserved := billing.Ceiling(max(int64(0), state.Grant.BudgetUnits-normalUnits))

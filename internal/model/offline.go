@@ -51,6 +51,9 @@ const NodeQuotaCapability = "node-quota-v1"
 // node's acknowledgement watermark. Units are 1/100 billed byte. Revision is
 // monotonic within a subscription, including across its different nodes.
 type NodeQuotaSnapshot struct {
+	// PeriodID scopes usage and delegated bytes. Empty legacy snapshots belong
+	// to the initial period whose ID equals the subscription ID.
+	PeriodID            string `json:"periodId,omitempty"`
 	Revision            int64  `json:"revision"`
 	QuotaUnits          *int64 `json:"quotaUnits"`
 	UsedUnits           int64  `json:"usedUnits"`

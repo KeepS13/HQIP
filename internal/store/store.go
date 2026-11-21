@@ -108,6 +108,14 @@ func Open(dataDir, baseURL string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = EnsureTrafficBillingSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = EnsureSubscriptionRenewalSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = EnsureSubscriptionAllocationSchema(db); err != nil {
 		db.Close()
 		return nil, err
@@ -121,10 +129,6 @@ func Open(dataDir, baseURL string) (*Store, error) {
 		return nil, err
 	}
 	if err = EnsureOfflineSchema(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = EnsureTrafficBillingSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}

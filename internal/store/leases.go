@@ -71,6 +71,9 @@ func leaseExpiry(now time.Time, e *model.UserSubscription) time.Time {
 	if end.After(e.ExpiresAt) {
 		end = e.ExpiresAt
 	}
+	if !e.CurrentPeriodEndsAt.IsZero() && end.After(e.CurrentPeriodEndsAt) {
+		end = e.CurrentPeriodEndsAt
+	}
 	return end.UTC()
 }
 func activeCredentialSession(tx *sql.Tx, user, subscription, scope string, now time.Time) (bool, error) {

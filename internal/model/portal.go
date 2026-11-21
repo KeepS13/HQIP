@@ -43,26 +43,41 @@ type PortalUser struct {
 	Subscriptions []UserSubscription `json:"subscriptions"`
 }
 type UserSubscription struct {
-	EmergencyUsedBytes     int64     `json:"emergencyUsedBytes"`
-	EmergencyReservedBytes int64     `json:"emergencyReservedBytes"`
-	OfflineReservations    int       `json:"offlineReservations"`
-	NodesPerSubscription   int       `json:"nodesPerSubscription"`
-	ID                     string    `json:"id"`
-	UserID                 string    `json:"userId"`
-	TemplateID             string    `json:"templateId"`
-	TemplateName           string    `json:"templateName"`
-	CreatedAt              time.Time `json:"createdAt"`
-	ExpiresAt              time.Time `json:"expiresAt"`
-	Status                 string    `json:"status"`
-	QuotaBytes             *int64    `json:"quotaBytes"`
-	UsedBytes              int64     `json:"usedBytes"`
-	ReservedBytes          int64     `json:"reservedBytes"`
-	BandwidthMbps          *float64  `json:"bandwidthMbps"`
-	MaxConnections         int       `json:"maxConnections"` // Online cap; independent of allocated node count.
-	Occupied               int       `json:"occupied"`       // HY2 instances + VLESS IPs; unknown legacy peers count separately.
-	NodeIDs                []string  `json:"nodeIds"`
-	DefaultNodeID          string    `json:"defaultNodeId"`
-	Revision               int64     `json:"revision"`
+	CurrentPeriodID        string               `json:"currentPeriodId"`
+	CurrentPeriodStartsAt  time.Time            `json:"currentPeriodStartsAt"`
+	CurrentPeriodEndsAt    time.Time            `json:"currentPeriodEndsAt"`
+	NextResetAt            *time.Time           `json:"nextResetAt,omitempty"`
+	Periods                []SubscriptionPeriod `json:"periods"`
+	Renewable              bool                 `json:"renewable"`
+	EmergencyUsedBytes     int64                `json:"emergencyUsedBytes"`
+	EmergencyReservedBytes int64                `json:"emergencyReservedBytes"`
+	OfflineReservations    int                  `json:"offlineReservations"`
+	NodesPerSubscription   int                  `json:"nodesPerSubscription"`
+	ID                     string               `json:"id"`
+	UserID                 string               `json:"userId"`
+	TemplateID             string               `json:"templateId"`
+	TemplateName           string               `json:"templateName"`
+	CreatedAt              time.Time            `json:"createdAt"`
+	ExpiresAt              time.Time            `json:"expiresAt"`
+	Status                 string               `json:"status"`
+	QuotaBytes             *int64               `json:"quotaBytes"`
+	UsedBytes              int64                `json:"usedBytes"`
+	ReservedBytes          int64                `json:"reservedBytes"`
+	BandwidthMbps          *float64             `json:"bandwidthMbps"`
+	MaxConnections         int                  `json:"maxConnections"` // Online cap is independent of allocated node count.
+	Occupied               int                  `json:"occupied"`       // HY2 instances plus VLESS IPs; legacy unknown peers count separately.
+	NodeIDs                []string             `json:"nodeIds"`
+	DefaultNodeID          string               `json:"defaultNodeId"`
+	Revision               int64                `json:"revision"`
+}
+type SubscriptionPeriod struct {
+	ID            string    `json:"id"`
+	StartsAt      time.Time `json:"startsAt"`
+	EndsAt        time.Time `json:"endsAt"`
+	OrderID       string    `json:"orderId,omitempty"`
+	UploadBytes   int64     `json:"uploadBytes"`
+	DownloadBytes int64     `json:"downloadBytes"`
+	ReservedBytes int64     `json:"reservedBytes"`
 }
 type SubscriptionRequest struct {
 	ID             string     `json:"id"`

@@ -40,7 +40,11 @@ func releaseUndelegatedOffline(tx *sql.Tx, g *model.OfflineGrant, state *leaseBi
 		release = state.Reserved - reserved
 		state.Reserved, state.Grant.BudgetUnits = reserved, units
 	}
-	if _, err := tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", release, g.SubscriptionID); err != nil {
+	period, err := leasePeriod(tx, g.ID)
+	if err != nil {
+		return err
+	}
+	if err = updatePeriodUsage(tx, g.SubscriptionID, period, 0, 0, -release); err != nil {
 		return err
 	}
 	g.NormalBudgetBytes = billing.Ceiling(units)

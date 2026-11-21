@@ -1,3 +1,4 @@
+import { RenewalButton } from "./Renewal";
 import { Link } from "react-router-dom";
 import { ArrowRight, Package } from "lucide-react";
 import { Badge, Meter, bytes, date } from "../components";
@@ -38,7 +39,7 @@ export function SubscriptionCard({ value }: { value: UserSubscription }) {
             ? "不限量"
             : bytes(Math.max(0, value.quotaBytes - value.usedBytes))}
         </strong>
-        <span>剩余总额度</span>
+        <span>本期剩余额度</span>
       </div>
       <Meter value={value.usedBytes} max={value.quotaBytes} />
       <div className="user-sub-usage">
@@ -52,9 +53,10 @@ export function SubscriptionCard({ value }: { value: UserSubscription }) {
       </p>
       <dl className="user-sub-facts">
         <div>
-          <dt>截止时间</dt>
+          <dt>总到期时间</dt>
           <dd>{date(value.expiresAt)}</dd>
         </div>
+        <div><dt>本期结束</dt><dd>{date(value.currentPeriodEndsAt)}</dd></div>
         <div>
           <dt>带宽</dt>
           <dd>
@@ -76,6 +78,7 @@ export function SubscriptionCard({ value }: { value: UserSubscription }) {
       >
         查看节点与导入链接 <ArrowRight size={16} />
       </Link>
+      <div className="user-sub-actions"><RenewalButton value={value} /></div>
     </article>
   );
 }

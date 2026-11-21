@@ -68,16 +68,20 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 		// rows. Locking a lease's rate first can deadlock with another lease's
 		// renewal while it rebalances the shared subscription rates.
 		du, dd := u.UploadBytes-l.UploadBytes, u.DownloadBytes-l.DownloadBytes
+		period, err := leasePeriod(tx, id)
+		if err != nil {
+			return empty, err
+		}
 		released := du + dd
 		if billingState != nil {
-			du, dd, released, err = settleBilling(tx, l.SubscriptionID, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, 0)
+			du, dd, released, err = settleBilling(tx, l.SubscriptionID, period, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, 0)
 			if err != nil {
 				return empty, err
 			}
 		} else if len(u.Billing) > 0 {
 			return empty, ErrConflict
 		}
-		if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", du, dd, released, l.SubscriptionID); err != nil {
+		if err = updatePeriodUsage(tx, l.SubscriptionID, period, du, dd, -released); err != nil {
 			return empty, err
 		}
 		if u.AppliedRateVersion == l.RateVersion {
@@ -101,7 +105,7 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 				remaining = billingState.Reserved
 				billingState.Reserved = 0
 			}
-			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", remaining, l.SubscriptionID); err != nil {
+			if err = updatePeriodUsage(tx, l.SubscriptionID, period, 0, 0, -remaining); err != nil {
 				return empty, err
 			}
 			l.Closed = true
@@ -114,7 +118,7 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 			if eerr != nil && !errors.Is(eerr, ErrNotFound) {
 				return empty, eerr
 			}
-			valid := eerr == nil && entitlementAllows(e, node) && !l.revoked && l.ExpiresAt.After(now)
+			valid := eerr == nil && entitlementAllows(e, node) && e.CurrentPeriodID == period && !l.revoked && l.ExpiresAt.After(now)
 			if valid {
 				valid, err = activeCredentialSession(tx, l.UserID, l.SubscriptionID, l.SessionID, now)
 				if err != nil {
@@ -167,7 +171,7 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 				}
 			}
 			if needed > 0 {
-				if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", needed, l.SubscriptionID); err != nil {
+				if err = updatePeriodUsage(tx, l.SubscriptionID, period, 0, 0, needed); err != nil {
 					return empty, err
 				}
 				if billingState != nil {

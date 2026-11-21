@@ -110,6 +110,15 @@ func TestPostgresPaymentsExplicitMigrationFromLegacySchemaIsIdempotent(t *testin
 	if e = MigratePostgresTrafficBilling(context.Background(), dsn); e != nil {
 		t.Fatal(e)
 	}
+	// The payment upgrade cannot silently enable a newer period ledger. Runtime
+	// startup must stay closed until its separate explicit migration succeeds.
+	if old, err := OpenPostgres(dir, "https://api.example.com", dsn); err == nil {
+		old.Close()
+		t.Fatal("runtime accepted a database without subscription periods")
+	}
+	if e = MigratePostgresSubscriptionRenewals(context.Background(), dsn); e != nil {
+		t.Fatal(e)
+	}
 	s, e := OpenPostgres(dir, "https://api.example.com", dsn)
 	if e != nil {
 		t.Fatal(e)

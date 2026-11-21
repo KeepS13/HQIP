@@ -17,7 +17,13 @@ func TestNodeQuotaOfflineOverspendReconcilesWithoutLosingUsage(t *testing.T) {
 	if err := s.DB.QueryRow("SELECT user_id,subscription_id FROM portal_credentials WHERE node_id=?", first.ID).Scan(&user, &subscription); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec("UPDATE portal_subscriptions SET expires=? WHERE id=?", now.Add(7*24*time.Hour).Unix(), subscription); err != nil {
+	initial, err := s.UserSubscription(user, subscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Use the administrative contract so the entitlement and its final period
+	// end move together, just as they do in a real renewal-capable deployment.
+	if _, err = s.UpdateSubscriptionExpiry(user, subscription, now.Add(7*24*time.Hour), initial.Revision); err != nil {
 		t.Fatal(err)
 	}
 	second := newNode(t, s, "node-quota-second")

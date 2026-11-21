@@ -4,14 +4,17 @@ import (
 	"errors"
 	"strconv"
 	"time"
+
+	"github.com/KeepS13/HQIP/internal/model"
 )
 
 type RecoveryUser struct {
-	SubscriptionID   string `json:"subscriptionId"`
-	UserID           string `json:"userId"`
-	UsedBytes        int64  `json:"usedBytes"`
-	ReservedBytes    int64  `json:"reservedBytes"`
-	MinimumUsedBytes int64  `json:"minimumUsedBytes"`
+	Periods          []model.SubscriptionPeriod `json:"periods"`
+	SubscriptionID   string                     `json:"subscriptionId"`
+	UserID           string                     `json:"userId"`
+	UsedBytes        int64                      `json:"usedBytes"`
+	ReservedBytes    int64                      `json:"reservedBytes"`
+	MinimumUsedBytes int64                      `json:"minimumUsedBytes"`
 }
 type PortalRecovery struct {
 	Hold      bool           `json:"hold"`
@@ -22,9 +25,14 @@ type PortalRecovery struct {
 	Users     []RecoveryUser `json:"users"`
 }
 type RecoveryTotal struct {
-	SubscriptionID string `json:"subscriptionId"`
-	UserID         string `json:"userId"`
-	UsedBytes      int64  `json:"usedBytes"`
+	PeriodAdjustments []RecoveryPeriodAdjustment `json:"periodAdjustments,omitempty"`
+	SubscriptionID    string                     `json:"subscriptionId"`
+	UserID            string                     `json:"userId"`
+	UsedBytes         int64                      `json:"usedBytes"`
+}
+type RecoveryPeriodAdjustment struct {
+	PeriodID            string `json:"periodId"`
+	AdditionalUsedBytes int64  `json:"additionalUsedBytes"`
 }
 
 func (s *Store) PortalRecovery() (PortalRecovery, error) {
@@ -57,10 +65,21 @@ func (s *Store) PortalRecovery() (PortalRecovery, error) {
 		r.MinimumUsedBytes = r.UsedBytes + gap
 		v.Users = append(v.Users, r)
 	}
+	if err = rows.Err(); err != nil {
+		return v, err
+	}
+	rows.Close()
+	for i := range v.Users {
+		e := &model.UserSubscription{ID: v.Users[i].SubscriptionID}
+		if err = readSubscriptionPeriods(s.DB, e, s.Now()); err != nil {
+			return v, err
+		}
+		v.Users[i].Periods = e.Periods
+	}
 	if v.Ready {
 		v.Reason = "需要管理员核对所有节点最终账本及未结算预算，确认累计量后恢复；不会自动归还预留额度"
 	}
-	return v, rows.Err()
+	return v, nil
 }
 func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []RecoveryTotal) error {
 	state, err := s.PortalRecovery()
@@ -71,6 +90,7 @@ func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []R
 		return errors.New("恢复核对条件尚未满足")
 	}
 	set := map[string]int64{}
+	adjustments := map[string][]RecoveryPeriodAdjustment{}
 	for _, v := range totals {
 		if v.SubscriptionID == "" || v.UsedBytes < 0 || v.UsedBytes > 1<<60 {
 			return errors.New("恢复用量无效")
@@ -79,6 +99,7 @@ func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []R
 			return errors.New("恢复订阅重复")
 		}
 		set[v.SubscriptionID] = v.UsedBytes
+		adjustments[v.SubscriptionID] = v.PeriodAdjustments
 	}
 	if len(set) != len(state.Users) {
 		return errors.New("必须逐一核对全部订阅的最终账本")
@@ -121,6 +142,39 @@ func (s *Store) ResumePortalRecovery(expected string, confirmed bool, totals []R
 		}
 		if target < min {
 			return ErrConflict
+		}
+		delta := target - used
+		parts := adjustments[id]
+		if len(parts) == 0 && delta > 0 {
+			var count int
+			if err = tx.QueryRow("SELECT COUNT(*) FROM subscription_periods WHERE subscription_id=?", id).Scan(&count); err != nil {
+				return err
+			}
+			if count != 1 {
+				return errors.New("多周期订阅的恢复差额必须逐项指定所属周期，不能直接扣入当前期")
+			}
+			parts = []RecoveryPeriodAdjustment{{PeriodID: id, AdditionalUsedBytes: delta}}
+		}
+		var sum int64
+		seen := map[string]bool{}
+		for _, part := range parts {
+			if seen[part.PeriodID] || part.AdditionalUsedBytes < 0 || part.AdditionalUsedBytes > delta-sum {
+				return errors.New("恢复周期差额无效")
+			}
+			seen[part.PeriodID] = true
+			sum += part.AdditionalUsedBytes
+			result, e := tx.Exec("UPDATE subscription_periods SET download=download+? WHERE id=? AND subscription_id=? AND starts_at<=?", part.AdditionalUsedBytes, part.PeriodID, id, s.Now().Unix())
+			if e != nil {
+				return e
+			}
+			if n, e := result.RowsAffected(); e != nil {
+				return e
+			} else if n != 1 {
+				return errors.New("恢复周期不属于此订阅或尚未开始")
+			}
+		}
+		if sum != delta {
+			return errors.New("恢复周期差额之和必须等于累计差额")
 		}
 		if _, err = tx.Exec("UPDATE portal_usage SET download=download+? WHERE subscription_id=?", target-used, id); err != nil {
 			return err

@@ -43,7 +43,7 @@ function OrderBadge({ order }: { order: PaymentOrder }) {
     label: "状态待核实",
     tone: "warning",
   };
-  return <Badge tone={state.tone}>{state.label}</Badge>;
+  return <Badge tone={state.tone}>{order.orderType === "renewal" && order.status === "fulfilled" ? "已续费" : order.orderType === "renewal" && order.status === "paid_pending" ? "已付款 · 待处理" : state.label}</Badge>;
 }
 
 function UpdatedAt({ at, stale }: { at: string | null; stale: boolean }) {
@@ -109,7 +109,7 @@ export function Orders() {
       <PageHeader
         eyebrow="PAYMENT ORDERS"
         title="订单管理"
-        description="查看付款与开通结果，每笔订单对应一份独立订阅。"
+        description="查看新购、续费及付款核验结果，处理已付款异常订单。"
         actions={
           <>
             <RefreshButton refresh={orders.refresh} />
@@ -198,7 +198,7 @@ export function Orders() {
                   <ReceiptText size={21} />
                 </span>
                 <div className="payment-order-main">
-                  <strong>{order.templateName}</strong>
+                  <strong>{order.templateName} · {order.orderType === "renewal" ? "续费" : "新购"}</strong>
                   <span>{order.email || order.userId}</span>
                   <code>{order.orderNo}</code>
                 </div>
@@ -272,7 +272,7 @@ function OrderAction({
   const retry = kind === "retry-fulfillment";
   return (
     <Modal
-      title={retry ? "重试订阅开通" : "向支付服务商查单"}
+      title={retry ? order.orderType === "renewal" ? "重试套餐续费" : "重试订阅开通" : "向支付服务商查单"}
       description={order.orderNo}
       onClose={() => {
         if (!busy) onClose();
@@ -280,7 +280,7 @@ function OrderAction({
     >
       <Notice>
         {retry
-          ? "只对这笔已确认付款的订单重试发放，不会重复扣款，也不会重复创建订阅。"
+          ? order.orderType === "renewal" ? "只对这笔已确认付款的订单重试追加周期，不会重复扣款或重复续期。已到期或移除的订阅仍不能恢复。" : "只对这笔已确认付款的订单重试发放，不会重复扣款，也不会重复创建订阅。"
           : "查询服务商记录并核对金额与交易信息；未查到已付款记录时，不会手动标记订单成功。"}
       </Notice>
       <ErrorNotice message={error} />
@@ -302,7 +302,7 @@ function OrderAction({
               await onDone();
               toast(
                 retry
-                  ? "已重试，请查看最新开通状态"
+                  ? "已重试，请查看最新处理状态"
                   : "查单已完成，请查看最新结果",
               );
               onClose();
@@ -375,7 +375,7 @@ export function OrderDetail() {
               </span>
               <div>
                 <h2>{order.templateName}</h2>
-                <p>每次购买独立计量 · 开通后 {order.validityDays} 天</p>
+                <p>{order.orderType === "renewal" ? "原订阅续费 · 下期重置流量 · 顺延" : "每次购买独立计量 · 开通后"} {order.validityDays} 天</p>
               </div>
               <div className="payment-detail-amount">
                 <strong>{priceText(order.amountCents)}</strong>
@@ -385,6 +385,9 @@ export function OrderDetail() {
             <div className="payment-detail-grid">
               <Panel className="payment-panel" title="订单信息">
                 <dl className="payment-facts">
+                  <div><dt>订单类型</dt><dd>{order.orderType === "renewal" ? "续费" : "新购"}</dd></div>
+                  {order.renewalSubscriptionId && <div><dt>续费目标</dt><dd><Link to={`/users/${order.userId}#subscription-${order.renewalSubscriptionId}`}>#{order.renewalSubscriptionId.slice(-8)}</Link></dd></div>}
+                  {order.periodStartsAt && <div><dt>续费周期</dt><dd>{date(order.periodStartsAt)} — {date(order.periodEndsAt)}</dd></div>}
                   <div>
                     <dt>商户订单号</dt>
                     <dd className="payment-copy">
@@ -432,7 +435,7 @@ export function OrderDetail() {
                   </div>
                 </dl>
               </Panel>
-              <Panel className="payment-panel" title="付款与开通">
+              <Panel className="payment-panel" title="付款与处理结果">
                 <div className="payment-progress">
                   <div>
                     <span>
@@ -479,12 +482,12 @@ export function OrderDetail() {
                     </span>
                     <section>
                       <strong>
-                        {fulfillmentLabel[order.fulfillmentState] || "待核实"}
+                        {order.orderType === "renewal" && order.fulfillmentState === "fulfilled" ? "已续费" : fulfillmentLabel[order.fulfillmentState] || "待核实"}
                       </strong>
                       <p>
                         {order.fulfilledAt
                           ? date(order.fulfilledAt)
-                          : "付款确认后自动开通独立订阅"}
+                          : order.orderType === "renewal" ? "到期前核验付款后追加一期；逾期收款转人工处理" : "付款确认后自动开通独立订阅"}
                       </p>
                     </section>
                   </div>
@@ -494,7 +497,7 @@ export function OrderDetail() {
                     className="button button-secondary full-width"
                     to={`/users/${order.userId}#subscription-${order.subscriptionId}`}
                   >
-                    查看已开通订阅 <ArrowRight size={15} />
+                    查看关联订阅 <ArrowRight size={15} />
                   </Link>
                 )}
               </Panel>
@@ -507,7 +510,7 @@ export function OrderDetail() {
               {order.lastError && <ErrorNotice message={order.lastError} />}
               {order.status === "paid_pending" && (
                 <Notice tone="warning">
-                  已确认付款，订阅尚未开通。请先解决下方错误或检查用户、模板状态，再重试开通。
+                  {order.orderType === "renewal" ? "续费收款已确认，请查看具体原因。已过期或移除的订阅不能通过重试恢复，需要管理员人工核对处理。" : "已确认付款，订阅尚未开通。请先解决下方错误或检查用户、模板状态，再重试开通。"}
                 </Notice>
               )}
               <div className="payment-processing">
@@ -524,7 +527,7 @@ export function OrderDetail() {
                         setAction({ order, kind: "retry-fulfillment" })
                       }
                     >
-                      重试开通
+                      {order.orderType === "renewal" ? "重试续费" : "重试开通"}
                     </Button>
                   )}
                   <Button
@@ -544,7 +547,7 @@ export function OrderDetail() {
               </div>
               {order.paymentState === "paid" ? (
                 <p className="muted">
-                  此订单已核验付款，无需再次向服务商查单。尚未开通时可在解决异常后重试开通。
+                  此订单已核验付款，无需再次向服务商查单。尚未完成时可在解决异常后重试处理。
                 </p>
               ) : settings.error ? (
                 <ErrorNotice

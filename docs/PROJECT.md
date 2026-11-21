@@ -11,6 +11,7 @@
 | traffic-billing | store、model、runtime billing | 固定点倍率与幂等累计报告 |
 | client-presentation | internal/client、desktop、user-web | 用户余额与原始链路统计 |
 | subscription-admission / 第三方导入 | internal/store/portal_import_links.go、internal/control/portal_import_export.go、user-web | [subscription-admission.import-links v1](contracts/subscription-import-links.md)：默认合并复制、单份复制与凭据轮换 |
+| subscription-renewals | internal/store/subscription_renewals.go、subscription_periods.go；internal/control；user-web、admin-web | [按周期续费](subscription-renewals.md)：原订阅延期、周期账本、幂等付款；[node-quota v1](contracts/node-quota.md) 的 periodId 扩展隔离跨期节点预算 |
 
 本次边界变更的规范见 [节点额度契约](contracts/node-quota.md)，已有行为见 [离线授权](offline-admission.md) 和 [部署](automatic-deployment.md)。数据库仅存业务状态，操作证据保存在 docs/incidents 或库外诊断记录。
 
@@ -18,4 +19,4 @@
 
 新模块文件默认不超过 300 行；已有大文件按本次修改边界逐步拆出完整职责。节点普通续约复用原 5 秒补报；新连接强制核验网站，断开立即补报并释放名额。每次释放或重新申请至多增加一次名额报告，受既有请求超时限制，待确认报告原样重放。节点 SQLite 扫描受既有账本容量上限约束。中央快照与名额读写在同一订阅事务内完成，不扫描其他订阅历史租约。所有测试前后保留既有节点探测修改。旧设备账号的登录/刷新/状态写接口和未挂载的设备页面已删除，历史构造器仅用于结算与迁移回归测试；正式路径不再发放旧授权。客户端恢复不再重复按占用数预判准入，由代理入口统一裁决。
 
-文件预算例外：`internal/store/offline.go` 保持完整结算事务，317 行，避免跨函数隐藏结算与回执顺序；`internal/agent/offline.go` 301 行，保留父报告、子续约与异常结束核对的顺序，名额转换已独立拆分；`scripts/upgrade_domains.py` 313 行、`scripts/upgrade_node_agent.py` 392 行，保留原升级/回滚职责与停止服务前后的能力检查。这四处均少于 400 行。历史大文件仍存在，本次按用户精简要求只调整相关入口、字段与文案，不附带大范围结构拆分；新增生产源文件均少于 300 行。
+文件预算例外：`internal/store/offline.go` 保持完整结算事务，325 行，避免跨函数隐藏结算与回执顺序；`internal/agent/offline.go` 301 行，保留父报告、子续约与异常结束核对的顺序，名额转换已独立拆分；`scripts/upgrade_domains.py` 324 行、`scripts/upgrade_node_agent.py` 392 行，保留原升级/回滚职责与停止服务前后的能力检查。这四处均少于 400 行。历史大文件仍存在，本次按用户精简要求只调整相关入口、字段与文案，不附带大范围结构拆分；新增生产源文件均少于 300 行。

@@ -218,7 +218,9 @@ def restore(release, backup, backup_sha, data, migration_file, application_file,
     restore_permissions(migration, database, manifest['schemaVersion'], manifest['paymentsVersion'])
     info = json.loads(run([binary,'storage-info','--data-dir',data], env={**SAFE_ENV,'HQIP_DATABASE_URL':application}))
     require(info.get('backend') == 'postgresql' and info.get('masterSHA256') == key_hash
-            and info.get('schemaVersion') == manifest['schemaVersion'], 'Restored application identity mismatch')
+            and info.get('schemaVersion') == manifest['schemaVersion']
+            and info.get('subscriptionRenewalsVersion') == manifest['subscriptionRenewalsVersion'],
+            'Restored application identity or subscription period capability mismatch')
     with tempfile.TemporaryDirectory(prefix='hqip-recovery-check-') as directory:
         verification = Path(directory) / 'verified.tar.gz'
         run([binary,'backup','--data-dir',data,'--output',verification], env={**SAFE_ENV,'HQIP_DATABASE_URL':application})

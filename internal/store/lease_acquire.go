@@ -82,6 +82,16 @@ func (s *Store) acquireLease(node, connection, password, protocol, clientIP stri
 			if old.UserID != user || old.SessionID != scope || old.ClientIP != clientIP || old.Closed || old.revoked || old.SubscriptionID != e.ID || !old.ExpiresAt.After(now) {
 				return empty, ErrEntitlement
 			}
+			period, err := leasePeriod(tx, old.ID)
+			if err != nil {
+				return empty, err
+			}
+			if period != e.CurrentPeriodID {
+				return empty, ErrEntitlement
+			}
+			if old.ExpiresAt.After(e.CurrentPeriodEndsAt) {
+				old.ExpiresAt = e.CurrentPeriodEndsAt
+			}
 			state, err := loadLeaseBilling(tx, old.ID)
 			if err != nil {
 				return empty, err
@@ -153,7 +163,7 @@ func (s *Store) acquireLease(node, connection, password, protocol, clientIP stri
 		if withOffline {
 			l.ExpiresAt = offlineExpiry(now, e)
 			if nodeQuota {
-				l.ExpiresAt = e.ExpiresAt
+				l.ExpiresAt = e.CurrentPeriodEndsAt
 			}
 		}
 		// An absent-key SELECT before this INSERT creates a Serializable gap
@@ -170,6 +180,9 @@ func (s *Store) acquireLease(node, connection, password, protocol, clientIP stri
 		if rows == 0 {
 			return existing()
 		}
+		if _, err = tx.Exec("INSERT INTO subscription_lease_periods(lease_id,period_id) VALUES(?,?)", l.ID, e.CurrentPeriodID); err != nil {
+			return empty, err
+		}
 		billingState, err := createLeaseBilling(tx, l.ID, protocol, budget)
 		if err != nil {
 			return empty, err
@@ -178,7 +191,7 @@ func (s *Store) acquireLease(node, connection, password, protocol, clientIP stri
 		if withOffline && e.QuotaBytes == nil || nodeQuota {
 			reserve = 0
 		}
-		if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", reserve, subscription); err != nil {
+		if err = updatePeriodUsage(tx, subscription, e.CurrentPeriodID, 0, 0, reserve); err != nil {
 			return empty, err
 		}
 		if withOffline {

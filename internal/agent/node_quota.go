@@ -41,7 +41,7 @@ func (a *Agent) localOfflineGrant(s *offlineState, id string, now time.Time) (mo
 	if !found {
 		states = append(states, *s)
 	}
-	available, err := nodeQuotaAvailable(states, s.Grant.SubscriptionID)
+	available, err := nodeQuotaAvailable(states, s.Grant.SubscriptionID, s.Grant.NodeQuota.PeriodID)
 	if err != nil {
 		return model.ConnectionLease{}, err
 	}
@@ -49,12 +49,24 @@ func (a *Agent) localOfflineGrant(s *offlineState, id string, now time.Time) (mo
 	return s.localGrant(id, now)
 }
 
-func nodeQuotaAvailable(states []offlineState, subscription string) (int64, error) {
+func nodeQuotaAvailable(states []offlineState, subscription, period string) (int64, error) {
+	// Legacy grants have no period ID and belong to the original period.
+	// Outstanding allocations from a closed period never consume a new one.
+	if period == "" {
+		period = subscription
+	}
 	var latest *model.NodeQuotaSnapshot
 	var used, delegated int64
 	for _, s := range states {
 		q := s.Grant.NodeQuota
 		if s.Grant.SubscriptionID != subscription || q == nil {
+			continue
+		}
+		grantPeriod := q.PeriodID
+		if grantPeriod == "" {
+			grantPeriod = subscription
+		}
+		if grantPeriod != period {
 			continue
 		}
 		if !validNodeQuotaSnapshot(q) {

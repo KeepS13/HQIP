@@ -209,6 +209,14 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	e.QuotaBytes = t.QuotaBytes
 	e.BandwidthMbps = t.BandwidthMbps
 	e.MaxConnections = t.MaxConnections
+	if err = readSubscriptionPeriods(q, e, now); err != nil {
+		return nil, err
+	}
+	var grantKey string
+	if err = q.QueryRow("SELECT grant_key FROM portal_subscriptions WHERE id=?", id).Scan(&grantKey); err != nil {
+		return nil, err
+	}
+	e.Renewable = strings.HasPrefix(grantKey, "payment:") && !revoked && userEnabled && t.Enabled && t.Listed && t.PriceCents != nil && expires > now.Unix()
 	var allocated string
 	if err = q.QueryRow("SELECT target_count,node_ids FROM subscription_allocations WHERE subscription_id=?", id).Scan(&e.NodesPerSubscription, &allocated); err != nil {
 		return nil, err
@@ -394,6 +402,9 @@ func grantSubscriptionWithValidity(tx *sql.Tx, user, template, key string, expec
 		return empty, err
 	}
 	if _, err = tx.Exec("INSERT INTO portal_usage(subscription_id) VALUES(?)", id); err != nil {
+		return empty, err
+	}
+	if _, err = tx.Exec("INSERT INTO subscription_periods(id,subscription_id,starts_at,ends_at) VALUES(?,?,?,?)", id, id, now.Unix(), expires.Unix()); err != nil {
 		return empty, err
 	}
 	if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id=?", user); err != nil {

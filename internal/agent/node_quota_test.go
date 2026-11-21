@@ -82,12 +82,12 @@ func TestNodeQuotaWatermarkDoesNotDoubleCountReports(t *testing.T) {
 	a.Grant.NodeQuota = &model.NodeQuotaSnapshot{Revision: 2, QuotaUnits: a.Grant.NodeQuota.QuotaUnits, UsedUnits: 80_000, NodeUsedUnits: 50_000, LegacyReservedUnits: 10_000}
 	b := quotaTestState(now, "b", "vless", 200_000)
 	b.Children["b"] = offlineChild{NormalUsed: 10_000, Normal: 30_000, Ended: true}
-	available, err := nodeQuotaAvailable([]offlineState{a, b}, "s")
+	available, err := nodeQuotaAvailable([]offlineState{a, b}, "s", "")
 	if err != nil || available != 60_000 {
 		t.Fatal("watermark or unknown delegated bytes reused", available, err)
 	}
 	a.Grant.NodeQuota.NodeUsedUnits = 70_000
-	if _, err = nodeQuotaAvailable([]offlineState{a, b}, "s"); err == nil {
+	if _, err = nodeQuotaAvailable([]offlineState{a, b}, "s", ""); err == nil {
 		t.Fatal("missing local usage was guessed")
 	}
 }

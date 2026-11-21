@@ -37,6 +37,7 @@ func subscriptionFixture(t *testing.T, s *Server, user model.PortalUser, ids []s
 	}{
 		{"INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", []any{id, user.ID, p.ID, s.Store.Now().Unix(), s.Store.Now().Add(30 * 24 * time.Hour).Unix(), store.NewID()}},
 		{"INSERT INTO portal_usage(subscription_id) VALUES(?)", []any{id}},
+		{"INSERT INTO subscription_periods(id,subscription_id,starts_at,ends_at) SELECT id,id,created_at,expires FROM portal_subscriptions WHERE id=?", []any{id}},
 		{"INSERT INTO subscription_allocations(subscription_id,target_count,node_ids) VALUES(?,?,?)", []any{id, len(ids), string(raw)}},
 		{"UPDATE portal_users SET revision=revision+1 WHERE id=?", []any{user.ID}},
 	} {

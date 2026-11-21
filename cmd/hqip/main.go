@@ -39,6 +39,8 @@ func run(args []string) error {
 		return errors.New("用法：hqip serve | init-admin | backup | restore")
 	}
 	switch args[0] {
+	case "migrate-subscription-renewals":
+		return migrateSubscriptionRenewals(args[1:])
 	case "migrate-traffic-billing":
 		return migrateTrafficBilling(args[1:])
 	case "migrate-offline-admission":
@@ -312,7 +314,7 @@ func backup(args []string) error {
 	if err = os.WriteFile(filepath.Join(temp, "master.key"), key, 0600); err != nil {
 		return err
 	}
-	manifest, _ := json.Marshal(map[string]any{"version": 1, "backend": backend, "createdAt": time.Now().UTC(), "containsSecrets": true})
+	manifest, _ := json.Marshal(map[string]any{"version": 1, "backend": backend, "createdAt": time.Now().UTC(), "containsSecrets": true, "subscriptionRenewalsVersion": 1})
 	if err = os.WriteFile(filepath.Join(temp, "manifest.json"), manifest, 0600); err != nil {
 		return err
 	}
@@ -431,6 +433,15 @@ func restore(args []string) error {
 	if seen["hqip.db"] == seen["hqip.pg.dump"] || !seen["master.key"] {
 		return errors.New("备份缺少数据库或主密钥")
 	}
+	if seen["manifest.json"] {
+		data, e := os.ReadFile(filepath.Join(temp, "manifest.json"))
+		var manifest struct {
+			SubscriptionRenewalsVersion int `json:"subscriptionRenewalsVersion"`
+		}
+		if e != nil || json.Unmarshal(data, &manifest) != nil || manifest.SubscriptionRenewalsVersion < 0 || manifest.SubscriptionRenewalsVersion > 1 {
+			return errors.New("备份的订阅周期版本不兼容")
+		}
+	}
 	postgres := seen["hqip.pg.dump"]
 	if postgres != (os.Getenv("HQIP_DATABASE_URL") != "") {
 		return errors.New("备份类型与 HQIP_DATABASE_URL 配置不匹配")
@@ -445,6 +456,9 @@ func restore(args []string) error {
 		// empty target. Upgrade this additive capability before runtime checks so
 		// pre-operation-log backups remain recoverable by the current release.
 		if err = store.MigratePostgresOperationLogs(ctx, os.Getenv("HQIP_DATABASE_URL")); err != nil {
+			return err
+		}
+		if err = store.MigratePostgresSubscriptionRenewals(ctx, os.Getenv("HQIP_DATABASE_URL")); err != nil {
 			return err
 		}
 	}

@@ -60,18 +60,21 @@ func addQuotaCounter(tx *sql.Tx, key string, delta int64) (int64, error) {
 }
 
 func recordNodeQuotaUsage(tx *sql.Tx, subscription, node string, delta int64) error {
+	// The accounting scope is the lease's immutable period ID. The initial
+	// period equals the subscription ID, preserving pre-upgrade watermarks.
 	_, err := addQuotaCounter(tx, "node-quota-used:"+subscription+":"+node, delta)
 	return err
 }
 
 func nextNodeQuotaSnapshot(tx *sql.Tx, e *model.UserSubscription, node string) (*model.NodeQuotaSnapshot, error) {
-	q := &model.NodeQuotaSnapshot{}
+	// Revisions stay subscription-wide; usage and rounding reset by period.
+	q := &model.NodeQuotaSnapshot{PeriodID: e.CurrentPeriodID}
 	var err error
 	q.Revision, err = addQuotaCounter(tx, "node-quota-revision:"+e.ID, 1)
 	if err != nil {
 		return nil, err
 	}
-	q.NodeUsedUnits, err = quotaCounter(tx, "node-quota-used:"+e.ID+":"+node)
+	q.NodeUsedUnits, err = quotaCounter(tx, "node-quota-used:"+e.CurrentPeriodID+":"+node)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +83,7 @@ func nextNodeQuotaSnapshot(tx *sql.Tx, e *model.UserSubscription, node string) (
 		return nil, err
 	}
 	var remainder int64
-	err = tx.QueryRow("SELECT upload+download FROM traffic_billing_remainders WHERE subscription_id=?", e.ID).Scan(&remainder)
+	err = tx.QueryRow("SELECT remainder FROM subscription_periods WHERE id=?", e.CurrentPeriodID).Scan(&remainder)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
