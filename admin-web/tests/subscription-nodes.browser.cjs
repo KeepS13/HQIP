@@ -1,4 +1,5 @@
-// Build admin-web first. Requires Playwright via node resolution (or NODE_PATH).
+// Build admin-web with VITE_API_URL=https://api-hqip.sharevps.online first.
+// Requires Playwright via node resolution (or NODE_PATH).
 // Every request is fulfilled locally; this never contacts a deployed service.
 const { chromium } = require('playwright');
 const { expect } = require('playwright/test');
@@ -43,7 +44,8 @@ const writes=[],errors=[],unexpected=[],checks=[];
         }else{
           const input=req.postDataJSON();writes.push({input,csrf:req.headers()['x-csrf-token']});
           if(input.expectedRevision!==sub.revision){status=409;body={error:'订阅已发生变化，请重新加载后重试'};}
-          else {sub={...sub,nodeIds:input.nodeIds,nodesPerSubscription:input.nodeIds.length,revision:sub.revision+1};body=sub;}
+          else if(input.nodeIds.length!==sub.nodesPerSubscription){status=400;body={error:`此订阅须选择 ${sub.nodesPerSubscription} 个节点`};}
+          else {sub={...sub,nodeIds:input.nodeIds,revision:sub.revision+1};body=sub;}
         }
       }else{unexpected.push(method+' '+p);status=404;body={error:'Unexpected fixture route'};}
       return route.fulfill({status,headers,contentType:'application/json',body:JSON.stringify(body)});
@@ -63,18 +65,30 @@ const writes=[],errors=[],unexpected=[],checks=[];
   try{
     await open();
     assert(await save().isDisabled());assert(await option('美国-原生IP-A').isChecked());assert(await option('已占用节点').isDisabled());
+    await expect(dialog.getByRole('status')).toHaveText('已选 1 / 1 个节点先取消原节点，再勾选替换节点');
+    assert(await option('日本-备用-B').isDisabled());await option('美国-原生IP-A').uncheck();assert(await save().isDisabled());
     await dialog.getByPlaceholder('搜索全站节点').fill('b.example.invalid');
     assert.equal(await dialog.locator('.subscription-assignment-option').count(),1);
-    await option('日本-备用-B').check();await dialog.getByPlaceholder('搜索全站节点').fill('');await option('美国-原生IP-A').uncheck();
+    await option('日本-备用-B').check();await dialog.getByPlaceholder('搜索全站节点').fill('');
     assert.match(await dialog.locator('.subscription-node-preview').innerText(),/新增节点[\s\S]*日本-备用-B[\s\S]*移除节点[\s\S]*美国-原生IP-A/);
     await save().click();await dialog.waitFor({state:'detached'});
-    assert.deepEqual(sub.nodeIds,['node-b']);assert.equal(writes.at(-1).csrf,'fixture-csrf');checks.push('search, blocked candidates, external replacement, preview, CSRF and refresh');
-    await open();await option('美国-原生IP-A').check();const frozen=sub.revision;sub={...sub,revision:sub.revision+1};
+    assert.deepEqual(sub.nodeIds,['node-b']);assert.equal(sub.nodesPerSubscription,1);assert.equal(sub.usedBytes,2200000);assert.equal(writes.at(-1).csrf,'fixture-csrf');checks.push('fixed single-node count, search, blocked candidates, replacement, preview, CSRF and refresh');
+    await open();await option('日本-备用-B').uncheck();await option('美国-原生IP-A').check();const frozen=sub.revision;sub={...sub,revision:sub.revision+1};
     await page.waitForResponse(r=>r.url()===API+'/api/v1/users/user'); // the real background poll
     assert(await option('美国-原生IP-A').isChecked());
     await save().click();await dialog.getByText('订阅已发生变化，请重新加载后重试',{exact:true}).waitFor();assert.equal(writes.at(-1).input.expectedRevision,frozen);
     await dialog.getByRole('button',{name:'重新加载',exact:true}).click();await expect(option('美国-原生IP-A')).not.toBeChecked();checks.push('polling preserves draft/revision; conflict reload resets draft');
-    await option('日本-备用-B').uncheck();await dialog.getByText('保存后此订阅将没有可用节点，现有连接会被撤销。',{exact:true}).waitFor();await save().click();await dialog.waitFor({state:'detached'});assert.deepEqual(sub.nodeIds,[]);checks.push('explicit empty selection warning and save');
+    await option('日本-备用-B').uncheck();await dialog.getByText('此订阅须选择 1 个节点，当前已选 0 个；选满后才能保存。',{exact:true}).waitFor();assert(await save().isDisabled());
+    const beforeInvalidSubmit=writes.length;await dialog.locator('form').evaluate(form=>form.requestSubmit());assert.equal(writes.length,beforeInvalidSubmit);assert.deepEqual(sub.nodeIds,['node-b']);checks.push('empty selection cannot save, including form submission');
+    await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
+    // The purchased instance count wins over the template's newer default of 1.
+    sub={...sub,nodeIds:['node-a','node-b'],nodesPerSubscription:2};await open();
+    await expect(dialog.getByRole('status')).toContainText('已选 2 / 2 个节点');assert(await option('候选节点-0').isDisabled());
+    await option('美国-原生IP-A').uncheck();assert(await save().isDisabled());
+    await dialog.getByText('此订阅须选择 2 个节点，当前已选 1 个；选满后才能保存。',{exact:true}).waitFor();
+    await option('候选节点-0').check();assert(await option('美国-原生IP-A').isDisabled());assert(await save().isEnabled());
+    await page.screenshot({path:path.join(output,'nodes-two-selected.png'),animations:'disabled'});
+    await save().click();await dialog.waitFor({state:'detached'});assert.deepEqual(sub.nodeIds,['node-b','node-0']);assert.equal(sub.nodesPerSubscription,2);assert.equal(sub.usedBytes,2200000);checks.push('two-node replacement preserves purchased count and displayed usage');
     await page.goto(CMS+'/users/user?subscription=sub-example');await dialog.getByPlaceholder('搜索全站节点').waitFor();checks.push('node deletion link opens matching subscription editor');
     await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
     failLoad=true;await page.getByRole('button',{name:'修改节点',exact:true}).click();await dialog.getByText('测试：暂时无法读取节点',{exact:true}).waitFor();assert(await save().isDisabled());failLoad=false;await dialog.getByRole('button',{name:'重新加载',exact:true}).click();await dialog.getByPlaceholder('搜索全站节点').waitFor();checks.push('load failure and retry');
@@ -85,7 +99,7 @@ const writes=[],errors=[],unexpected=[],checks=[];
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${width}: page overflow`);
       assert.equal(await dialog.evaluate(e=>e.scrollWidth>e.clientWidth+1),false,`${width}: dialog overflow`);
       await page.screenshot({path:path.join(output,`nodes-${width}.png`),animations:'disabled'});
-      await option('日本-备用-B').check();await save().scrollIntoViewIfNeeded();
+      await option('美国-原生IP-A').uncheck();await option('日本-备用-B').check();await save().scrollIntoViewIfNeeded();
       const rect=await save().boundingBox();assert(rect.y>=0 && rect.y+rect.height<=height,`${width}: save unreachable`);
       await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
     }

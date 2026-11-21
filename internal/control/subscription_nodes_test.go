@@ -41,6 +41,8 @@ func TestAdminSubscriptionNodesAuthorizationValidationAndExports(t *testing.T) {
 		{"expectedRevision": sub.Revision}, {"nodeIds": nil, "expectedRevision": sub.Revision},
 		{"nodeIds": []string{}}, {"nodeIds": []string{""}, "expectedRevision": sub.Revision},
 		{"nodeIds": []string{b.ID, b.ID}, "expectedRevision": sub.Revision},
+		{"nodeIds": []string{}, "expectedRevision": sub.Revision},
+		{"nodeIds": []string{a.ID, b.ID}, "expectedRevision": sub.Revision},
 	} {
 		if w := request(h, "PATCH", path, bad, admin, csrf); w.Code != 400 {
 			t.Fatal("invalid body accepted", w.Code, w.Body.String())
@@ -103,9 +105,11 @@ func TestAdminSubscriptionNodesAuthorizationValidationAndExports(t *testing.T) {
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "userSubscriptions") {
 		t.Fatal("delete not blocked", w.Code, w.Body.String())
 	}
-	body["expectedRevision"], body["nodeIds"] = updated.Revision, []string{}
+	// Move back to the original node to release the external node's reference;
+	// clearing the allocation is no longer an administrative resize operation.
+	body["expectedRevision"], body["nodeIds"] = updated.Revision, []string{a.ID}
 	if w = request(h, "PATCH", path, body, admin, csrf); w.Code != 200 {
-		t.Fatal("clear", w.Code, w.Body.String())
+		t.Fatal("replace", w.Code, w.Body.String())
 	}
 	w = request(h, "DELETE", "/api/v1/nodes/"+b.ID, model.NodeDeleteOptions{ExpectedRevision: preview.Node.Revision}, admin, csrf)
 	if w.Code != 202 {

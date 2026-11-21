@@ -102,7 +102,7 @@ func TestSubscriptionNodesPreserveUsageIdentityAndOtherGrants(t *testing.T) {
 }
 
 func TestSubscriptionNodesCountsTemplateReconciliationAndDeletion(t *testing.T) {
-	s, _, u, p := allocationFixture(t, 4, 1)
+	s, _, u, p := allocationFixture(t, 4, 2)
 	a := assignAllocation(t, s, u.ID, p)
 	outside := automaticTestNode(t, s, "outside")
 	outside, _ = s.Node(outside.ID)
@@ -119,7 +119,7 @@ func TestSubscriptionNodesCountsTemplateReconciliationAndDeletion(t *testing.T) 
 	if !errors.As(err, &conflict) || len(conflict.UserSubscriptions) != 1 || len(conflict.Templates) != 0 {
 		t.Fatal("external node deletion not blocked", err)
 	}
-	// Changing metadata alone does not discard the manual nodes/count.
+	// Changing metadata alone does not discard the replacement nodes/count.
 	p.Name = "renamed"
 	p, err = s.SaveSubscriptionTemplate(p.ID, p, p.Revision)
 	if err != nil {
@@ -151,22 +151,19 @@ func TestSubscriptionNodesCountsTemplateReconciliationAndDeletion(t *testing.T) 
 	if _, err = s.DeleteNode(outside.ID, model.NodeDeleteOptions{ExpectedRevision: outside.Revision}); err != nil {
 		t.Fatal(err)
 	}
-	// Reduce, then clear. Zero is a persistent target, not a request to refill.
-	a, err = s.UpdateSubscriptionNodes(u.ID, a.ID, kept.NodeIDs[:1], kept.Revision)
-	if err != nil || a.NodesPerSubscription != 1 {
-		t.Fatal(a, err)
-	}
-	a, err = s.UpdateSubscriptionNodes(u.ID, a.ID, []string{}, a.Revision)
-	if err != nil || a.NodesPerSubscription != 0 || len(a.NodeIDs) != 0 {
-		t.Fatal(a, err)
+	// A replacement cannot reduce or clear the originally purchased target.
+	for _, ids := range [][]string{kept.NodeIDs[:1], {}} {
+		if _, err = s.UpdateSubscriptionNodes(u.ID, a.ID, ids, kept.Revision); !errors.Is(err, ErrSubscriptionNodes) {
+			t.Fatal("allocation count changed", err)
+		}
 	}
 	p.NodeIDs = []string{newPool.ID}
 	if _, err = s.SaveSubscriptionTemplate(p.ID, p, p.Revision); err != nil {
 		t.Fatal(err)
 	}
 	kept, _ = s.UserSubscription(u.ID, a.ID)
-	if kept.NodesPerSubscription != 0 || len(kept.NodeIDs) != 0 {
-		t.Fatal("empty allocation refilled", kept)
+	if kept.NodesPerSubscription != 2 || len(kept.NodeIDs) != 1 {
+		t.Fatal("pool shortfall changed allocation target", kept)
 	}
 }
 
@@ -174,6 +171,14 @@ func TestSubscriptionNodesValidationAndAvailability(t *testing.T) {
 	for _, scenario := range []string{"missing-list", "duplicate", "over-limit", "foreign", "stale", "expired", "revoked", "disabled", "exhausted", "offline-new", "offline-retained", "not-ready", "incapable", "retiring", "server-expired", "server-exhausted", "unknown", "occupied", "reserved"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, now, u, p := allocationFixture(t, 3, 1)
+			if scenario == "offline-retained" {
+				p.NodesPerSubscription = 2
+				var err error
+				p, err = s.SaveSubscriptionTemplate(p.ID, p, p.Revision)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			a := assignAllocation(t, s, u.ID, p)
 			n := automaticTestNode(t, s, "external")
 			ids, owner, revision, want := []string{n.ID}, u.ID, a.Revision, error(nil)
@@ -208,7 +213,7 @@ func TestSubscriptionNodesValidationAndAvailability(t *testing.T) {
 				want = ErrConflict
 			case "offline-retained":
 				audienceExec(t, s, "UPDATE nodes SET last_seen=0 WHERE id=?", a.NodeIDs[0])
-				ids = append(ids, a.NodeIDs...)
+				ids = append(ids, a.NodeIDs[0])
 			case "not-ready":
 				if err := s.SetStatus(n.ID, "pending", "test", false); err != nil {
 					t.Fatal(err)
@@ -314,7 +319,7 @@ func TestSubscriptionNodesConcurrentInventoryAndDelete(t *testing.T) {
 				var e error
 				switch scenario {
 				case "same-revision":
-					_, e = other.UpdateSubscriptionNodes(u.ID, a.ID, []string{}, a.Revision)
+					_, e = other.UpdateSubscriptionNodes(u.ID, a.ID, []string{n.ID}, a.Revision)
 				case "two-grants":
 					_, e = other.UpdateSubscriptionNodes(u.ID, b.ID, []string{n.ID}, b.Revision)
 				case "purchase":

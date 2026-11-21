@@ -167,6 +167,13 @@ func (s *Store) SubscriptionNodes(user, id string) (SubscriptionNodeOptions, err
 	})
 }
 
+// UpdateSubscriptionNodes replaces exactly the allocation's saved target count,
+// not the template's current default. Caller-owned ids are copied. The allocation
+// user lock serializes inventory changes; revision checks, node replacement and
+// lease revocation commit together. Usage, periods and unsettled reservations
+// remain owned by the same subscription so removed nodes can still settle usage.
+// Invalid selections return ErrSubscriptionNodes; stale inventory/revisions
+// return ErrConflict. Reordering an unchanged selection is an unaudited no-op.
 func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected int64) (model.UserSubscription, error) {
 	if ids == nil || len(ids) > 1000 || expected < 1 {
 		return model.UserSubscription{}, ErrSubscriptionNodes
@@ -202,7 +209,10 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 		if current.Revision != expected {
 			return empty, ErrConflict
 		}
-		if sameNodeSet(current.NodeIDs, ids) && current.NodesPerSubscription == len(ids) {
+		if len(ids) != current.NodesPerSubscription {
+			return empty, fmt.Errorf("%w：此订阅须选择 %d 个节点，不能增减分配数量", ErrSubscriptionNodes, current.NodesPerSubscription)
+		}
+		if sameNodeSet(current.NodeIDs, ids) {
 			return *current, nil
 		}
 		options, err := subscriptionNodeOptions(tx, current, now)
@@ -242,7 +252,7 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 		if count != 1 {
 			return empty, ErrConflict
 		}
-		if _, err = tx.Exec("UPDATE subscription_allocations SET node_ids=?,target_count=? WHERE subscription_id=?", jsonString(ids), len(ids), id); err != nil {
+		if _, err = tx.Exec("UPDATE subscription_allocations SET node_ids=? WHERE subscription_id=?", jsonString(ids), id); err != nil {
 			return empty, err
 		}
 		if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id=?", user); err != nil {
