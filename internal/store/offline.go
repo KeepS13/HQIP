@@ -18,7 +18,7 @@ func offlineExpiry(now time.Time, e *model.UserSubscription) time.Time {
 	return end.UTC()
 }
 
-func createOfflineGrant(tx *sql.Tx, l *model.ConnectionLease, e *model.UserSubscription, hash string, now time.Time) error {
+func createOfflineGrant(tx *sql.Tx, l *model.ConnectionLease, e *model.UserSubscription, hash string, now time.Time, quotaMode ...bool) error {
 	if l.SessionID != "subscription" {
 		var expires int64
 		if err := tx.QueryRow("SELECT expires FROM portal_sessions WHERE id=?", l.SessionID).Scan(&expires); err != nil {
@@ -38,6 +38,9 @@ func createOfflineGrant(tx *sql.Tx, l *model.ConnectionLease, e *model.UserSubsc
 	emergency := max(int64(0), model.EmergencyAllowanceBytes-used-reserved) / int64(max(1, e.MaxConnections-e.Occupied))
 	normal := l.BudgetBytes
 	if e.QuotaBytes == nil {
+		normal, emergency = 0, 0
+	}
+	if len(quotaMode) == 1 && quotaMode[0] {
 		normal, emergency = 0, 0
 	}
 	if _, err := tx.Exec("INSERT INTO portal_offline_grants(lease_id,credential_hash,authorized_at,normal_budget,normal_unlimited,emergency_budget) VALUES(?,?,?,?,?,?)", l.ID, hash, now.Unix(), normal, e.QuotaBytes == nil, emergency); err != nil {
@@ -64,6 +67,7 @@ func loadOfflineGrant(q portalQuery, node, id string) (model.OfflineGrant, error
 		state, err = loadLeaseBilling(q, id)
 		if state != nil {
 			g.Billing = &state.Grant
+			g.NodeQuota = state.NodeQuota
 		}
 	}
 	return g, notFound(err)
@@ -132,9 +136,15 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 		normalDelta := normal - oldNormal
 		uploadDelta, downloadDelta := u.UploadBytes-g.UploadBytes, u.DownloadBytes-g.DownloadBytes
 		if billingState != nil {
+			previousUnits := billingState.NormalUsed
 			uploadDelta, downloadDelta, normalDelta, err = settleBilling(tx, g.SubscriptionID, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, u.EmergencyUsedBytes)
 			if err != nil {
 				return empty, err
+			}
+			if billingState.NodeQuota != nil {
+				if err = recordNodeQuotaUsage(tx, g.SubscriptionID, node, billingState.NormalUsed-previousUnits); err != nil {
+					return empty, err
+				}
 			}
 		} else if len(u.Billing) > 0 {
 			return empty, ErrConflict
@@ -150,6 +160,14 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 		}
 		if _, err = tx.Exec("UPDATE portal_emergency_usage SET used=used+?,reserved=reserved-? WHERE subscription_id=?", u.EmergencyUsedBytes-g.EmergencyUsedBytes, u.EmergencyUsedBytes-g.EmergencyUsedBytes, g.SubscriptionID); err != nil {
 			return empty, err
+		}
+		if err = releaseUndelegatedOffline(tx, &g, billingState, u); err != nil {
+			return empty, err
+		}
+		if u.RetainedNormalUnits != nil && g.OfflineUntil.After(s.Now()) {
+			// Every child is explicitly closed or proven ended by the node.
+			// Expire the connection slot while retaining unknown byte allocations.
+			g.OfflineUntil = s.Now().UTC()
 		}
 		if u.AppliedRateVersion == g.RateVersion {
 			ceiling := g.BandwidthBytesPerSecond
@@ -204,6 +222,9 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			}
 		} else if !g.Revoked && extend && u.Active {
 			g.AuthorizedAt, g.OfflineUntil = now.UTC(), offlineExpiry(now, e)
+			if g.NodeQuota != nil {
+				g.OfflineUntil = e.ExpiresAt
+			}
 			if g.SessionID != "subscription" {
 				var expires int64
 				if err = tx.QueryRow("SELECT expires FROM portal_sessions WHERE id=?", g.SessionID).Scan(&expires); err != nil {
@@ -216,7 +237,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			// Include this grant's unspent share before calculating a top-up.
 			// Repeated heartbeats must not reserve the other connection slots'
 			// shares. Billing reservations are billed bytes, not raw traffic.
-			if !g.NormalUnlimited && e.QuotaBytes != nil {
+			if !g.NormalUnlimited && e.QuotaBytes != nil && g.NodeQuota == nil {
 				available := max(int64(0), *e.QuotaBytes-e.UsedBytes-e.ReservedBytes)
 				remaining := g.NormalBudgetBytes - normal
 				if billingState != nil {
@@ -251,6 +272,12 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 		}
 		if billingState != nil {
 			budget = billing.MaxRawBytes
+			if billingState.NodeQuota != nil {
+				billingState.NodeQuota, err = nextNodeQuotaSnapshot(tx, e, node)
+				if err != nil {
+					return empty, err
+				}
+			}
 			if !g.Revoked && !u.Closed {
 				if err = issueBillingPolicy(tx, billingState); err != nil {
 					return empty, err

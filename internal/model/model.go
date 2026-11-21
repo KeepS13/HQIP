@@ -103,6 +103,7 @@ type AgentRemovalStatus struct {
 }
 
 type AgentDesired struct {
+	NodeQuotaVersion        int                `json:"nodeQuotaVersion,omitempty"`
 	OfflineAdmissionVersion int                `json:"offlineAdmissionVersion,omitempty"`
 	PortalEnabled           bool               `json:"portalEnabled"`
 	Revision                int64              `json:"revision"`

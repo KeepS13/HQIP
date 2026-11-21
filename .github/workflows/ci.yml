@@ -171,7 +171,7 @@ jobs:
           go test ./internal/client -run TestPinnedCoreProxyStatistics -count=1 -v
           go build -C runtime/hysteria/app -trimpath -o ../../../dist/hysteria-billing-test.exe .
           $env:HQIP_E2E_CORE = (Resolve-Path dist/hysteria-billing-test.exe).Path
-          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/agent -run TestTrafficBillingRealDualProtocolHotUpdate -count=1 -v
+          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/agent -run "TestTrafficBillingRealDualProtocolHotUpdate|TestNodeQuotaRealWebsiteOutageAndReconciliation" -count=1 -v
       - uses: actions/upload-artifact@v4
         id: upload_windows
         continue-on-error: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}

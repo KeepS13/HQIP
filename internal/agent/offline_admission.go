@@ -89,6 +89,9 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 		if protocol != "" {
 			body["billingProtocol"] = protocol
 			body["billingCapability"] = "traffic-billing-v1"
+			if a.nodeQuotaEnabled() {
+				body["quotaCapability"] = model.NodeQuotaCapability
+			}
 		}
 		status, data, requestErr := a.requestAdmission(ctx, "/api/v1/agents/offline-grants", body)
 		if requestErr != nil || status != 200 {
@@ -134,7 +137,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 		return
 	}
 	id := "off_" + connection
-	grant, err := selected.localGrant(id, a.now())
+	grant, err := a.localOfflineGrant(selected, id, a.now())
 	if err == nil {
 		child := selected.Children[id]
 		child.CoreGeneration = coreGeneration

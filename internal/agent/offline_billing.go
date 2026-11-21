@@ -127,6 +127,9 @@ func (state *offlineState) localBillingGrant(id string, now time.Time) (model.Co
 	if state.Grant.NormalUnlimited {
 		available = need
 	}
+	if state.Grant.NodeQuota != nil {
+		available = min(available, state.QuotaAvailableUnits)
+	}
 	if child.Emergency == 0 {
 		add := min(need, available)
 		child.Normal += add

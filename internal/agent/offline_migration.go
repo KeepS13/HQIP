@@ -4,25 +4,52 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/apernet/hysteria/core/v2/billing"
 )
 
-// idleLegacyGrant requires explicit finals for every child. An expired or
-// Ended child still owns uncertain bytes and must never release its parent.
-func idleLegacyGrant(s *offlineState) bool {
-	if s.Grant.Billing != nil || s.Grant.Closed {
+// Old controllers require explicit finals. Node quota controllers can retire
+// a proven-ended child while retaining its entire uncertain delegated budget.
+func idleLegacyGrant(s *offlineState, nodeQuota ...bool) bool {
+	migrateQuota := len(nodeQuota) == 1 && nodeQuota[0]
+	if s.Grant.Closed || s.Grant.NodeQuota != nil || s.Grant.Billing != nil && !migrateQuota {
 		return false
 	}
 	for _, child := range s.Children {
-		if !child.Closed {
+		if !child.Closed && !(migrateQuota && child.Ended) {
 			return false
 		}
 	}
 	return true
 }
 
+// retainedLegacyUnits never guesses final usage. Closed children contribute
+// their exact usage; ended children retain every byte the core could consume.
+func retainedLegacyUnits(s *offlineState) (*int64, error) {
+	if !s.Denied || !idleLegacyGrant(s, true) || s.Grant.NormalUnlimited {
+		return nil, nil
+	}
+	var units int64
+	for _, child := range s.Children {
+		amount := child.Normal
+		var err error
+		if s.Grant.Billing == nil {
+			amount, err = billing.Units(amount, 100)
+			if err != nil {
+				return nil, err
+			}
+		}
+		units, err = billing.Add(units, amount)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &units, nil
+}
+
 func (a *Agent) hasIdleLegacyGrant(states []offlineState) bool {
 	for i := range states {
-		if idleLegacyGrant(&states[i]) {
+		if idleLegacyGrant(&states[i], a.nodeQuotaEnabled()) {
 			return true
 		}
 	}
@@ -46,7 +73,7 @@ func (a *Agent) coreUsesProtocolBilling(ctx context.Context) bool {
 // reservation. A previously pending report is replayed unchanged first; only
 // its acknowledgement permits the next version carrying the explicit final.
 func (a *Agent) retireIdleLegacyGrant(ctx context.Context, s *offlineState) error {
-	if !idleLegacyGrant(s) {
+	if !idleLegacyGrant(s, a.nodeQuotaEnabled()) {
 		return nil
 	}
 	s.Denied = true

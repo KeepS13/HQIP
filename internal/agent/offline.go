@@ -46,6 +46,12 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 		if err != nil {
 			return err
 		}
+		if a.nodeQuotaEnabled() {
+			u.RetainedNormalUnits, err = retainedLegacyUnits(s)
+			if err != nil {
+				return err
+			}
+		}
 		s.NextVersion = u.Version
 		s.Pending = &u
 		if err = a.ledger.saveOffline(*s); err != nil {
@@ -56,10 +62,16 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 	status, data, err := a.requestAdmission(ctx, "/api/v1/agents/offline-grants/"+s.Grant.ID+"/report", u)
 	if status == 200 && err == nil {
 		var g model.OfflineGrant
-		if json.Unmarshal(data, &g) != nil || g.ID != s.Grant.ID || g.NodeID != s.Grant.NodeID || g.CredentialHash != s.Grant.CredentialHash || g.UserID != s.Grant.UserID || g.SubscriptionID != s.Grant.SubscriptionID || g.SessionID != s.Grant.SessionID || g.AuthorizedAt.Before(s.Grant.AuthorizedAt) || g.OfflineUntil.Before(s.Grant.OfflineUntil) || g.ReportVersion != u.Version || g.UploadBytes != u.UploadBytes || g.DownloadBytes != u.DownloadBytes || g.EmergencyUsedBytes != u.EmergencyUsedBytes || g.Closed != u.Closed || g.NormalBudgetBytes < s.Grant.NormalBudgetBytes || g.EmergencyBudgetBytes != s.Grant.EmergencyBudgetBytes || g.RateVersion < s.Grant.RateVersion || g.NormalUnlimited != s.Grant.NormalUnlimited || (!g.Closed && !g.Revoked && !validOfflineGrant(g, a.cfg.NodeID, g.CredentialHash, now)) {
+		if json.Unmarshal(data, &g) != nil || g.ID != s.Grant.ID || g.NodeID != s.Grant.NodeID || g.CredentialHash != s.Grant.CredentialHash || g.UserID != s.Grant.UserID || g.SubscriptionID != s.Grant.SubscriptionID || g.SessionID != s.Grant.SessionID || g.AuthorizedAt.Before(s.Grant.AuthorizedAt) || (g.OfflineUntil.Before(s.Grant.OfflineUntil) && u.RetainedNormalUnits == nil) || g.ReportVersion != u.Version || g.UploadBytes != u.UploadBytes || g.DownloadBytes != u.DownloadBytes || g.EmergencyUsedBytes != u.EmergencyUsedBytes || g.Closed != u.Closed || (g.NormalBudgetBytes < s.Grant.NormalBudgetBytes && u.RetainedNormalUnits == nil) || g.EmergencyBudgetBytes != s.Grant.EmergencyBudgetBytes || g.RateVersion < s.Grant.RateVersion || g.NormalUnlimited != s.Grant.NormalUnlimited || (!g.Closed && !g.Revoked && !validOfflineGrant(g, a.cfg.NodeID, g.CredentialHash, now)) {
 			err = &admissionProtocolError{}
 		} else {
-			if s.Grant.Billing != nil && (g.Billing == nil || g.Billing.Protocol != s.Grant.Billing.Protocol || g.Billing.Version < s.Grant.Billing.Version || g.Billing.BudgetUnits < s.Grant.Billing.BudgetUnits) {
+			if (s.Grant.NodeQuota != nil) != (g.NodeQuota != nil) || g.NodeQuota != nil && (!validNodeQuotaSnapshot(g.NodeQuota) || g.NodeQuota.Revision < s.Grant.NodeQuota.Revision) {
+				return &admissionProtocolError{}
+			}
+			if s.Grant.Billing != nil && (g.Billing == nil || g.Billing.Protocol != s.Grant.Billing.Protocol || g.Billing.Version < s.Grant.Billing.Version || (g.Billing.BudgetUnits < s.Grant.Billing.BudgetUnits && u.RetainedNormalUnits == nil)) {
+				return &admissionProtocolError{}
+			}
+			if u.RetainedNormalUnits != nil && (!g.Revoked || g.NormalBudgetBytes != (*u.RetainedNormalUnits+99)/100 || g.Billing != nil && g.Billing.BudgetUnits != *u.RetainedNormalUnits) {
 				return &admissionProtocolError{}
 			}
 			s.Grant = g
@@ -139,7 +151,7 @@ func (a *Agent) offlineRenew(w http.ResponseWriter, r *http.Request, id string, 
 		http.Error(w, "emergency authorization ended", 403)
 		return
 	}
-	grant, err := s.localGrant(id, a.now())
+	grant, err := a.localOfflineGrant(&s, id, a.now())
 	if err == nil {
 		if a.offlineIssued == nil {
 			a.offlineIssued = map[string]time.Time{}
@@ -167,6 +179,22 @@ func (a *Agent) syncOfflineGrants(ctx context.Context) error {
 	states, err := a.ledger.offlineStates()
 	if err != nil {
 		return err
+	}
+	// A changed core generation proves old transports ended, but cannot prove
+	// their final counters. Persist that distinction before reclaiming only the
+	// parent budget that was never delegated to any of those transports.
+	if a.nodeQuotaEnabled() {
+		generation, generationErr := a.generation(ctx)
+		if generationErr == nil && generation != "" {
+			for i := range states {
+				if states[i].Grant.NodeQuota == nil && !states[i].Grant.Closed {
+					a.reconcileOfflineChildren(ctx, &states[i], generation)
+					if err = a.ledger.saveOffline(states[i]); err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 	// Only an upgraded core proves new connections use protocol billing.
 	// Probe once per sweep, and only if a legacy grant still needs migration.

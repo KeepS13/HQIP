@@ -119,6 +119,7 @@ def verify_agent_assets(release,old,manifest):
 
 def require_billing_compatible(manifest):
  if postgres_enabled():
+  if manifest.get('nodeQuotaVersion',0)<postgres_info().get('nodeQuotaVersion',0):raise ValueError('Node-owned quota requires a compatible release; preserve usage and fix forward')
   if manifest.get('trafficBillingVersion',0)<postgres_info().get('trafficBillingVersion',0):raise ValueError('Traffic billing ledger requires a compatible release; fix forward without repricing usage')
   if manifest.get('postgresSchemaVersion')!=1:raise ValueError('PostgreSQL data requires a PostgreSQL-compatible release; SQLite rollback refused')
   if manifest.get('offlineAdmissionVersion',0)<postgres_info().get('offlineAdmissionVersion',0):raise ValueError('Offline grants require a compatible release; reservations and unsettled usage are preserved')
@@ -129,6 +130,8 @@ def require_billing_compatible(manifest):
   return
  with closing(sqlite3.connect((control.DATA/'hqip.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
   has_metadata=db.execute("SELECT 1 FROM sqlite_master WHERE name='metadata'").fetchone()
+  quota_version=db.execute("SELECT value FROM metadata WHERE key='node_quota_version'").fetchone() if has_metadata else None
+  if quota_version and manifest.get('nodeQuotaVersion',0)<int(quota_version[0]):raise ValueError('Node-owned quota requires a compatible release; preserve usage and fix forward')
   billing_version=db.execute("SELECT value FROM metadata WHERE key='traffic_billing_version'").fetchone() if has_metadata else None
   if billing_version and manifest.get('trafficBillingVersion',0)<int(billing_version[0]):raise ValueError('Traffic billing ledger requires a compatible release; live usage is preserved')
   reality_version=db.execute("SELECT value FROM metadata WHERE key='vless_reality_version'").fetchone() if has_metadata else None

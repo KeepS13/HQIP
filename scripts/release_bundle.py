@@ -64,6 +64,9 @@ def validate_manifest(manifest, *, allow_legacy=False):
         required = required | {'scripts/hqip_firewall.py'}
     offline = manifest.get('offlineAdmissionVersion', 0)
     billing = manifest.get('trafficBillingVersion', 0)
+    quota = manifest.get('nodeQuotaVersion', 0)
+    if type(quota) is not int or quota not in (0, 1) or quota == 1 and (billing != 1 or offline != 1):
+        raise ValueError('Unsupported node quota capability')
     if type(billing) is not int or billing not in (0, 1):
         raise ValueError('Unsupported traffic billing capability')
     if billing == 0:
@@ -231,6 +234,8 @@ def verify_full_release(release, manifest=None, *, allow_legacy=False):
         if nodes.get('sha256', {}).get(name) != hashes['artifacts/' + name]:
             raise ValueError('Node artifact checksum mismatch: ' + name)
     core = nodes.get('hysteriaSource', {})
+    if nodes.get('nodeQuotaVersion', 0) != manifest.get('nodeQuotaVersion', 0):
+        raise ValueError('Node quota capability mismatch')
     if manifest.get('trafficBillingVersion', 0) == 1 and nodes.get('trafficBillingVersion') != 1:
         raise ValueError('Node package lacks protocol billing capability')
     for arch in ('amd64', 'arm64'):

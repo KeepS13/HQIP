@@ -15,13 +15,19 @@ func (s *Server) agentOfflineAdmission(w http.ResponseWriter, r *http.Request) {
 		Password          string `json:"password"`
 		BillingProtocol   string `json:"billingProtocol,omitempty"`
 		BillingCapability string `json:"billingCapability,omitempty"`
+		QuotaCapability   string `json:"quotaCapability,omitempty"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	var grant model.OfflineGrant
 	var err error
-	if body.BillingCapability == "traffic-billing-v1" {
+	if body.QuotaCapability == model.NodeQuotaCapability && body.BillingCapability == "traffic-billing-v1" {
+		grant, err = s.Store.AcquireNodeQuotaGrant(node, body.ConnectionID, body.Password, body.BillingProtocol)
+	} else if body.QuotaCapability != "" {
+		http.Error(w, "unsupported node quota capability", http.StatusBadRequest)
+		return
+	} else if body.BillingCapability == "traffic-billing-v1" {
 		grant, err = s.Store.AcquireProtocolOfflineGrant(node, body.ConnectionID, body.Password, body.BillingProtocol)
 	} else {
 		grant, err = s.Store.AcquireOfflineGrant(node, body.ConnectionID, body.Password)

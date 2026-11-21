@@ -93,6 +93,7 @@ def main():
     # stale Windows files or an older manifest never expand production scope.
     manifest = {"sourceSHA": source_sha, "dirty": dirty, "hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "offlineAdmissionVersion": 1, "vlessRealityVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names}}
     manifest['trafficBillingVersion'] = 1
+    manifest['nodeQuotaVersion'] = 1
     if extension.exists():
         manifest["hysteriaSource"] = json.loads(extension.read_text(encoding="utf-8"))
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

@@ -39,17 +39,20 @@ func (c offlineChild) emergencyUsed() int64 {
 }
 
 type offlineState struct {
-	BillingReported map[int64]billing.Segment `json:"billingReported,omitempty"`
-	BillingPolicies map[int64]billing.Policy  `json:"billingPolicies,omitempty"`
-	Grant           model.OfflineGrant        `json:"grant"`
-	Children        map[string]offlineChild   `json:"children"`
-	LastWall        time.Time                 `json:"lastWall"`
-	Denied          bool                      `json:"denied"`
-	Online          bool                      `json:"online"`
-	RetryAt         time.Time                 `json:"retryAt"`
-	Failures        int                       `json:"failures"`
-	NextVersion     int64                     `json:"nextVersion"`
-	Pending         *model.OfflineUsage       `json:"pending,omitempty"`
+	// Computed under offlineMu from the complete ledger; never persisted as
+	// independent money that a restart or second protocol could spend again.
+	QuotaAvailableUnits int64                     `json:"-"`
+	BillingReported     map[int64]billing.Segment `json:"billingReported,omitempty"`
+	BillingPolicies     map[int64]billing.Policy  `json:"billingPolicies,omitempty"`
+	Grant               model.OfflineGrant        `json:"grant"`
+	Children            map[string]offlineChild   `json:"children"`
+	LastWall            time.Time                 `json:"lastWall"`
+	Denied              bool                      `json:"denied"`
+	Online              bool                      `json:"online"`
+	RetryAt             time.Time                 `json:"retryAt"`
+	Failures            int                       `json:"failures"`
+	NextVersion         int64                     `json:"nextVersion"`
+	Pending             *model.OfflineUsage       `json:"pending,omitempty"`
 }
 
 func (l *ledger) offlineStates() ([]offlineState, error) {
@@ -116,7 +119,11 @@ func (l *ledger) offlineChild(id string) (offlineState, bool, error) {
 }
 
 func validOfflineGrant(g model.OfflineGrant, node, hash string, now time.Time) bool {
-	return g.Version == model.OfflineAdmissionVersion && g.NodeID == node && g.CredentialHash == hash && leaseIdentifier.MatchString(g.ID) && g.UserID != "" && g.SubscriptionID != "" && g.SessionID != "" && !g.AuthorizedAt.After(now.Add(time.Minute)) && g.OfflineUntil.After(now) && !g.OfflineUntil.After(g.AuthorizedAt.Add(model.OfflineGrace)) && g.NormalBudgetBytes >= 0 && g.EmergencyBudgetBytes >= 0 && g.EmergencyBudgetBytes <= model.EmergencyAllowanceBytes && g.NormalBudgetBytes <= math.MaxInt64-g.EmergencyBudgetBytes && g.UploadBytes >= 0 && g.DownloadBytes >= 0 && g.UploadBytes <= math.MaxInt64-g.DownloadBytes && g.EmergencyUsedBytes >= 0 && g.EmergencyUsedBytes <= g.EmergencyBudgetBytes && g.RateVersion >= 0 && g.BandwidthBytesPerSecond >= 0 && g.Revision >= 0 && !g.Closed && !g.Revoked
+	deadlineValid := !g.OfflineUntil.After(g.AuthorizedAt.Add(model.OfflineGrace))
+	if g.NodeQuota != nil {
+		deadlineValid = validNodeQuotaSnapshot(g.NodeQuota) && g.Billing != nil && g.EmergencyBudgetBytes == 0
+	}
+	return g.Version == model.OfflineAdmissionVersion && g.NodeID == node && g.CredentialHash == hash && leaseIdentifier.MatchString(g.ID) && g.UserID != "" && g.SubscriptionID != "" && g.SessionID != "" && !g.AuthorizedAt.After(now.Add(time.Minute)) && g.OfflineUntil.After(now) && deadlineValid && g.NormalBudgetBytes >= 0 && g.EmergencyBudgetBytes >= 0 && g.EmergencyBudgetBytes <= model.EmergencyAllowanceBytes && g.NormalBudgetBytes <= math.MaxInt64-g.EmergencyBudgetBytes && g.UploadBytes >= 0 && g.DownloadBytes >= 0 && g.UploadBytes <= math.MaxInt64-g.DownloadBytes && g.EmergencyUsedBytes >= 0 && g.EmergencyUsedBytes <= g.EmergencyBudgetBytes && g.RateVersion >= 0 && g.BandwidthBytesPerSecond >= 0 && g.Revision >= 0 && !g.Closed && !g.Revoked
 }
 
 func (s *offlineState) observe(now time.Time) error {

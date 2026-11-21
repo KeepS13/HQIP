@@ -197,11 +197,19 @@ func (a *Agent) resolveRealityCredential(ctx context.Context, uuid string) (stri
 		Password string `json:"password"`
 	}
 	status, data, err := a.requestAdmission(ctx, "/api/v1/agents/reality-credential", map[string]string{"uuid": uuid})
+	if offlineRetryable(status, err) {
+		return a.cachedRealityPassword(uuid)
+	}
 	if err != nil || status != http.StatusOK || json.Unmarshal(data, &response) != nil {
+		a.forgetRealityPassword(uuid)
 		return "", errors.New("Reality credential unavailable")
 	}
 	if len(response.Password) != 43 || model.RealityUUID(response.Password) != uuid {
+		a.forgetRealityPassword(uuid)
 		return "", errors.New("invalid Reality credential response")
+	}
+	if err = a.rememberRealityPassword(uuid, response.Password); err != nil {
+		return "", err
 	}
 	return response.Password, nil
 }
