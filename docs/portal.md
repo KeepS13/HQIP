@@ -1,5 +1,7 @@
 # 用户账户、多份订阅与节点准入
 
+已购未到期套餐支持[按周期手动续费](subscription-renewals.md)。`expiresAt` 表示总到期时间，订阅用量与预留表示本期；追加周期保留原订阅及节点，下一期开始才重置额度。
+
 用户端为 `https://hqip.sharevps.online`，管理端为 `https://cms-hqip.sharevps.online`，API 为 `https://api-hqip.sharevps.online`。用户通过邮箱和密码注册；密码至少 6 个 Unicode 字符、最多 1024 字节。注册和网页登录需要 Turnstile，未配置或验证服务不可用时不会绕过验证。用户登录本身不授予 VPN 权限。
 
 ## 订阅模板与用户实例

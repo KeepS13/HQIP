@@ -1,0 +1,27 @@
+# 已购套餐按周期续费
+
+用户在“我的订阅”卡片或详情页点击“续费套餐”。仅本人购买、未到期、未移除且仍在售、有定价、服务启用的套餐可以续费。流量耗尽但未到期仍可续费，不过本期不会立即恢复流量。每笔订单购买一期，可以预付多期；价格和天数在下单时锁定，使用限额继续跟随模板。
+
+付款核验成功后原订阅总到期时间立即顺延，编号、节点和导入链接保持不变。下一期从原总到期时间开始，流量在该期开始时重置；余额不结转，不能提前使用未来额度。续费不新建订阅，不预留额外节点，商城新购库存为零也不影响续费。
+
+付款入口不晚于订阅到期关闭。到期后才收到的有效付款通知仍记录收款，但进入“已付款，待人工处理”，不会恢复过期订阅。平台通知里的付款时间不能代替服务器核验时间。管理员重试也不能续费过期或已移除的订阅；应按订单和平台收款记录人工处理，不要要求用户重复付款。
+
+## 接口与计量
+
+`POST /api/v1/user/orders` 保持新购请求兼容；续费额外传入 `renewalSubscriptionId` 和 `expectedSubscriptionRevision`，同时提供原有 `requestId`、`templateId`、`templateRevision`。相同请求重试返回原订单；请求标识不能在新购、不同订阅或不同版本之间混用。已创建的合法订单保留价格和天数快照，后续停售不取消已创建订单，但停用或到期会阻止履约。
+
+订单返回 `orderType`（`purchase` 或 `renewal`）、`renewalSubscriptionId`，成功后包含 `periodStartsAt`、`periodEndsAt`。订阅的 `expiresAt` 为总到期时间，`usedBytes`、`reservedBytes` 为当前期；新增 `currentPeriodId`、`currentPeriodStartsAt`、`currentPeriodEndsAt`、`nextResetAt`、`periods`、`renewable`。
+
+周期按服务器时间选择，不依赖定时清零。租约和离线许可绑定周期且不跨期授权；跨期可能短暂重连，失联时不能提前使用下一期预算。旧期迟到补账仍计入旧期。累计账本和历史用量保留，离线应急额度仍按全订阅限制。
+
+管理员调整到期时间只修改最后一期终点，不能移动既有周期边界或截断已预付周期。恢复核账时，若多周期订阅存在累计差额，恢复请求中的该订阅必须携带 `periodAdjustments: [{periodId, additionalUsedBytes}]`，各项之和等于累计差额；不能把无法归属的历史流量直接扣到当前期。恢复查询返回周期列表供核对。
+
+## 后续上线与回退
+
+本次只准备本地代码和测试，不执行部署或生产迁移。
+
+数据库新增 `subscription_periods`、`subscription_lease_periods`、`payment_renewals`，能力标记为 `subscription_renewals_version=1`，发布清单和 `storage-info` 声明 `subscriptionRenewalsVersion=1`。旧订阅初始化为一期，保留用量、预留、计费余量及旧租约归属；重复迁移不会重置任何账本。
+
+未来部署须先备份数据库和配套主密钥，停止控制服务和其他业务写入。SQLite 随新版本启动事务升级；已有 PostgreSQL 使用迁移角色执行 `hqip migrate-subscription-renewals`，前置要求基础支付及流量计费迁移已完成。正常发布脚本在停服后执行迁移并记录尝试状态；失败或超时应向前修复，不能重启不支持周期的旧控制端。
+
+SQLite 转 PostgreSQL 前先升级源库并重新制作一致性快照。备份与恢复包含所有周期记录；不得用旧快照覆盖新增订单和流量。新协议沿用已有授权截止字段，无需新增 Agent 接口；上线前仍应验证实际客户端的周期边界重连。
