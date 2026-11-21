@@ -30,7 +30,7 @@ func (s *Server) adminSubscriptionExpiry(w http.ResponseWriter, r *http.Request)
 		fail(w, 409, err.Error())
 	case errors.Is(err, store.ErrConflict):
 		fail(w, 409, "订阅已发生变化，请关闭弹窗并刷新后重试")
-	case errors.Is(err, store.ErrSubscriptionExpiry):
+	case errors.Is(err, store.ErrSubscriptionExpiry), errors.Is(err, store.ErrSubscriptionPeriodExpiry):
 		fail(w, 400, err.Error())
 	default:
 		fail(w, 503, "暂时无法调整到期时间，请刷新确认当前结果后重试")

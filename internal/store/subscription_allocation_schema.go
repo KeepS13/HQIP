@@ -112,7 +112,9 @@ func migrateSubscriptionAllocations(tx *sql.Tx, now time.Time, postgres bool) er
 			return err
 		}
 	}
-	rows, err = tx.Query(paymentOrderSelect+"WHERE o.fulfillment_state!='fulfilled' AND (o.payment_state='paid' OR (o.closed_at=0 AND o.creation_state!='failed' AND o.expires_at>?)) ORDER BY o.created_at,o.id", now.Unix())
+	// This older migration can run before the renewal tables exist.
+	legacyOrderSelect := "SELECT " + paymentOrderFields + ", '',0,0 FROM payment_orders o JOIN portal_users u ON u.id=o.user_id "
+	rows, err = tx.Query(legacyOrderSelect+"WHERE o.fulfillment_state!='fulfilled' AND (o.payment_state='paid' OR (o.closed_at=0 AND o.creation_state!='failed' AND o.expires_at>?)) ORDER BY o.created_at,o.id", now.Unix())
 	if err != nil {
 		return err
 	}

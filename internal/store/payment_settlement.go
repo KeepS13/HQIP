@@ -12,9 +12,9 @@ import (
 	"github.com/KeepS13/HQIP/internal/payment"
 )
 
-// ProcessPaymentNotify acknowledges only durable receipt. Fulfillment is a
-// separate short transaction performed by the worker; no external HTTP occurs
-// while handling the provider's three-second callback deadline.
+// ProcessPaymentNotify acknowledges only durable receipt. Purchases are fulfilled
+// by the worker; renewals append their period in the receipt transaction. No
+// external HTTP occurs while handling the provider's callback deadline.
 func (s *Store) ProcessPaymentNotify(values url.Values) error {
 	if len(values) > 24 || len(values.Get("orderNo")) > 32 {
 		return ErrPaymentNotify
@@ -114,9 +114,15 @@ func recordVerifiedPayment(s *Store, tx *sql.Tx, r paymentOrderRecord, p payment
 	if err != nil {
 		return err
 	}
-	return s.bestEffortOperationLog(tx, func(ctx context.Context) error {
+	if err = s.bestEffortOperationLog(tx, func(ctx context.Context) error {
 		return appendOperationLog(ctx, tx, model.OperationLog{ID: "payment-paid:" + r.Order.ID, At: now, Category: "payment", Action: "payment." + kind, ActorType: "system", ActorName: "系统", AuthType: "payment-signature", ResourceType: "order", ResourceID: r.Order.ID, Result: "success"}, now, false)
-	})
+	}); err != nil {
+		return err
+	}
+	if r.Order.RenewalSubscriptionID != "" {
+		_, err = s.fulfillPaymentRenewal(tx, r, s.Now())
+	}
+	return err
 }
 
 func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
@@ -137,6 +143,13 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 			return false, err
 		}
 		now := s.Now()
+		if r.Order.RenewalSubscriptionID != "" {
+			ok, err := s.fulfillPaymentRenewal(tx, r, now)
+			if err != nil {
+				return false, err
+			}
+			return ok, tx.Commit()
+		}
 		var enabled bool
 		if err = tx.QueryRow("SELECT enabled FROM portal_users WHERE id=?", r.Order.UserID).Scan(&enabled); err != nil {
 			return false, err

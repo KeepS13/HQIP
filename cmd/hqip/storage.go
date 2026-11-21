@@ -56,7 +56,20 @@ func storageInfo(args []string) error {
 	if err = s.DB.QueryRow("SELECT COUNT(*) FROM metadata WHERE key='vless_reality_version' AND value='1'").Scan(&realityVersion); err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"backend": backend, "schemaVersion": version, "postgresSchemaVersion": pgVersion, "serverBillingVersion": 2, "paymentsVersion": 1, "subscriptionAllocationsVersion": 1, "operationsVersion": 1, "operationLogsVersion": 1, "offlineAdmissionVersion": 1, "trafficBillingVersion": 1, "vlessRealityVersion": realityVersion, "paymentsRequired": paymentOrders > 0 || paymentEnabled != 0, "masterSHA256": hex.EncodeToString(h[:])})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"backend": backend, "schemaVersion": version, "postgresSchemaVersion": pgVersion, "serverBillingVersion": 2, "paymentsVersion": 1, "subscriptionAllocationsVersion": 1, "subscriptionRenewalsVersion": 1, "operationsVersion": 1, "operationLogsVersion": 1, "offlineAdmissionVersion": 1, "trafficBillingVersion": 1, "vlessRealityVersion": realityVersion, "paymentsRequired": paymentOrders > 0 || paymentEnabled != 0, "masterSHA256": hex.EncodeToString(h[:])})
+}
+
+func migrateSubscriptionRenewals(args []string) error {
+	if len(args) != 0 {
+		return errors.New("migrate-subscription-renewals 不接受额外参数")
+	}
+	dsn := os.Getenv("HQIP_DATABASE_URL")
+	if dsn == "" {
+		return errors.New("请使用 PostgreSQL 迁移账号配置 HQIP_DATABASE_URL；SQLite 随启动升级")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return store.MigratePostgresSubscriptionRenewals(ctx, dsn)
 }
 
 func migrateOperationLogs(args []string) error {

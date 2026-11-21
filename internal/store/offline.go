@@ -15,6 +15,9 @@ func offlineExpiry(now time.Time, e *model.UserSubscription) time.Time {
 	if end.After(e.ExpiresAt) {
 		end = e.ExpiresAt
 	}
+	if !e.CurrentPeriodEndsAt.IsZero() && end.After(e.CurrentPeriodEndsAt) {
+		end = e.CurrentPeriodEndsAt
+	}
 	return end.UTC()
 }
 
@@ -130,9 +133,13 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			return empty, ErrConflict
 		}
 		normalDelta := normal - oldNormal
+		period, err := leasePeriod(tx, id)
+		if err != nil {
+			return empty, err
+		}
 		uploadDelta, downloadDelta := u.UploadBytes-g.UploadBytes, u.DownloadBytes-g.DownloadBytes
 		if billingState != nil {
-			uploadDelta, downloadDelta, normalDelta, err = settleBilling(tx, g.SubscriptionID, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, u.EmergencyUsedBytes)
+			uploadDelta, downloadDelta, normalDelta, err = settleBilling(tx, g.SubscriptionID, period, billingState, u.Billing, u.UploadBytes, u.DownloadBytes, u.EmergencyUsedBytes)
 			if err != nil {
 				return empty, err
 			}
@@ -145,7 +152,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 				billingState.Reserved = 0
 			}
 		}
-		if _, err = tx.Exec("UPDATE portal_usage SET upload=upload+?,download=download+?,reserved=reserved-? WHERE subscription_id=?", uploadDelta, downloadDelta, normalDelta, g.SubscriptionID); err != nil {
+		if err = updatePeriodUsage(tx, g.SubscriptionID, period, uploadDelta, downloadDelta, -normalDelta); err != nil {
 			return empty, err
 		}
 		if _, err = tx.Exec("UPDATE portal_emergency_usage SET used=used+?,reserved=reserved-? WHERE subscription_id=?", u.EmergencyUsedBytes-g.EmergencyUsedBytes, u.EmergencyUsedBytes-g.EmergencyUsedBytes, g.SubscriptionID); err != nil {
@@ -186,7 +193,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return empty, err
 		}
-		g.Revoked = g.Revoked || now.Before(g.AuthorizedAt) || !g.OfflineUntil.After(now) || !entitlementAllows(e, node) || !active || validCredential != 1 || usable != 1 || gate != "true" || hold == "true"
+		g.Revoked = g.Revoked || e.CurrentPeriodID != period || now.Before(g.AuthorizedAt) || !g.OfflineUntil.After(now) || !entitlementAllows(e, node) || !active || validCredential != 1 || usable != 1 || gate != "true" || hold == "true"
 		if u.Closed {
 			remaining := int64(0)
 			if !g.NormalUnlimited {
@@ -196,7 +203,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 					billingState.Reserved = 0
 				}
 			}
-			if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved-? WHERE subscription_id=?", remaining, g.SubscriptionID); err != nil {
+			if err = updatePeriodUsage(tx, g.SubscriptionID, period, 0, 0, -remaining); err != nil {
 				return empty, err
 			}
 			if _, err = tx.Exec("UPDATE portal_emergency_usage SET reserved=reserved-? WHERE subscription_id=?", g.EmergencyBudgetBytes-u.EmergencyUsedBytes, g.SubscriptionID); err != nil {
@@ -230,7 +237,7 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 						}
 						billingState.Reserved += add
 					}
-					if _, err = tx.Exec("UPDATE portal_usage SET reserved=reserved+? WHERE subscription_id=?", add, g.SubscriptionID); err != nil {
+					if err = updatePeriodUsage(tx, g.SubscriptionID, period, 0, 0, add); err != nil {
 						return empty, err
 					}
 				}

@@ -42,7 +42,7 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	// PostgreSQL extended protocol accepts one statement per Parse. Execute
 	// schema statements individually instead of sending the whole migration
 	// script as one multi-command query.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema()+";"+postgresSubscriptionRenewalSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.ExecContext(ctx, statement); err != nil {
 				return err
@@ -64,6 +64,9 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('offline_admission_version','1')"); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('subscription_renewals_version','1')"); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -82,6 +85,10 @@ func OpenPostgres(dataDir, baseURL, dsn string) (*Store, error) {
 		return nil, err
 	}
 	var version string
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='subscription_renewals_version'").Scan(&version); err != nil || version != "1" {
+		db.Close()
+		return nil, errors.New("订阅周期尚未升级，请使用迁移账号执行 hqip migrate-subscription-renewals")
+	}
 	if err = db.QueryRow("SELECT value FROM metadata WHERE key='postgres_schema_version'").Scan(&version); err != nil || version != "1" {
 		db.Close()
 		return nil, errors.New("PostgreSQL schema 未初始化或版本不兼容")

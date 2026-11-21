@@ -15,7 +15,10 @@ import (
 var ErrEntitlement = errors.New("订阅不可用、已到期、额度不足或连接已撤销")
 var ErrSlots = errors.New("并发连接数已满，请先断开其他连接")
 
-type portalQuery interface{ QueryRow(string, ...any) *sql.Row }
+type portalQuery interface {
+	QueryRow(string, ...any) *sql.Row
+	Query(string, ...any) (*sql.Rows, error)
+}
 
 func (s *Store) PortalEnabled() bool {
 	var v string

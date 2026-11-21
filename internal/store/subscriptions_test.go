@@ -36,6 +36,7 @@ func grantAnother(t *testing.T, s *Store, user string, p model.SubscriptionTempl
 	id := NewID()
 	audienceExec(t, s, "INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", id, user, p.ID, s.Now().Unix(), s.Now().Add(time.Duration(p.ValidityDays)*24*time.Hour).Unix(), "legacy:"+key)
 	audienceExec(t, s, "INSERT INTO portal_usage(subscription_id) VALUES(?)", id)
+	audienceExec(t, s, "INSERT INTO subscription_periods(id,subscription_id,starts_at,ends_at) SELECT id,id,created_at,expires FROM portal_subscriptions WHERE id=?", id)
 	audienceExec(t, s, "INSERT INTO subscription_allocations(subscription_id,target_count,node_ids) VALUES(?,?,?)", id, len(p.NodeIDs), jsonString(p.NodeIDs))
 	audienceExec(t, s, "UPDATE portal_users SET revision=revision+1 WHERE id=?", user)
 	e, err := s.UserSubscription(user, id)

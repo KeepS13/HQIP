@@ -54,6 +54,10 @@ func (s *Store) UpdateSubscriptionExpiry(user, id string, expires time.Time, exp
 		if current.ExpiresAt.Equal(expires) {
 			return *current, nil
 		}
+		last := current.Periods[len(current.Periods)-1]
+		if !expires.After(last.StartsAt) {
+			return empty, ErrSubscriptionPeriodExpiry
+		}
 		result, err := tx.Exec(`UPDATE portal_subscriptions SET expires=?,revision=revision+1
 WHERE id=? AND user_id=? AND revision=? AND revoked=0 AND expires>?`, expires.Unix(), id, user, expected, s.Now().Unix())
 		if err != nil {
@@ -68,6 +72,14 @@ WHERE id=? AND user_id=? AND revision=? AND revoked=0 AND expires>?`, expires.Un
 			return empty, ErrConflict
 		}
 		if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id=?", user); err != nil {
+			return empty, err
+		}
+		if _, err = tx.Exec("UPDATE subscription_periods SET ends_at=? WHERE id=?", expires.Unix(), last.ID); err != nil {
+			return empty, err
+		}
+		// Shortening an entitlement must also close its existing unpaid renewal
+		// links by the new deadline. Extending it never reopens an expired order.
+		if _, err = tx.Exec("UPDATE payment_orders SET expires_at=?,revision=revision+1 WHERE id IN (SELECT order_id FROM payment_renewals WHERE subscription_id=?) AND payment_state='unpaid' AND expires_at>?", expires.Unix(), id, expires.Unix()); err != nil {
 			return empty, err
 		}
 		audit := jsonString(map[string]any{"userId": user, "subscriptionId": id, "previousExpiresAt": current.ExpiresAt, "expiresAt": expires, "revision": expected + 1})

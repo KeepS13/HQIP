@@ -24,7 +24,8 @@ type paymentOrderRecord struct {
 	LastReconcileAt  int64
 }
 
-const paymentOrderSelect = `SELECT o.id,o.order_no,o.user_id,u.email,o.template_id,o.template_name,o.template_snapshot,o.amount,o.validity_days,o.created_at,o.expires_at,o.paid_at,o.fulfilled_at,o.last_notify_at,o.closed_at,o.creation_state,o.payment_state,o.fulfillment_state,o.subscription_id,o.pay_url,o.platform_order_no,o.last_error,o.revision,o.config_version,o.template_revision,o.provider_identity,o.last_reconcile_at FROM payment_orders o JOIN portal_users u ON u.id=o.user_id `
+const paymentOrderFields = `o.id,o.order_no,o.user_id,u.email,o.template_id,o.template_name,o.template_snapshot,o.amount,o.validity_days,o.created_at,o.expires_at,o.paid_at,o.fulfilled_at,o.last_notify_at,o.closed_at,o.creation_state,o.payment_state,o.fulfillment_state,o.subscription_id,o.pay_url,o.platform_order_no,o.last_error,o.revision,o.config_version,o.template_revision,o.provider_identity,o.last_reconcile_at`
+const paymentOrderSelect = `SELECT ` + paymentOrderFields + `,COALESCE(r.subscription_id,''),COALESCE(p.starts_at,0),COALESCE(p.ends_at,0) FROM payment_orders o JOIN portal_users u ON u.id=o.user_id LEFT JOIN payment_renewals r ON r.order_id=o.id LEFT JOIN subscription_periods p ON p.id=r.period_id `
 
 type paymentScanner interface{ Scan(...any) error }
 
@@ -33,7 +34,8 @@ func scanPaymentOrder(row paymentScanner, now time.Time) (paymentOrderRecord, er
 	o := &r.Order
 	var raw string
 	var created, expires, paid, fulfilled, notify int64
-	err := row.Scan(&o.ID, &o.OrderNo, &o.UserID, &o.Email, &o.TemplateID, &o.TemplateName, &raw, &o.AmountCents, &o.ValidityDays, &created, &expires, &paid, &fulfilled, &notify, &r.ClosedAt, &o.CreationState, &o.PaymentState, &o.FulfillmentState, &o.SubscriptionID, &r.PayURLEncrypted, &o.PlatformOrderNo, &o.LastError, &o.Revision, &r.ConfigVersion, &r.TemplateRevision, &r.ProviderIdentity, &r.LastReconcileAt)
+	var periodStart, periodEnd int64
+	err := row.Scan(&o.ID, &o.OrderNo, &o.UserID, &o.Email, &o.TemplateID, &o.TemplateName, &raw, &o.AmountCents, &o.ValidityDays, &created, &expires, &paid, &fulfilled, &notify, &r.ClosedAt, &o.CreationState, &o.PaymentState, &o.FulfillmentState, &o.SubscriptionID, &r.PayURLEncrypted, &o.PlatformOrderNo, &o.LastError, &o.Revision, &r.ConfigVersion, &r.TemplateRevision, &r.ProviderIdentity, &r.LastReconcileAt, &o.RenewalSubscriptionID, &periodStart, &periodEnd)
 	if err != nil {
 		return r, notFound(err)
 	}
@@ -43,6 +45,14 @@ func scanPaymentOrder(row paymentScanner, now time.Time) (paymentOrderRecord, er
 	o.CreatedAt = time.Unix(created, 0).UTC()
 	o.ExpiresAt = time.Unix(expires, 0).UTC()
 	o.Currency = "CNY"
+	o.OrderType = "purchase"
+	if o.RenewalSubscriptionID != "" {
+		o.OrderType = "renewal"
+	}
+	if periodStart != 0 {
+		start, end := time.Unix(periodStart, 0).UTC(), time.Unix(periodEnd, 0).UTC()
+		o.PeriodStartsAt, o.PeriodEndsAt = &start, &end
+	}
 	if paid != 0 {
 		at := time.Unix(paid, 0).UTC()
 		o.PaidAt = &at
@@ -224,7 +234,7 @@ func paymentOrderNumber() (string, error) {
 // Retries with the same request ID return the existing record even after a
 // response timeout; the provider's startOrder API has no documented idempotency.
 func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.PaymentOrderInput, client *payment.Client) (model.PaymentOrder, error) {
-	if !validRequestKey(in.RequestID) || in.TemplateID == "" || in.TemplateRevision < 1 {
+	if !validRequestKey(in.RequestID) || in.TemplateID == "" || in.TemplateRevision < 1 || (in.RenewalSubscriptionID != "" && in.ExpectedSubscriptionRevision < 1) || (in.RenewalSubscriptionID == "" && in.ExpectedSubscriptionRevision != 0) {
 		return model.PaymentOrder{}, errors.New("支付订单请求无效")
 	}
 	type prepared struct {
@@ -243,11 +253,11 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		if e = lockAllocationUser(tx, userID); e != nil {
 			return out, e
 		}
-		var oldTemplate string
-		var oldRevision int64
-		e = tx.QueryRow("SELECT id,template_id,template_revision FROM payment_orders WHERE user_id=? AND request_key=?", userID, in.RequestID).Scan(&out.id, &oldTemplate, &oldRevision)
+		var oldTemplate, oldSubscription string
+		var oldRevision, oldSubscriptionRevision int64
+		e = tx.QueryRow("SELECT o.id,o.template_id,o.template_revision,COALESCE(r.subscription_id,''),COALESCE(r.expected_revision,0) FROM payment_orders o LEFT JOIN payment_renewals r ON r.order_id=o.id WHERE o.user_id=? AND o.request_key=?", userID, in.RequestID).Scan(&out.id, &oldTemplate, &oldRevision, &oldSubscription, &oldSubscriptionRevision)
 		if e == nil {
-			if oldTemplate != in.TemplateID || oldRevision != in.TemplateRevision {
+			if oldTemplate != in.TemplateID || oldRevision != in.TemplateRevision || oldSubscription != in.RenewalSubscriptionID || oldSubscriptionRevision != in.ExpectedSubscriptionRevision {
 				return out, ErrConflict
 			}
 			return out, nil
@@ -276,7 +286,7 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		if template.Revision != in.TemplateRevision {
 			return out, ErrConflict
 		}
-		if !template.Enabled || !template.Listed || template.PriceCents == nil || len(template.NodeIDs) == 0 {
+		if !template.Enabled || !template.Listed || template.PriceCents == nil || (in.RenewalSubscriptionID == "" && len(template.NodeIDs) == 0) {
 			return out, errors.New("该订阅暂不可购买")
 		}
 		if e = validSubscriptionTemplate(template); e != nil {
@@ -307,6 +317,15 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		out.id = NewID()
 		now := s.Now()
 		expires := now.Add(time.Duration(config.Config.PayDurationMinutes) * time.Minute)
+		if in.RenewalSubscriptionID != "" {
+			subscription, err := validateRenewalOrder(tx, userID, in, now)
+			if err != nil {
+				return out, err
+			}
+			if expires.After(subscription.ExpiresAt) {
+				expires = subscription.ExpiresAt
+			}
+		}
 		result, e := tx.Exec("INSERT INTO payment_orders(id,order_no,user_id,template_id,request_key,template_revision,template_name,template_snapshot,amount,validity_days,config_version,provider_identity,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,request_key) DO NOTHING", out.id, no, userID, template.ID, in.RequestID, template.Revision, template.Name, jsonString(template), *template.PriceCents, template.ValidityDays, configVersion, config.Identity, now.Unix(), expires.Unix())
 		if e != nil {
 			return out, e
@@ -322,10 +341,17 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 			out.raced = true
 			return out, nil
 		}
-		if _, e = reserveOrderNodes(tx, out.id, userID, template, template.NodesPerSubscription, now); e != nil {
+		message := "订单已创建，节点已预留，正在获取支付链接"
+		if in.RenewalSubscriptionID != "" {
+			_, e = tx.Exec("INSERT INTO payment_renewals(order_id,subscription_id,expected_revision) VALUES(?,?,?)", out.id, in.RenewalSubscriptionID, in.ExpectedSubscriptionRevision)
+			message = "续费订单已创建，保留原订阅与节点；付款后延期，下期开始时重置流量"
+		} else {
+			_, e = reserveOrderNodes(tx, out.id, userID, template, template.NodesPerSubscription, now)
+		}
+		if e != nil {
 			return out, e
 		}
-		if e = paymentActivity(tx, out.id, "created", "订单已创建，节点已预留，正在获取支付链接", now.Unix()); e != nil {
+		if e = paymentActivity(tx, out.id, "created", message, now.Unix()); e != nil {
 			return out, e
 		}
 		out.dispatch = true
@@ -336,12 +362,12 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		return model.PaymentOrder{}, err
 	}
 	if p.raced {
-		var template string
-		var revision int64
-		if err = s.DB.QueryRow("SELECT id,template_id,template_revision FROM payment_orders WHERE user_id=? AND request_key=?", userID, in.RequestID).Scan(&p.id, &template, &revision); err != nil {
+		var template, subscription string
+		var revision, subscriptionRevision int64
+		if err = s.DB.QueryRow("SELECT o.id,o.template_id,o.template_revision,COALESCE(r.subscription_id,''),COALESCE(r.expected_revision,0) FROM payment_orders o LEFT JOIN payment_renewals r ON r.order_id=o.id WHERE o.user_id=? AND o.request_key=?", userID, in.RequestID).Scan(&p.id, &template, &revision, &subscription, &subscriptionRevision); err != nil {
 			return model.PaymentOrder{}, err
 		}
-		if template != in.TemplateID || revision != in.TemplateRevision {
+		if template != in.TemplateID || revision != in.TemplateRevision || subscription != in.RenewalSubscriptionID || subscriptionRevision != in.ExpectedSubscriptionRevision {
 			return model.PaymentOrder{}, ErrConflict
 		}
 	}

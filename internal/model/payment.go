@@ -28,37 +28,43 @@ type PaymentSettingsInput struct {
 }
 
 type PaymentOrderInput struct {
-	RequestID        string `json:"requestId"`
-	TemplateID       string `json:"templateId"`
-	TemplateRevision int64  `json:"templateRevision"`
+	RenewalSubscriptionID        string `json:"renewalSubscriptionId,omitempty"`
+	ExpectedSubscriptionRevision int64  `json:"expectedSubscriptionRevision,omitempty"`
+	RequestID                    string `json:"requestId"`
+	TemplateID                   string `json:"templateId"`
+	TemplateRevision             int64  `json:"templateRevision"`
 }
 
 type PaymentOrder struct {
-	ID               string               `json:"id"`
-	OrderNo          string               `json:"orderNo"`
-	UserID           string               `json:"userId"`
-	Email            string               `json:"email,omitempty"`
-	TemplateID       string               `json:"templateId"`
-	TemplateName     string               `json:"templateName"`
-	TemplateSnapshot SubscriptionTemplate `json:"templateSnapshot"`
-	AmountCents      int64                `json:"amountCents"`
-	Currency         string               `json:"currency"`
-	ValidityDays     int                  `json:"validityDays"`
-	CreatedAt        time.Time            `json:"createdAt"`
-	ExpiresAt        time.Time            `json:"expiresAt"`
-	PaidAt           *time.Time           `json:"paidAt,omitempty"`
-	FulfilledAt      *time.Time           `json:"fulfilledAt,omitempty"`
-	LastNotifyAt     *time.Time           `json:"lastNotifyAt,omitempty"`
-	SubscriptionID   string               `json:"subscriptionId"`
-	PayURL           string               `json:"payUrl,omitempty"`
-	PlatformOrderNo  string               `json:"platformOrderNo,omitempty"`
-	Status           string               `json:"status"`
-	CreationState    string               `json:"creationState"`
-	PaymentState     string               `json:"paymentState"`
-	FulfillmentState string               `json:"fulfillmentState"`
-	LastError        string               `json:"lastError"`
-	Revision         int64                `json:"revision"`
-	Activities       []PaymentActivity    `json:"activities,omitempty"`
+	OrderType             string               `json:"orderType"`
+	RenewalSubscriptionID string               `json:"renewalSubscriptionId,omitempty"`
+	PeriodStartsAt        *time.Time           `json:"periodStartsAt,omitempty"`
+	PeriodEndsAt          *time.Time           `json:"periodEndsAt,omitempty"`
+	ID                    string               `json:"id"`
+	OrderNo               string               `json:"orderNo"`
+	UserID                string               `json:"userId"`
+	Email                 string               `json:"email,omitempty"`
+	TemplateID            string               `json:"templateId"`
+	TemplateName          string               `json:"templateName"`
+	TemplateSnapshot      SubscriptionTemplate `json:"templateSnapshot"`
+	AmountCents           int64                `json:"amountCents"`
+	Currency              string               `json:"currency"`
+	ValidityDays          int                  `json:"validityDays"`
+	CreatedAt             time.Time            `json:"createdAt"`
+	ExpiresAt             time.Time            `json:"expiresAt"`
+	PaidAt                *time.Time           `json:"paidAt,omitempty"`
+	FulfilledAt           *time.Time           `json:"fulfilledAt,omitempty"`
+	LastNotifyAt          *time.Time           `json:"lastNotifyAt,omitempty"`
+	SubscriptionID        string               `json:"subscriptionId"`
+	PayURL                string               `json:"payUrl,omitempty"`
+	PlatformOrderNo       string               `json:"platformOrderNo,omitempty"`
+	Status                string               `json:"status"`
+	CreationState         string               `json:"creationState"`
+	PaymentState          string               `json:"paymentState"`
+	FulfillmentState      string               `json:"fulfillmentState"`
+	LastError             string               `json:"lastError"`
+	Revision              int64                `json:"revision"`
+	Activities            []PaymentActivity    `json:"activities,omitempty"`
 }
 
 type PaymentActivity struct {
