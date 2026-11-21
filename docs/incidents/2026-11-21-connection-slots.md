@@ -8,4 +8,10 @@ connection-slots-v1 将订阅身份及累计计量与在线占位分开。新 Ag
 
 本地验证：Go 全量 race、vet 通过；新增边界回归通过。真实双节点单名额测试完成“节点一→节点二→节点一”，每次强制退出后由核心确认断开，随后占用归零，复用原累计账本和正确带宽。真实双节点网站失联超过 120 秒仍可转发，恢复后准确汇总。Windows Python 新兼容性测试通过，全量部署测试仍受既有符号链接权限与路径差异影响，Linux 全量以 CI 为准。
 
-发布须先控制端再节点，记录 capability 与业务版本，升级和回退前后均检查账本兼容性。生产验收需确认 15 节点 connection-slots-v1、目标订阅实际代理与断开回收、默认 1.50 倍率及真实流量未被清空。部署与线上证据补记于此；库外日志位于 .diagnostics/ntt-20261121/。
+发布须先控制端再节点，记录 capability 与业务版本，升级和回退前后均检查账本兼容性。库外日志位于 .diagnostics/ntt-20261121/。
+
+正式版本 `3824d4e4362d407a857e2d725b5010c645784833` 通过 CI run `44910052435` 的 Linux、Windows、PostgreSQL 和 deploy 全部检查。控制端 current 已切换该版本，/readyz 返回 ok=true。节点 Agent SHA256 为 `8500a3a398479a9e10a9f447d8f459cb7c236267427324776fcb45f5192bdd7f`；13 台通过后台队列升级，itp0 / zus1 通过已校验主机指纹的既有 SSH 路径完成，回执分别为 `b876280a2218258909`、`2b2265034375b06503`，均为 succeeded、coreInvocationUnchanged=true。itp0 首次写入新 staging 路径时目录未建立，补齐目录和正式文件后成功，首次失败未停止服务。
+
+2026-11-21 14:06:16 UTC 验收：15 个节点全部 ready、core_healthy=1、connection-slots-v1，最近上报距检查 1～6 秒。全站原预留阻塞查询为 0，node-quota 父账本中 active=false 但仍占有效在线名额的数量为 0。目标订阅占用为 0、reserved=0、累计已用 44,998,195,979 字节；其父账本保留且 slotReleased=true，未被伪造为最终结算。
+
+指定用户分配的 zus2 / itp0 各自 HY2 与 VLESS 四条真实代理均成功，出口与节点地址一致。每条路径逐一测试，客户端强制退出后均由节点确认并释放，occupiedBefore=0、occupiedAfter=0，没有通过管理员撤销清理测试连接。默认倍率仍为 enabled=1、revision=2、HY2=150、VLESS=150；真实累计计数与未知旧子连接预算继续保留。以上证明本次已测路径及名额回收，不把未知最终流量当作零。
