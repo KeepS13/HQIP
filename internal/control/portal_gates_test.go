@@ -9,8 +9,8 @@ import (
 func TestPortalActivationRequiresLegacyClientUpgrade(t *testing.T) {
 	s, _ := newServer(t)
 	public := s.PublicHandler()
-	if w := request(public, "GET", "/api/v1/client/profile", nil, "", ""); w.Code != http.StatusUnauthorized {
-		t.Fatal("legacy route changed before activation", w.Code)
+	if w := request(public, "GET", "/api/v1/client/profile", nil, "", ""); w.Code != http.StatusGone {
+		t.Fatal("retired route became available before activation", w.Code)
 	}
 	if err := s.Store.ActivatePortal(); err != nil {
 		t.Fatal(err)
@@ -18,7 +18,7 @@ func TestPortalActivationRequiresLegacyClientUpgrade(t *testing.T) {
 	for _, path := range []string{"/api/v1/client/login", "/api/v1/client/refresh", "/api/v1/client/logout", "/api/v1/client/profile", "/api/v1/client/status", "/api/v1/client/rules/old-hash", "/api/v1/client/unknown"} {
 		for _, method := range []string{"GET", "POST"} {
 			w := request(public, method, path, nil, "", "")
-			if w.Code != http.StatusUpgradeRequired || !strings.Contains(w.Body.String(), "HQIP 3.0") || !strings.Contains(w.Body.String(), "浏览器登录") {
+			if w.Code != http.StatusGone || !strings.Contains(w.Body.String(), "HQIP 3.0") || !strings.Contains(w.Body.String(), "浏览器登录") {
 				t.Fatalf("legacy %s %s did not give upgrade guidance: %d", method, path, w.Code)
 			}
 		}

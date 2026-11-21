@@ -9,7 +9,11 @@ def prepare(deploy, manifest):
         return None
     if version != 1:
         raise ValueError('Unsupported offline admission schema')
-    if deploy.postgres_info().get('offlineAdmissionVersion', 0) >= version:
+    info = deploy.postgres_info()
+    # The existing additive command also adds ingress IPs. An already-installed
+    # offline ledger must not cause this newer migration to be skipped.
+    if (info.get('offlineAdmissionVersion', 0) >= version
+            and info.get('connectionSlotsVersion', 0) >= manifest.get('connectionSlotsVersion', 0)):
         return None
     environment = deploy.storage_environment(deploy.MIGRATION_ENV)
     application = urlsplit(deploy.storage_environment()['HQIP_DATABASE_URL'])

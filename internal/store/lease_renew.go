@@ -122,12 +122,10 @@ func (s *Store) RenewLease(node, id string, u model.LeaseUsage) (model.Connectio
 				}
 			}
 			if valid {
-				var rank int
-				err = tx.QueryRow("SELECT COUNT(*) FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? AND (created_at<? OR (created_at=? AND rowid<=(SELECT rowid FROM portal_leases WHERE id=?)))", l.SubscriptionID, now.Unix(), l.CreatedAt.Unix(), l.CreatedAt.Unix(), l.ID).Scan(&rank)
+				valid, err = onlineSlotRetained(tx, l.SubscriptionID, l.ID, e.MaxConnections, now)
 				if err != nil {
 					return empty, err
 				}
-				valid = rank <= e.MaxConnections
 			}
 			if !valid {
 				if billingState != nil {

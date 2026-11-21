@@ -25,7 +25,7 @@ func validSubscriptionTemplate(p model.SubscriptionTemplate) error {
 		return errors.New("订阅价格须为 1 至 1000000 元，最多两位小数")
 	}
 	if strings.TrimSpace(p.Name) == "" || len(p.Name) > 100 || p.ValidityDays < 1 || p.ValidityDays > 36500 || p.MaxConnections < 1 || p.MaxConnections > 1000 || len(p.NodeIDs) > 1000 {
-		return errors.New("订阅名称、有效天数、节点或连接数无效")
+		return errors.New("订阅名称、有效天数、节点或同时在线上限无效")
 	}
 	if p.BandwidthMbps != nil && (*p.BandwidthMbps <= 0 || *p.BandwidthMbps > 1e6 || math.IsNaN(*p.BandwidthMbps) || math.IsInf(*p.BandwidthMbps, 0)) {
 		return errors.New("带宽必须为正数或无限")
@@ -229,7 +229,9 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	// Keep an already-authorized tail usable. Reserved bytes alone may belong
 	// to a dead lease awaiting settlement and must neither count as usage nor
 	// keep an unusable subscription active.
-	if err = q.QueryRow("SELECT COUNT(*),COALESCE(MAX(CASE WHEN l.revoked=0 AND ((b.state IS NULL AND l.budget>l.upload+l.download) OR (b.state IS NOT NULL AND (b.remaining_units>0 OR b.remaining_emergency>0))) THEN 1 ELSE 0 END),0) FROM portal_leases l LEFT JOIN traffic_lease_billing b ON b.lease_id=l.id WHERE l.subscription_id=? AND l.closed=0 AND l.expires>?", id, now.Unix()).Scan(&e.Occupied, &liveBudget); err != nil {
+	// Match onlineSlotKey: only VLESS shares an IP slot; HY2 and unknown legacy
+	// protocols use separate lease identities even when their source IP matches.
+	if err = q.QueryRow("SELECT COUNT(DISTINCT CASE WHEN json_extract(json_extract(b.state,'$.grant'),'$.protocol')='vless' THEN COALESCE(NULLIF(l.client_ip,''),l.id) ELSE l.id END),COALESCE(MAX(CASE WHEN l.revoked=0 AND ((b.state IS NULL AND l.budget>l.upload+l.download) OR (b.state IS NOT NULL AND (b.remaining_units>0 OR b.remaining_emergency>0))) THEN 1 ELSE 0 END),0) FROM portal_leases l LEFT JOIN traffic_lease_billing b ON b.lease_id=l.id WHERE l.subscription_id=? AND l.closed=0 AND l.expires>?", id, now.Unix()).Scan(&e.Occupied, &liveBudget); err != nil {
 		return nil, err
 	}
 	minimum := model.MinimumSubscriptionLeaseBytes

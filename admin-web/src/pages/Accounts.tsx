@@ -214,7 +214,7 @@ export function Users() {
                       </td>
                       <td>
                         {subscriptions.reduce((sum, s) => sum + s.occupied, 0)}{" "}
-                        个 VPN 连接
+                        个在线名额
                       </td>
                       <td>
                         <Link className="text-link" to={`/users/${u.id}`}>
@@ -369,7 +369,7 @@ function OwnedSubscription({
           </dd>
         </div>
         <div>
-          <dt>VPN 连接</dt>
+          <dt>同时在线</dt>
           <dd>
             {value.occupied} / {value.maxConnections}
           </dd>
@@ -388,7 +388,7 @@ function OwnedSubscription({
           </small>
         </strong>
         <Meter value={value.usedBytes} max={value.quotaBytes} />
-        <p>一次性上传＋下载 · 待结算预留 {bytes(value.reservedBytes)}</p><p>离线许可预留 {value.offlineReservations || 0} 个名额 · 应急已用 {bytes(value.emergencyUsedBytes || 0)} / 1 GiB · 应急预留 {bytes(value.emergencyReservedBytes || 0)}</p>
+        <p>一次性上传＋下载 · 待结算预留 {bytes(value.reservedBytes)}</p>
       </div>
       {!["removed", "revoked"].includes(value.status) && (
         <div className="subscription-owned-actions">
@@ -538,7 +538,7 @@ export function UserPage() {
       />
       <Panel
         title="持有订阅"
-        subtitle="每份流量、有效期、带宽与连接上限独立计算"
+        subtitle="每份流量、有效期、带宽与同时在线上限独立计算"
         action={
           <select
             className="subscription-status-filter"
@@ -631,7 +631,7 @@ export function UserPage() {
       <div className="account-detail-grid">
         <Panel
           title="连接记录"
-          subtitle="用于核对各份订阅的准入与计量；断开确认前仍占名额"
+          subtitle="用于核对各份订阅的连接与计量；HY2 按在线客户端实例计数，VLESS 按来源 IP 去重"
         >
           {connections.length ? (
             <div className="account-records">
@@ -645,7 +645,7 @@ export function UserPage() {
                         ?.templateName || "订阅"}{" "}
                       · #{c.subscriptionId?.slice(-8)}
                       <br />
-                      建立于 {date(c.createdAt)}
+                      来源 IP：{c.clientIP || "旧记录未知"} · 建立于 {date(c.createdAt)}
                     </p>
                   </section>
                   <Badge tone={connectionActive(c) ? "success" : "muted"}>

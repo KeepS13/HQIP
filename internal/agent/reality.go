@@ -217,23 +217,13 @@ func (a *Agent) resolveRealityCredential(ctx context.Context, uuid string) (stri
 // The loop-local HY2 connection uses the same server certificate validation and
 // per-scope password as ordinary clients. No probe or unlimited credential is
 // used; all business traffic remains charged by the existing forwarding core.
-func (a *Agent) connectRealityBackend(ctx context.Context, password string) (hy.Client, error) {
+func (a *Agent) connectRealityBackend(ctx context.Context, password, clientIP string) (hy.Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	credential := password
-	var capability struct {
-		TrafficBillingVersion int `json:"trafficBillingVersion"`
-	}
-	if err := a.statsJSON(ctx, http.MethodGet, "/hqip/capabilities", nil, &capability); err != nil {
+	credential, err := a.realityBillingPassword(password, clientIP)
+	if err != nil {
 		return nil, err
-	}
-	if capability.TrafficBillingVersion == 1 {
-		var err error
-		credential, err = a.realityBillingPassword(password)
-		if err != nil {
-			return nil, err
-		}
 	}
 	client, _, err := hy.NewClient(&hy.Config{
 		ServerAddr: &net.UDPAddr{IP: net.ParseIP(a.cfg.PublicIP), Port: a.cfg.Reality.BackendPort}, Auth: credential,

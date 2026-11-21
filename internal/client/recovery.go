@@ -177,38 +177,22 @@ func (c *Controller) recoveryAttempt(r *recoveryRun) (bool, error) {
 	if !c.engine.Alive() {
 		return false, errors.New("代理内核已停止，请手动重新连接")
 	}
-	// Never drain or steal another device's slot during recovery.
-	ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
-	before, err := r.api.Connections(ctx)
-	cancel()
-	if err != nil {
-		c.mu.Lock()
-		offline := c.offlineValidLocked()
-		c.mu.Unlock()
-		if retryable(err) && offline {
-			return c.recoverOffline(r)
-		}
-		if errors.Is(err, ErrUnauthorized) {
-			_ = c.expireSession(r.api)
-		}
-		return false, err
-	}
-	if before.MaxConnections > 0 && before.Occupied >= before.MaxConnections && !matchingLease(before, r.subscription, r.node, c.clockNow()) {
-		return false, temporary(errors.New("等待连接名额"))
-	}
+	// Only ingress knows whether this source shares an already occupied IP.
+	// Let node admission decide; the confirmed matching lease below is still
+	// required before forwarding resumes. This also avoids a redundant API read.
 	c.recoveryProbeMu.Lock()
 	if r.ctx.Err() != nil {
 		c.recoveryProbeMu.Unlock()
 		return true, nil
 	}
 	probeCtx, probeCancel := context.WithTimeout(r.ctx, 25*time.Second)
-	err = c.engine.VerifyCurrent(probeCtx, node.PublicIP)
+	err := c.engine.VerifyCurrent(probeCtx, node.PublicIP)
 	probeCancel()
 	c.recoveryProbeMu.Unlock()
 	if err != nil {
 		return false, err
 	}
-	ctx, cancel = context.WithTimeout(r.ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
 	state, err := r.api.Connections(ctx)
 	cancel()
 	if err != nil {

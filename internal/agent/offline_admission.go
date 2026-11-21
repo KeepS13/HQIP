@@ -11,20 +11,13 @@ import (
 	"github.com/KeepS13/HQIP/internal/secure"
 )
 
-func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection, password string, protocols ...string) {
-	protocol := ""
-	if len(protocols) > 0 {
-		protocol = protocols[0]
-	}
+func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection, password, protocol, clientIP string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), admissionControlTimeout)
 	defer cancel()
 	a.offlineMu.Lock()
 	defer a.offlineMu.Unlock()
 	now, hash := a.now(), secure.Hash(password)
-	requestHash := hash
-	if protocol != "" {
-		requestHash = protocol + ":" + hash
-	}
+	requestHash := protocol + ":" + hash + ":" + clientIP
 	if a.offlineIssued == nil {
 		a.offlineIssued = map[string]time.Time{}
 		a.offlineBoot = time.Now()
@@ -49,7 +42,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			}
 		}
 		matchesProtocol := s.Grant.Billing == nil && protocol == "" || s.Grant.Billing != nil && s.Grant.Billing.Protocol == protocol
-		if matchesProtocol && s.Grant.CredentialHash == hash && !s.Grant.Closed && !s.Denied && !s.Grant.Revoked && now.Before(s.Grant.OfflineUntil) {
+		if matchesProtocol && s.Grant.CredentialHash == hash && s.Grant.ClientIP == clientIP && !s.Grant.Closed && !s.Denied && !s.Grant.Revoked && now.Before(s.Grant.OfflineUntil) {
 			a.reconcileOfflineChildren(ctx, s, coreGeneration)
 			if err = a.ledger.saveOffline(*s); err != nil {
 				http.Error(w, "offline reconciliation persistence failed", 503)
@@ -72,8 +65,9 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			http.Error(w, "offline grant issuance disabled", 403)
 			return
 		}
-		// Persist a credential-scoped request key before dispatch. Retrying a lost
-		// grant response must not reserve a second slot for another QUIC dial.
+		// Persist an IP/protocol/credential request key before dispatch. A lost
+		// response must not issue duplicate accounting parents, and a different
+		// IP must never inherit this request's approved identity.
 		a.ledger.mu.Lock()
 		_, err = a.ledger.db.Exec("INSERT OR IGNORE INTO offline_requests(hash,request_id) VALUES(?,?)", requestHash, connection)
 		var requestID string
@@ -85,14 +79,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			http.Error(w, "offline request persistence failed", 503)
 			return
 		}
-		body := map[string]string{"connectionId": requestID, "password": password}
-		if protocol != "" {
-			body["billingProtocol"] = protocol
-			body["billingCapability"] = "traffic-billing-v1"
-			if a.nodeQuotaEnabled() {
-				body["quotaCapability"] = model.NodeQuotaCapability
-			}
-		}
+		body := map[string]string{"connectionId": requestID, "password": password, "clientIP": clientIP, "billingProtocol": protocol, "billingCapability": "traffic-billing-v1", "quotaCapability": model.NodeQuotaCapability}
 		status, data, requestErr := a.requestAdmission(ctx, "/api/v1/agents/offline-grants", body)
 		if requestErr != nil || status != 200 {
 			if !offlineRetryable(status, requestErr) {
@@ -104,7 +91,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			return
 		}
 		var g model.OfflineGrant
-		if json.Unmarshal(data, &g) != nil || !validOfflineGrant(g, a.cfg.NodeID, hash, now) || g.ReportVersion != 0 || g.UploadBytes != 0 || g.DownloadBytes != 0 || g.EmergencyUsedBytes != 0 {
+		if json.Unmarshal(data, &g) != nil || g.NodeQuota == nil || g.Billing == nil || g.Billing.Protocol != protocol || g.ClientIP != clientIP || g.ConnectionSlotsVersion != model.ConnectionSlotsVersion || !validOfflineGrant(g, a.cfg.NodeID, hash, now) || g.ReportVersion != 0 || g.UploadBytes != 0 || g.DownloadBytes != 0 || g.EmergencyUsedBytes != 0 {
 			http.Error(w, "invalid offline grant", 403)
 			return
 		}

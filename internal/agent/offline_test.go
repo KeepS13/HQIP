@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/secure"
+	"github.com/apernet/hysteria/core/v2/billing"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,7 +19,8 @@ func offlineTestGrant(now time.Time) model.OfflineGrant {
 
 func TestOfflineAdmissionPersistsAndReconnectsPast120Seconds(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	g := offlineTestGrant(now)
+	g := quotaTestState(now, "grant-one", "hysteria2", 64<<20*100).Grant
+	g.ClientIP, g.ConnectionSlotsVersion = "198.51.100.1", model.ConnectionSlotsVersion
 	status := 200
 	central := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != 200 {
@@ -33,6 +35,7 @@ func TestOfflineAdmissionPersistsAndReconnectsPast120Seconds(t *testing.T) {
 			g.DownloadBytes = u.DownloadBytes
 			g.EmergencyUsedBytes = u.EmergencyUsedBytes
 			g.Closed = u.Closed
+			g.Billing.Acknowledged = u.Billing
 		}
 		_ = json.NewEncoder(w).Encode(g)
 	}))
@@ -46,7 +49,7 @@ func TestOfflineAdmissionPersistsAndReconnectsPast120Seconds(t *testing.T) {
 		t.Fatal(err)
 	}
 	admit := func(ch string) *httptest.ResponseRecorder {
-		return admissionRequest(a, "/admission", `{"connectionId":"`+strings.Repeat(ch, 64)+`","password":"`+firstPassword+`"}`, "127.0.0.1:3000", testSecret)
+		return admissionRequest(a, "/admission", `{"clientIP":"198.51.100.1","billingCapability":"traffic-billing-v1","connectionId":"`+strings.Repeat(ch, 64)+`","password":"`+firstPassword+`"}`, "127.0.0.1:3000", testSecret)
 	}
 	w := admit("a")
 	if w.Code != 200 {
@@ -56,6 +59,9 @@ func TestOfflineAdmissionPersistsAndReconnectsPast120Seconds(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &l)
 	status = 503
 	renew := func(id string, u model.LeaseUsage) *httptest.ResponseRecorder {
+		if u.DownloadBytes > 0 {
+			u.Billing = []billing.Segment{{Version: 1, Download: u.DownloadBytes, AppliedAt: g.AuthorizedAt}}
+		}
 		b, _ := json.Marshal(u)
 		return admissionRequest(a, "/leases/"+id+"/renew", string(b), "127.0.0.1:3000", testSecret)
 	}

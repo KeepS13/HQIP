@@ -42,22 +42,22 @@ func TestRealityBillingIdentityRejectsForgedOrExpiredTicket(t *testing.T) {
 	now := time.Now()
 	agent := &Agent{cfg: model.AgentConfig{NodeID: "node-a", Token: strings.Repeat("x", 32)}, now: func() time.Time { return now }}
 	password := strings.Repeat("p", 43)
-	ticket, err := agent.realityBillingPassword(password)
+	ticket, err := agent.realityBillingPassword(password, "198.51.100.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, protocol, err := agent.billingIdentity(ticket, billing.Capability)
-	if err != nil || resolved != password || protocol != "vless" {
+	resolved, protocol, ip, err := agent.billingIdentity(ticket, billing.Capability, "127.0.0.1")
+	if err != nil || resolved != password || protocol != "vless" || ip != "198.51.100.1" {
 		t.Fatalf("invalid trusted marker %v", err)
 	}
-	if _, _, err = agent.billingIdentity(ticket+"a", billing.Capability); err == nil {
+	if _, _, _, err = agent.billingIdentity(ticket+"a", billing.Capability, "127.0.0.1"); err == nil {
 		t.Fatal("forged marker accepted")
 	}
-	if _, _, err = agent.billingIdentity(ticket, ""); err == nil {
+	if _, _, _, err = agent.billingIdentity(ticket, "", "127.0.0.1"); err == nil {
 		t.Fatal("legacy runtime accepted marked credential")
 	}
 	now = now.Add(time.Minute)
-	if _, _, err = agent.billingIdentity(ticket, billing.Capability); err == nil {
+	if _, _, _, err = agent.billingIdentity(ticket, billing.Capability, "127.0.0.1"); err == nil {
 		t.Fatal("expired marker accepted")
 	}
 }

@@ -117,7 +117,7 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	}
 	// pgx extended protocol parses one statement at a time; split the static
 	// schema script before executing it in the migration transaction.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema()+";"+onlineIPSchema, ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.Exec(ctx, statement); err != nil {
 				return report, err
@@ -185,6 +185,11 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 		return report, err
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO traffic_billing_settings(id,enabled,revision,hy2,vless) VALUES(1,0,1,150,150) ON CONFLICT(id) DO NOTHING"); err != nil {
+		return report, err
+	}
+	// Unknown source IPs remain separate reservations; importing does not infer
+	// them from historical subscription-download or account-login records.
+	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('online_ips_version','1'),('connection_slots_version','3') ON CONFLICT(key) DO UPDATE SET value=excluded.value"); err != nil {
 		return report, err
 	}
 	data, err := json.MarshalIndent(report, "", "  ")

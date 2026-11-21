@@ -31,9 +31,10 @@ func TestLegacyMigrationSettlesBeforeProtocolAdmission(t *testing.T) {
 			http.Error(w, "old reservation still owns quota", 403)
 			return
 		}
-		g := offlineTestGrant(now)
+		g := quotaTestState(now, "protocol-grant", "hysteria2", 64<<20*100).Grant
+		g.ClientIP, g.ConnectionSlotsVersion = "198.51.100.1", model.ConnectionSlotsVersion
 		g.ID = "protocol-grant"
-		g.Billing = &billing.Grant{Policy: billing.Policy{Version: 1, Multiplier: 150, Protocol: "hysteria2"}, BudgetUnits: g.NormalBudgetBytes * 100, EmergencyBytes: g.EmergencyBudgetBytes}
+		g.Billing = &billing.Grant{Policy: billing.Policy{Version: 1, Multiplier: 150, Protocol: "hysteria2"}, BudgetUnits: 64 << 20 * 100, EmergencyBytes: g.EmergencyBudgetBytes}
 		_ = json.NewEncoder(w).Encode(g)
 	}))
 	defer central.Close()
@@ -50,7 +51,7 @@ func TestLegacyMigrationSettlesBeforeProtocolAdmission(t *testing.T) {
 	if err := a.ledger.saveOffline(s); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"connectionId": strings.Repeat("b", 64), "password": firstPassword, "billingCapability": "traffic-billing-v1"})
+	body, _ := json.Marshal(map[string]string{"clientIP": "198.51.100.1", "connectionId": strings.Repeat("b", 64), "password": firstPassword, "billingCapability": "traffic-billing-v1"})
 	w := admissionRequest(a, "/admission", string(body), "127.0.0.1:3000", testSecret)
 	if w.Code != 200 {
 		t.Fatalf("protocol admission %d: %s", w.Code, w.Body.String())

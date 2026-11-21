@@ -59,7 +59,7 @@ func createOfflineGrant(tx *sql.Tx, l *model.ConnectionLease, e *model.UserSubsc
 func loadOfflineGrant(q portalQuery, node, id string) (model.OfflineGrant, error) {
 	var g model.OfflineGrant
 	var authorized, until int64
-	err := q.QueryRow(`SELECT l.id,l.node_id,l.user_id,l.subscription_id,l.session_id,o.credential_hash,o.authorized_at,l.expires,o.normal_budget,o.normal_unlimited,o.emergency_budget,o.emergency_used,l.upload,l.download,l.revision,r.version,l.bandwidth,r.pending,l.closed,l.revoked,o.report_version FROM portal_offline_grants o JOIN portal_leases l ON l.id=o.lease_id JOIN portal_rates r ON r.lease_id=l.id WHERE l.id=? AND l.node_id=?`, id, node).Scan(&g.ID, &g.NodeID, &g.UserID, &g.SubscriptionID, &g.SessionID, &g.CredentialHash, &authorized, &until, &g.NormalBudgetBytes, &g.NormalUnlimited, &g.EmergencyBudgetBytes, &g.EmergencyUsedBytes, &g.UploadBytes, &g.DownloadBytes, &g.Revision, &g.RateVersion, &g.BandwidthBytesPerSecond, &g.RatePending, &g.Closed, &g.Revoked, &g.ReportVersion)
+	err := q.QueryRow(`SELECT l.id,l.node_id,l.user_id,l.subscription_id,l.session_id,o.credential_hash,o.authorized_at,l.expires,o.normal_budget,o.normal_unlimited,o.emergency_budget,o.emergency_used,l.upload,l.download,l.revision,r.version,l.bandwidth,r.pending,l.closed,l.revoked,o.report_version,l.client_ip FROM portal_offline_grants o JOIN portal_leases l ON l.id=o.lease_id JOIN portal_rates r ON r.lease_id=l.id WHERE l.id=? AND l.node_id=?`, id, node).Scan(&g.ID, &g.NodeID, &g.UserID, &g.SubscriptionID, &g.SessionID, &g.CredentialHash, &authorized, &until, &g.NormalBudgetBytes, &g.NormalUnlimited, &g.EmergencyBudgetBytes, &g.EmergencyUsedBytes, &g.UploadBytes, &g.DownloadBytes, &g.Revision, &g.RateVersion, &g.BandwidthBytesPerSecond, &g.RatePending, &g.Closed, &g.Revoked, &g.ReportVersion, &g.ClientIP)
 	g.Version = model.OfflineAdmissionVersion
 	g.AuthorizedAt, g.OfflineUntil = time.Unix(authorized, 0).UTC(), time.Unix(until, 0).UTC()
 	if err == nil {
@@ -69,7 +69,7 @@ func loadOfflineGrant(q portalQuery, node, id string) (model.OfflineGrant, error
 			g.Billing = &state.Grant
 			g.NodeQuota = state.NodeQuota
 			if state.NodeQuota != nil {
-				g.ConnectionSlotsVersion = 1
+				g.ConnectionSlotsVersion = model.ConnectionSlotsVersion
 				g.SlotReleased = state.SlotReleased
 				if !state.AuthorizationUntil.IsZero() {
 					g.OfflineUntil = state.AuthorizationUntil
@@ -78,22 +78,6 @@ func loadOfflineGrant(q portalQuery, node, id string) (model.OfflineGrant, error
 		}
 	}
 	return g, notFound(err)
-}
-
-func (s *Store) AcquireOfflineGrant(node, connection, password string) (model.OfflineGrant, error) {
-	l, err := s.AcquireLease(node, connection, password, true)
-	if err != nil {
-		return model.OfflineGrant{}, err
-	}
-	return loadOfflineGrant(s.DB, node, l.ID)
-}
-
-func (s *Store) AcquireProtocolOfflineGrant(node, connection, password, protocol string) (model.OfflineGrant, error) {
-	lease, err := s.AcquireProtocolLease(node, connection, password, protocol, true)
-	if err != nil {
-		return model.OfflineGrant{}, err
-	}
-	return loadOfflineGrant(s.DB, node, lease.ID)
 }
 
 func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model.OfflineGrant, error) {
@@ -215,6 +199,16 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			return empty, err
 		}
 		g.Revoked = g.Revoked || now.Before(g.AuthorizedAt) || !g.OfflineUntil.After(now) || !entitlementAllows(e, node) || !active || validCredential != 1 || usable != 1 || gate != "true" || hold == "true"
+		// A v2-to-v3 upgrade may reveal several HY2 instances behind one IP.
+		// Retain the oldest allowed slots on their next report; accounting below
+		// still accepts real usage from every instance being stopped.
+		if !u.Closed && !g.Revoked && !g.SlotReleased && e.Occupied > e.MaxConnections {
+			retained, checkErr := onlineSlotRetained(tx, g.SubscriptionID, g.ID, e.MaxConnections, now)
+			if checkErr != nil {
+				return empty, checkErr
+			}
+			g.Revoked = !retained
+		}
 		if u.Closed {
 			remaining := int64(0)
 			if !g.NormalUnlimited {
@@ -273,7 +267,9 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 				}
 			}
 		}
-		acquireOfflineSlot(&g, billingState, u, e)
+		if err = acquireOfflineSlot(tx, &g, billingState, u, e, now); err != nil {
+			return empty, err
+		}
 		budget := g.NormalBudgetBytes + g.EmergencyBudgetBytes
 		if g.NormalUnlimited {
 			budget = total

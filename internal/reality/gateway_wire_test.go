@@ -139,7 +139,7 @@ func testRealityGuardedWire(t *testing.T, binary string, xray bool) {
 					}
 					return password, nil
 				},
-				Connect: func(_ context.Context, credential string) (hy.Client, error) {
+				Connect: func(_ context.Context, credential, clientIP string) (hy.Client, error) {
 					c, _, e := hy.NewClient(&hy.Config{ServerAddr: packet.LocalAddr(), Auth: credential, TLSConfig: hy.TLSConfig{ServerName: "example.com", RootCAs: pool}, QUICConfig: hy.QUICConfig{DisableChromeParrot: true}})
 					return c, e
 				},

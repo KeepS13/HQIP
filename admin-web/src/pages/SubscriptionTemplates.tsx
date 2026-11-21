@@ -63,8 +63,8 @@ export function TemplateFacts({ value }: { value: SubscriptionTemplate }) {
         </dd>
       </div>
       <div>
-        <dt>每份连接上限</dt>
-        <dd>{value.maxConnections} 个 VPN 连接</dd>
+        <dt>每份同时在线上限</dt>
+        <dd>{value.maxConnections} 个</dd>
       </div>
       <div>
         <dt>每份分配节点</dt>
@@ -101,7 +101,7 @@ function SubscriptionCardPreview({ value, price }: {
         <div><dt>一次性总流量</dt><dd>{value.quotaBytes === null ? "不限量" : Number.isFinite(value.quotaBytes) && value.quotaBytes > 0 ? bytes(value.quotaBytes) : "—"}</dd></div>
         <div><dt>有效期</dt><dd>开通后 {quantity(value.validityDays)} 天</dd></div>
         <div><dt>共享带宽</dt><dd>{value.bandwidthMbps === null ? "不限速" : `${quantity(value.bandwidthMbps)} Mbps`}</dd></div>
-        <div><dt>同时在线连接</dt><dd>{quantity(value.maxConnections)} 个</dd></div>
+        <div><dt>同时在线</dt><dd>{quantity(value.maxConnections)} 个</dd></div>
         <div><dt>每份分配节点</dt><dd>{quantity(value.nodesPerSubscription)} 个</dd></div>
       </dl>
       {!!lines.length && <ul className="subscription-product-description">{lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}
@@ -384,8 +384,8 @@ function TemplateEditor({
                     />
                   </Field>
                   <Field
-                    label="每份同时在线连接数"
-                    hint="仅统计 VPN 连接，不含登录。"
+                    label="每份同时在线上限"
+                    hint="HY2 每个在线客户端实例占一个名额；VLESS 按来源 IP 去重。两者合计，跨节点共享上限；分配节点数独立设置。"
                   >
                     <input
                       required

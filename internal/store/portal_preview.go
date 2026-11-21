@@ -86,14 +86,15 @@ func (s *Store) PreviewSubscriptionTemplate(id string, p model.SubscriptionTempl
 		for _, node := range nodes {
 			allowed[node] = true
 		}
-		rows, err := tx.Query("SELECT id,node_id FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? ORDER BY created_at,rowid", m.id, s.Now().Unix())
+		rows, err := tx.Query("SELECT l.id,l.node_id,l.client_ip,"+onlineProtocolSQL+" FROM portal_leases l WHERE l.subscription_id=? AND l.closed=0 AND l.revoked=0 AND l.expires>? ORDER BY l.created_at,l.rowid", m.id, s.Now().Unix())
 		if err != nil {
 			return out, err
 		}
-		rank := 0
+		retained := map[string]bool{}
 		for rows.Next() {
 			l := ClosingConnection{UserID: m.user, SubscriptionID: m.id}
-			if err = rows.Scan(&l.ID, &l.NodeID); err != nil {
+			var ip, protocol string
+			if err = rows.Scan(&l.ID, &l.NodeID, &ip, &protocol); err != nil {
 				rows.Close()
 				return out, err
 			}
@@ -103,17 +104,15 @@ func (s *Store) PreviewSubscriptionTemplate(id string, p model.SubscriptionTempl
 				l.Reason = "订阅已停用"
 			case !allowed[l.NodeID]:
 				l.Reason = "节点已移出订阅"
-			case rank >= p.MaxConnections:
-				l.Reason = "超过新的并发连接上限"
 			case p.QuotaBytes != nil && e.UsedBytes >= *p.QuotaBytes:
 				l.Reason = "已用流量达到新额度"
 			case p.QuotaBytes != nil && e.UsedBytes+e.ReservedBytes > *p.QuotaBytes:
 				l.Reason = "需结清已发放预算后应用新额度"
+			case !keepOnlineSlot(retained, protocol, ip, l.ID, p.MaxConnections):
+				l.Reason = "超过新的同时在线上限"
 			}
 			if l.Reason != "" {
 				out.ConnectionsToClose = append(out.ConnectionsToClose, l)
-			} else {
-				rank++
 			}
 		}
 		err = rows.Err()

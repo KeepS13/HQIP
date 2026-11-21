@@ -20,9 +20,6 @@ func releaseOfflineSlot(tx *sql.Tx, g *model.OfflineGrant, state *leaseBilling, 
 	if state.AuthorizationUntil.IsZero() {
 		state.AuthorizationUntil = g.OfflineUntil
 	}
-	if _, err := tx.Exec("INSERT INTO metadata(key,value) VALUES('connection_slots_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
-		return err
-	}
 	if u.SlotAction != "release" || state.SlotReleased {
 		return nil
 	}
@@ -40,15 +37,20 @@ func releaseOfflineSlot(tx *sql.Tx, g *model.OfflineGrant, state *leaseBilling, 
 
 // Reacquisition never discards accounting when the subscription is full. The
 // acknowledged grant remains released, allowing a later idempotent retry.
-func acquireOfflineSlot(g *model.OfflineGrant, state *leaseBilling, u model.OfflineUsage, e *model.UserSubscription) {
+func acquireOfflineSlot(tx *sql.Tx, g *model.OfflineGrant, state *leaseBilling, u model.OfflineUsage, e *model.UserSubscription, now time.Time) error {
 	if state == nil || state.AuthorizationUntil.IsZero() {
-		return
+		return nil
 	}
 	state.AuthorizationUntil = g.OfflineUntil
-	if u.SlotAction == "acquire" && state.SlotReleased && !g.Revoked && e.Occupied < e.MaxConnections {
-		state.SlotReleased = false
+	if u.SlotAction == "acquire" && state.SlotReleased && !g.Revoked {
+		available, err := onlineSlotAvailable(tx, g.SubscriptionID, state.Grant.Protocol, g.ClientIP, e.Occupied, e.MaxConnections, now)
+		if err != nil {
+			return err
+		}
+		state.SlotReleased = !available
 	}
 	g.SlotReleased = state.SlotReleased
+	return nil
 }
 
 func offlineSlotExpiry(g model.OfflineGrant, now time.Time) int64 {

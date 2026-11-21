@@ -109,9 +109,11 @@ func randomConnectionID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func (a *Admission) open(ctx context.Context, connectionID, password string, closeConnection func()) (*connectionLease, string, error) {
+func (a *Admission) open(ctx context.Context, connectionID, password, clientIP string, closeConnection func()) (*connectionLease, string, error) {
 	start := time.Now()
-	g, err := a.request(ctx, "/admission", map[string]string{"connectionId": connectionID, "password": password, "billingCapability": billing.Capability})
+	// The ingress supplies the peer address; subscription contents and auth
+	// headers never choose the IP used by the shared online limit.
+	g, err := a.request(ctx, "/admission", map[string]string{"connectionId": connectionID, "password": password, "clientIP": clientIP, "billingCapability": billing.Capability})
 	if err != nil {
 		return nil, "", err
 	}

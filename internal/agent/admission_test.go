@@ -31,7 +31,7 @@ func TestAdmissionActivationRevokesLegacyAndKeepsProbes(t *testing.T) {
 	if err := a.applyDesired(d); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"connectionId":"` + strings.Repeat("a", 64) + `","password":"` + firstPassword + `"}`
+	body := `{"clientIP":"198.51.100.1","billingCapability":"traffic-billing-v1","connectionId":"` + strings.Repeat("a", 64) + `","password":"` + firstPassword + `"}`
 	w := admissionRequest(a, "/admission", body, "127.0.0.1:30000", testSecret)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"legacy":true`) {
 		t.Fatal("legacy grant unavailable", w.Code)

@@ -54,7 +54,7 @@ function ProductFacts({ value }: { value: SubscriptionTemplate }) {
         </dd>
       </div>
       <div>
-        <dt>同时在线连接</dt>
+        <dt>同时在线上限</dt>
         <dd>{value.maxConnections} 个</dd>
       </div>
       <div>

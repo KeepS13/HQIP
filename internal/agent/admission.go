@@ -32,6 +32,7 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		ClientIP          string `json:"clientIP"`
 		ConnectionID      string `json:"connectionId"`
 		Password          string `json:"password"`
 		LegacyRenewal     string `json:"legacyRenewal,omitempty"`
@@ -42,7 +43,7 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid admission", 400)
 		return
 	}
-	password, protocol, identityErr := a.billingIdentity(body.Password, body.BillingCapability)
+	password, protocol, clientIP, identityErr := a.billingIdentity(body.Password, body.BillingCapability, body.ClientIP)
 	if identityErr != nil {
 		http.Error(w, "invalid protocol identity", 403)
 		return
@@ -82,8 +83,13 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "portal disabled", 403)
 		return
 	}
+	body.ClientIP, identityErr = model.CanonicalClientIP(clientIP)
+	if identityErr != nil {
+		http.Error(w, "missing or invalid ingress client IP; upgrade core", 400)
+		return
+	}
 	if a.offlineAllowed() || a.cachedOfflineCredential(body.Password) {
-		a.offlineAdmit(w, r, body.ConnectionID, body.Password, protocol)
+		a.offlineAdmit(w, r, body.ConnectionID, body.Password, protocol, body.ClientIP)
 		return
 	}
 	a.forwardAdmission(w, r, "/api/v1/agents/admission", body)

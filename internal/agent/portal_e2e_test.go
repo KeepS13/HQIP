@@ -104,24 +104,25 @@ func TestPortalFullChainTwoNodesRealClients(t *testing.T) {
 		t.Fatal("second transfer remained blocked")
 	}
 	t.Log("real controller + Agents + two cores: 1->2 connection shares and applied-rate ACK passed")
-	third := f.client("sing-box", singbox, 1, passwords[1], target.Certificate())
-	defer third.stop()
-	third.http.Timeout = 4 * time.Second
-	if response, e := third.http.Get(target.URL); e == nil {
-		response.Body.Close()
-		t.Fatal("third process bypassed shared connection cap")
-	}
+	f.rejectSourceIP(1, passwords[1], "127.0.0.2")
 	e, err := f.db.UserSubscription(u.ID, subscription.ID)
 	if err != nil || e.Occupied != 2 {
 		t.Fatal("cross-node occupied count incorrect", err)
 	}
 	f.fetch(first, target.URL, 64)
 	f.fetch(second, target.URL, 64)
-	third.stop()
 	second.stop()
 	// Forced process termination sends no QUIC close; the server must retain the
 	// slot until QUIC idle detection confirms closure, rather than reuse it early.
-	f.wait(45*time.Second, func() bool { e, _ := f.db.UserSubscription(u.ID, subscription.ID); return e != nil && e.Occupied == 1 }, "crashed second real connection did not release after QUIC idle closure")
+	f.wait(45*time.Second, func() bool {
+		var count int
+		_ = f.db.DB.QueryRow("SELECT COUNT(*) FROM portal_leases WHERE subscription_id=? AND closed=0 AND expires>?", subscription.ID, time.Now().Unix()).Scan(&count)
+		return count == 1
+	}, "crashed second real connection did not release after QUIC idle closure")
+	// The remaining instance keeps its own slot after the other one closes.
+	if current, err := f.db.UserSubscription(u.ID, subscription.ID); err != nil || current.Occupied != 1 {
+		t.Fatal("same-IP disconnect disturbed the remaining connection", current, err)
+	}
 	f.wait(12*time.Second, func() bool {
 		leases, _ := f.db.PortalConnections(u.ID, "")
 		for _, l := range leases {
@@ -294,14 +295,7 @@ func TestPortalSameTemplateCopiesRealClients(t *testing.T) {
 			t.Fatalf("different subscription took part of this copy's bandwidth: %+v", l)
 		}
 	}
-	extra := f.client("sing-box", singbox, 1, firstPasswords[1], target.Certificate())
-	defer extra.stop()
-	extra.http.Timeout = 4 * time.Second
-	if response, e := extra.http.Get(target.URL); e == nil {
-		response.Body.Close()
-		t.Fatal("same subscription bypassed its single connection cap across nodes")
-	}
-	extra.stop()
+	f.rejectSourceIP(1, firstPasswords[1], "127.0.0.2")
 	firstCurrent, err := f.db.UserSubscription(u.ID, firstSubscription.ID)
 	if err != nil {
 		t.Fatal(err)

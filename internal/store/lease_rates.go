@@ -15,18 +15,18 @@ func rebalancePortalRates(tx *sql.Tx, subscription string, e *model.UserSubscrip
 		id                     string
 		rate, ceiling, version int64
 		pending, revoked       bool
-		node                   string
+		node, ip, protocol     string
 	}
 	// Correlated primary-key reads avoid a hash join that scans every rate row
 	// and takes Serializable predicate locks for unrelated subscriptions.
-	rows, err := tx.Query("SELECT l.id,l.bandwidth,(SELECT ceiling FROM portal_rates WHERE lease_id=l.id),(SELECT version FROM portal_rates WHERE lease_id=l.id),(SELECT pending FROM portal_rates WHERE lease_id=l.id),l.revoked,l.node_id FROM portal_leases l WHERE l.subscription_id=? AND l.closed=0 AND l.expires>? ORDER BY l.created_at,l.rowid", subscription, now.Unix())
+	rows, err := tx.Query("SELECT l.id,l.bandwidth,(SELECT ceiling FROM portal_rates WHERE lease_id=l.id),(SELECT version FROM portal_rates WHERE lease_id=l.id),(SELECT pending FROM portal_rates WHERE lease_id=l.id),l.revoked,l.node_id,l.client_ip,"+onlineProtocolSQL+" FROM portal_leases l WHERE l.subscription_id=? AND l.closed=0 AND l.expires>? ORDER BY l.created_at,l.rowid", subscription, now.Unix())
 	if err != nil {
 		return err
 	}
 	members := []member{}
 	for rows.Next() {
 		var m member
-		if err = rows.Scan(&m.id, &m.rate, &m.ceiling, &m.version, &m.pending, &m.revoked, &m.node); err != nil {
+		if err = rows.Scan(&m.id, &m.rate, &m.ceiling, &m.version, &m.pending, &m.revoked, &m.node, &m.ip, &m.protocol); err != nil {
 			rows.Close()
 			return err
 		}
@@ -38,9 +38,10 @@ func rebalancePortalRates(tx *sql.Tx, subscription string, e *model.UserSubscrip
 		return err
 	}
 	count := 0
+	retained := map[string]bool{}
 	eligible := map[string]bool{}
 	for _, m := range members {
-		if !m.revoked && entitlementAllows(e, m.node) && count < e.MaxConnections {
+		if !m.revoked && entitlementAllows(e, m.node) && keepOnlineSlot(retained, m.protocol, m.ip, m.id, e.MaxConnections) {
 			eligible[m.id] = true
 			count++
 		}

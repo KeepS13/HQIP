@@ -14,7 +14,8 @@ import (
 
 func TestOfflineLostAdmissionResponseReusesDurableRequest(t *testing.T) {
 	now := time.Now()
-	g := offlineTestGrant(now)
+	g := quotaTestState(now, "grant-one", "hysteria2", 64<<20*100).Grant
+	g.ClientIP, g.ConnectionSlotsVersion = "198.51.100.1", model.ConnectionSlotsVersion
 	var keys []string
 	central := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]string
@@ -36,7 +37,7 @@ func TestOfflineLostAdmissionResponseReusesDurableRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	admit := func(ch string) *httptest.ResponseRecorder {
-		return admissionRequest(a, "/admission", `{"connectionId":"`+strings.Repeat(ch, 64)+`","password":"`+firstPassword+`"}`, "127.0.0.1:3000", testSecret)
+		return admissionRequest(a, "/admission", `{"clientIP":"198.51.100.1","billingCapability":"traffic-billing-v1","connectionId":"`+strings.Repeat(ch, 64)+`","password":"`+firstPassword+`"}`, "127.0.0.1:3000", testSecret)
 	}
 	if w := admit("a"); w.Code != 503 {
 		t.Fatal(w.Code)
@@ -98,7 +99,7 @@ func TestOfflineLostReportReplaysExactSnapshotBeforeNewCounters(t *testing.T) {
 	if err = a.syncOfflineState(context.Background(), &s, true); err != nil {
 		t.Fatal(err)
 	}
-	if len(reports) != 2 || !reflect.DeepEqual(reports[0],reports[1]) {
+	if len(reports) != 2 || !reflect.DeepEqual(reports[0], reports[1]) {
 		t.Fatal("uncertain report mutated during retry")
 	}
 	if err = a.syncOfflineState(context.Background(), &s, true); err != nil {

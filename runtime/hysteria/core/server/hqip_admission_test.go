@@ -24,7 +24,7 @@ func testLease(t *testing.T, budget, rate int64, expiry time.Duration) (*connect
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, _, err := a.open(context.Background(), randomConnectionID(), "random-password-012345", func() { closed.Add(1) })
+	l, _, err := a.open(context.Background(), randomConnectionID(), "random-password-012345", "198.51.100.1", func() { closed.Add(1) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestHQIPLegacyRenewalDenialClosesExactConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, _, err := a.open(context.Background(), randomConnectionID(), "old-device-password", func() { closed.Add(1) })
+	l, _, err := a.open(context.Background(), randomConnectionID(), "old-device-password", "198.51.100.1", func() { closed.Add(1) })
 	if err != nil {
 		t.Fatal(err)
 	}

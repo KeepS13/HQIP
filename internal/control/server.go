@@ -83,10 +83,9 @@ func (s *Server) AdminHandler() http.Handler {
 		"GET /api/v1/nodes/{id}/events":                 s.events,
 		"GET /api/v1/devices":                           s.listDevices, "POST /api/v1/devices": s.createDevice,
 		"GET /api/v1/devices/{id}": s.deviceDetail, "PATCH /api/v1/devices/{id}": s.updateDevice,
-		"POST /api/v1/devices/{id}/rotate":         s.rotateDevice,
-		"POST /api/v1/devices/{id}/client-account": s.clientAccount,
-		"PATCH /api/v1/devices/{id}/assignment":    s.assignment,
-		"GET /api/v1/rules":                        s.getRules, "PUT /api/v1/rules": s.putRules, "GET /api/v1/rules/export": s.exportRules,
+		"POST /api/v1/devices/{id}/rotate":      s.rotateDevice,
+		"PATCH /api/v1/devices/{id}/assignment": s.assignment,
+		"GET /api/v1/rules":                     s.getRules, "PUT /api/v1/rules": s.putRules, "GET /api/v1/rules/export": s.exportRules,
 	} {
 		m.Handle(pattern, s.auth(handler, false))
 	}
@@ -112,27 +111,14 @@ func (s *Server) PublicHandler() http.Handler {
 	m.HandleFunc("GET /api/v1/agents/config", s.agentConfig)
 	m.HandleFunc("POST /api/v1/agents/report", s.agentReport)
 	m.HandleFunc("GET /sub/{token}", s.subscription)
-	legacy := http.NewServeMux()
-	legacy.HandleFunc("POST /api/v1/client/login", s.clientLogin)
-	legacy.HandleFunc("POST /api/v1/client/refresh", s.clientRefresh)
-	legacy.HandleFunc("POST /api/v1/client/logout", s.clientLogout)
-	legacy.HandleFunc("GET /api/v1/client/profile", s.clientProfile)
-	legacy.HandleFunc("POST /api/v1/client/status", s.clientStatus)
-	legacy.HandleFunc("GET /api/v1/client/rules/{hash}", s.clientRules)
-	m.Handle("/api/v1/client/", s.legacyClientGate(legacy))
+	// The retired device-account API cannot create another authorization path.
+	// Current clients use the account portal; subscription URLs remain unchanged.
+	m.HandleFunc("/api/v1/client/", func(w http.ResponseWriter, r *http.Request) {
+		fail(w, http.StatusGone, "请升级 HQIP 3.0，使用邮箱账户在浏览器登录")
+	})
 	s.registerPortalPublic(m)
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	return s.operationRequests(m, s.headers(m, s.opts.UserOrigin), false)
-}
-
-func (s *Server) legacyClientGate(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.Store.PortalEnabled() {
-			fail(w, http.StatusUpgradeRequired, "请升级 HQIP 3.0，使用邮箱账户在浏览器登录")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) headers(m http.Handler, origin string) http.Handler {

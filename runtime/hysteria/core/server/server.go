@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"math/rand"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -188,7 +189,8 @@ func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var id string
 		if h.config.HQIPAdmission != nil {
 			var err error
-			h.lease, id, err = h.config.HQIPAdmission.open(h.conn.Context(), h.admissionID, authReq.Auth, func() { _ = h.conn.CloseWithError(closeErrCodeTrafficLimitReached, "HQIP authorization ended") })
+			peerIP, _, _ := net.SplitHostPort(h.conn.RemoteAddr().String())
+			h.lease, id, err = h.config.HQIPAdmission.open(h.conn.Context(), h.admissionID, authReq.Auth, peerIP, func() { _ = h.conn.CloseWithError(closeErrCodeTrafficLimitReached, "HQIP authorization ended") })
 			ok = err == nil
 			if h.lease != nil {
 				h.outbound = &leasedOutbound{base: h.config.Outbound, lease: h.lease}

@@ -6,6 +6,6 @@ import (
 )
 
 // Test-only hook to exercise the production gateway marker with local CAs.
-func RealityBillingPasswordForTest(node, token, password string) (string, error) {
-	return (&Agent{cfg: model.AgentConfig{NodeID: node, Token: token}, now: time.Now}).realityBillingPassword(password)
+func RealityBillingPasswordForTest(node, token, password, clientIP string) (string, error) {
+	return (&Agent{cfg: model.AgentConfig{NodeID: node, Token: token}, now: time.Now}).realityBillingPassword(password, clientIP)
 }

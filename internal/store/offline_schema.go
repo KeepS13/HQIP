@@ -27,7 +27,7 @@ func migrateOffline(tx *sql.Tx, postgres bool) error {
 		if version != "1" {
 			return errors.New("离线授权 schema 版本不兼容")
 		}
-		return nil
+		return migrateOnlineIPs(tx)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -43,8 +43,10 @@ func migrateOffline(tx *sql.Tx, postgres bool) error {
 			}
 		}
 	}
-	_, err = tx.Exec("INSERT INTO metadata(key,value) VALUES('offline_admission_version','1')")
-	return err
+	if _, err = tx.Exec("INSERT INTO metadata(key,value) VALUES('offline_admission_version','1')"); err != nil {
+		return err
+	}
+	return migrateOnlineIPs(tx)
 }
 
 func EnsureOfflineSchema(db *sql.DB) error {

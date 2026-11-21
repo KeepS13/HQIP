@@ -9,14 +9,18 @@ import (
 	"github.com/apernet/hysteria/core/v2/billing"
 )
 
-// AcquireNodeQuotaGrant opts into shared node quota; older callers retain
-// reserved grants. Admission, slot limits and credentials use the same locked
-// subscription transaction. No quota is multiplied by the number of parents.
-func (s *Store) AcquireNodeQuotaGrant(node, connection, password, protocol string) (model.OfflineGrant, error) {
+// AcquireNodeQuotaGrant binds the node-observed IP to shared node quota.
+// Admission, IP limits and credentials use one locked subscription transaction.
+// No quota is multiplied by the number of connections sharing an IP.
+func (s *Store) AcquireNodeQuotaGrant(node, connection, password, protocol, clientIP string) (model.OfflineGrant, error) {
 	if protocol != "hysteria2" && protocol != "vless" {
 		return model.OfflineGrant{}, ErrConflict
 	}
-	l, err := s.acquireLease(node, connection, password, protocol, true, true)
+	ip, err := model.CanonicalClientIP(clientIP)
+	if err != nil {
+		return model.OfflineGrant{}, ErrUnauthorized
+	}
+	l, err := s.acquireLease(node, connection, password, protocol, ip, true, true)
 	if err != nil {
 		return model.OfflineGrant{}, err
 	}

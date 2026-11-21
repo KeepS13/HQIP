@@ -82,10 +82,13 @@ DROP TABLE portal_plans;
 DELETE FROM portal_turnstile_tokens;
 UPDATE metadata SET value=COALESCE((SELECT value FROM metadata WHERE key='subscriptions_registration_after_reset'),value) WHERE key='portal_registration';
 DELETE FROM metadata WHERE key='subscriptions_registration_after_reset';
-DELETE FROM metadata WHERE key IN ('subscriptions_reset_ready','subscriptions_migration_id') OR key LIKE 'portal_recovery_%';
+DELETE FROM metadata WHERE key IN ('subscriptions_reset_ready','subscriptions_migration_id','online_ips_version') OR key LIKE 'portal_recovery_%';
 INSERT INTO metadata(key,value) VALUES('portal_recovery_hold','false');
 `); err != nil {
 		return err
 	}
-	return migratePortal(tx)
+	if err := migratePortal(tx); err != nil {
+		return err
+	}
+	return migrateOnlineIPs(tx)
 }

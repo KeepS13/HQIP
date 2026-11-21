@@ -42,7 +42,7 @@ func TestTrafficBillingFactorsBothDirectionsAndLegacy(t *testing.T) {
 			if _, err = store.RenewLease(node.ID, legacy.ID, model.LeaseUsage{UploadBytes: 1000, Closed: true}); err != nil {
 				t.Fatal(err)
 			}
-			lease, err := store.AcquireProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false)
+			lease, err := store.legacyProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -78,7 +78,7 @@ func TestTrafficBillingFractionDoesNotDependOnDirectionOrBatch(t *testing.T) {
 	leases := make([]model.ConnectionLease, 2)
 	for index := range leases {
 		var err error
-		leases[index], err = store.AcquireProtocolLease(node.ID, strings.Repeat(string(rune('a'+index)), 32), password, []string{"hysteria2", "vless"}[index], false)
+		leases[index], err = store.legacyProtocolLease(node.ID, strings.Repeat(string(rune('a'+index)), 32), password, []string{"hysteria2", "vless"}[index], false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func TestTrafficBillingConfirmationScopeAndExpiry(t *testing.T) {
 	quota := int64(1000000)
 	store, now, user, _, node, password := portalFixture(t, 1, &quota)
 	enableBilling(t, store, 150, 150)
-	l, err := store.AcquireProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false)
+	l, err := store.legacyProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,13 +175,13 @@ func TestTrafficBillingTailAdmissionUsesBilledMinimum(t *testing.T) {
 			if _, err := store.DB.Exec("UPDATE portal_usage SET upload=? WHERE subscription_id=?", quota-minimum+1, user.Subscriptions[0].ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.AcquireProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false); !errors.Is(err, ErrEntitlement) {
+			if _, err := store.legacyProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false); !errors.Is(err, ErrEntitlement) {
 				t.Fatal("sub-minimum tail admitted", err)
 			}
 			if _, err := store.DB.Exec("UPDATE portal_usage SET upload=? WHERE subscription_id=?", quota-minimum, user.Subscriptions[0].ID); err != nil {
 				t.Fatal(err)
 			}
-			lease, err := store.AcquireProtocolLease(node.ID, strings.Repeat("b", 32), password, "hysteria2", false)
+			lease, err := store.legacyProtocolLease(node.ID, strings.Repeat("b", 32), password, "hysteria2", false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -215,7 +215,7 @@ func TestTrafficBillingProtocolRemainderAndReplay(t *testing.T) {
 	store, now, user, _, node, password := portalFixture(t, 2, &quota)
 	enableBilling(t, store, 150, 200)
 	for index, protocol := range []string{"hysteria2", "vless"} {
-		lease, err := store.AcquireProtocolLease(node.ID, strings.Repeat(string(rune('a'+index)), 32), password, protocol, false)
+		lease, err := store.legacyProtocolLease(node.ID, strings.Repeat(string(rune('a'+index)), 32), password, protocol, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestTrafficBillingProtocolRemainderAndReplay(t *testing.T) {
 	if sub.UsedBytes != 3 || sub.ReservedBytes != 0 {
 		t.Fatalf("bad accounting %+v", sub)
 	}
-	lease, err := store.AcquireProtocolLease(node.ID, strings.Repeat("c", 32), password, "hysteria2", false)
+	lease, err := store.legacyProtocolLease(node.ID, strings.Repeat("c", 32), password, "hysteria2", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestTrafficBillingHotChangeDoesNotRepriceOrDoubleCharge(t *testing.T) {
 	quota := int64(10000000)
 	store, now, user, _, node, password := portalFixture(t, 1, &quota)
 	enableBilling(t, store, 150, 150)
-	lease, err := store.AcquireProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false)
+	lease, err := store.legacyProtocolLease(node.ID, strings.Repeat("a", 32), password, "hysteria2", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestTrafficBillingRejectsForgedAndOverBudgetSegments(t *testing.T) {
 	quota := int64(1000000)
 	store, now, _, _, node, password := portalFixture(t, 1, &quota)
 	enableBilling(t, store, 1000, 1)
-	lease, err := store.AcquireProtocolLease(node.ID, strings.Repeat("a", 32), password, "vless", false)
+	lease, err := store.legacyProtocolLease(node.ID, strings.Repeat("a", 32), password, "vless", false)
 	if err != nil {
 		t.Fatal(err)
 	}

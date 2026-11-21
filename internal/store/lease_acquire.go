@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func (s *Store) acquireLease(node, connection, password, protocol string, withOffline bool, quotaMode ...bool) (model.ConnectionLease, error) {
+func (s *Store) acquireLease(node, connection, password, protocol, clientIP string, withOffline bool, quotaMode ...bool) (model.ConnectionLease, error) {
 	nodeQuota := len(quotaMode) == 1 && quotaMode[0] && withOffline && protocol != ""
 	if len(connection) < 16 || len(connection) > 128 || strings.ContainsAny(connection, "\r\n\x00") || len(password) != 43 {
 		return model.ConnectionLease{}, ErrUnauthorized
@@ -79,7 +79,7 @@ func (s *Store) acquireLease(node, connection, password, protocol string, withOf
 			if err != nil {
 				return empty, err
 			}
-			if old.UserID != user || old.SessionID != scope || old.Closed || old.revoked || old.SubscriptionID != e.ID || !old.ExpiresAt.After(now) {
+			if old.UserID != user || old.SessionID != scope || old.ClientIP != clientIP || old.Closed || old.revoked || old.SubscriptionID != e.ID || !old.ExpiresAt.After(now) {
 				return empty, ErrEntitlement
 			}
 			state, err := loadLeaseBilling(tx, old.ID)
@@ -132,19 +132,23 @@ func (s *Store) acquireLease(node, connection, password, protocol string, withOf
 			}
 			minimum = billing.Ceiling(model.MinimumSubscriptionLeaseBytes * policy.Multiplier)
 		}
-		if e.Occupied >= e.MaxConnections || budget < minimum {
+		availableIP, err := onlineSlotAvailable(tx, subscription, protocol, clientIP, e.Occupied, e.MaxConnections, now)
+		if err != nil {
+			return empty, err
+		}
+		if !availableIP || budget < minimum {
 			// Replays still succeed when their existing reservation fills the
 			// quota or last slot. Rejected new connections stay read-only.
 			old, err := existing()
 			if !errors.Is(err, sql.ErrNoRows) {
 				return old, err
 			}
-			if e.Occupied >= e.MaxConnections {
+			if !availableIP {
 				return empty, ErrSlots
 			}
 			return empty, ErrEntitlement
 		}
-		l := model.ConnectionLease{ID: NewID(), UserID: user, AccountingID: "subscription_" + subscription, SubscriptionID: subscription, SessionID: scope, NodeID: node, CreatedAt: now.UTC(), ExpiresAt: leaseExpiry(now, e), BandwidthBytesPerSecond: rate, BudgetBytes: budget, Revision: e.Revision, State: "active"}
+		l := model.ConnectionLease{ClientIP: clientIP, ID: NewID(), UserID: user, AccountingID: "subscription_" + subscription, SubscriptionID: subscription, SessionID: scope, NodeID: node, CreatedAt: now.UTC(), ExpiresAt: leaseExpiry(now, e), BandwidthBytesPerSecond: rate, BudgetBytes: budget, Revision: e.Revision, State: "active"}
 		l.LeaseID = l.ID
 		if withOffline {
 			l.ExpiresAt = offlineExpiry(now, e)
@@ -155,7 +159,7 @@ func (s *Store) acquireLease(node, connection, password, protocol string, withOf
 		// An absent-key SELECT before this INSERT creates a Serializable gap
 		// predicate on the shared node/connection index. Let its unique constraint
 		// arbitrate replays without making unrelated new connections conflict.
-		inserted, err := tx.Exec("INSERT INTO portal_leases(id,node_id,connection_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id,connection_id) DO NOTHING", l.ID, node, connection, user, scope, subscription, e.Revision, now.Unix(), l.ExpiresAt.Unix(), 0, budget)
+		inserted, err := tx.Exec("INSERT INTO portal_leases(id,node_id,connection_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget,client_ip) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id,connection_id) DO NOTHING", l.ID, node, connection, user, scope, subscription, e.Revision, now.Unix(), l.ExpiresAt.Unix(), 0, budget, clientIP)
 		if err != nil {
 			return empty, err
 		}

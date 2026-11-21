@@ -64,6 +64,9 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('offline_admission_version','1')"); err != nil {
 		return err
 	}
+	if err = migrateOnlineIPs(tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -109,6 +112,14 @@ func OpenPostgres(dataDir, baseURL, dsn string) (*Store, error) {
 	if err = db.QueryRow("SELECT value FROM metadata WHERE key='offline_admission_version'").Scan(&version); err != nil || version != "1" {
 		db.Close()
 		return nil, errors.New("离线授权 schema 未升级，请执行 hqip migrate-offline-admission")
+	}
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='online_ips_version'").Scan(&version); err != nil || version != "1" {
+		db.Close()
+		return nil, errors.New("在线 IP schema 未升级，请执行 hqip migrate-offline-admission")
+	}
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='connection_slots_version'").Scan(&version); err != nil || version != "3" {
+		db.Close()
+		return nil, errors.New("在线计数契约未升级，请执行 hqip migrate-offline-admission")
 	}
 	key, err := os.ReadFile(filepath.Join(dataDir, "master.key"))
 	if err != nil {

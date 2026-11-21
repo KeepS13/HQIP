@@ -32,6 +32,15 @@ func TestUnsupportedOrUnboundQueriesFailClosed(t *testing.T) {
 	}
 }
 
+// Online counting reads the immutable billing protocol without a new column.
+// Nested single-key extraction must remain compatible with the SQL adapter.
+func TestOnlineProtocolNestedExtraction(t *testing.T) {
+	q, err := translate("SELECT COUNT(DISTINCT CASE WHEN json_extract(json_extract(b.state,'$.grant'),'$.protocol')='vless' THEN COALESCE(NULLIF(l.client_ip,''),l.id) ELSE l.id END) FROM portal_leases l LEFT JOIN traffic_lease_billing b ON b.lease_id=l.id WHERE l.subscription_id=?", []driver.NamedValue{{Ordinal: 1, Value: "subscription"}})
+	if err != nil || !strings.Contains(q, "((b.state::jsonb->>'grant')::jsonb->>'protocol')='vless'") || !strings.Contains(q, "l.subscription_id=$1::text") {
+		t.Fatal("online slot query is not PostgreSQL compatible", q, err)
+	}
+}
+
 func TestPostgresRejectsUnverifiedRemoteConnections(t *testing.T) {
 	for _, dsn := range []string{"postgres://user:secret@db.example/hqip?sslmode=disable", "postgres://user:secret@db.example/hqip?sslmode=require", "postgres://user:secret@db.example/hqip?sslmode=prefer", "not a postgres config"} {
 		if _, err := Config(dsn); err == nil || strings.Contains(err.Error(), "secret") {

@@ -11,9 +11,12 @@ const EmergencyAllowanceBytes int64 = 1 << 30
 const OfflineChunkBytes int64 = 16 << 20
 
 // OfflineGrant caches verified subscription identity and durable metering.
-// With connection-slots-v1 its authorization survives release of the online
-// slot; a released slot must be acquired again before issuing a child lease.
+// Authorization survives release of the online slot; a released slot must be
+// acquired again before issuing a child lease. Version 3 counts HY2 instances
+// separately and shares VLESS slots only within the same observed ClientIP.
 type OfflineGrant struct {
+	// ClientIP binds cached reconnects to the same observed source address.
+	ClientIP                string             `json:"clientIP,omitempty"`
 	ConnectionSlotsVersion  int                `json:"connectionSlotsVersion,omitempty"`
 	SlotReleased            bool               `json:"slotReleased,omitempty"`
 	NodeQuota               *NodeQuotaSnapshot `json:"nodeQuota,omitempty"`

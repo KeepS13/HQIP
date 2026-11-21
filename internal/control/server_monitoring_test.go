@@ -106,24 +106,10 @@ func TestServerCapacityAPIIsolationAndConcurrency(t *testing.T) {
 			t.Fatalf("invalid settings accepted: %v (%d)", invalid, w.Code)
 		}
 	}
-	d, err := s.Store.CreateDevice("client")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.Store.SetClientAccount(d.ID, "monitor-user", "strong-device-password"); err != nil {
-		t.Fatal(err)
-	}
-	w = bearerRequest(s.PublicHandler(), "POST", "/api/v1/client/login", map[string]string{"username": "monitor-user", "password": "strong-device-password", "installationId": "monitor-0001", "clientName": "test"}, "")
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	var tokens model.ClientTokens
-	if err = json.Unmarshal(w.Body.Bytes(), &tokens); err != nil {
-		t.Fatal(err)
-	}
+	_, userCookie, userCSRF := portalLoginFixture(t, s, "monitor-user@example.com")
 	for _, endpoint := range []struct{ method, path string }{{"PATCH", path}, {"GET", "/api/v1/servers/" + v.ID + "/traffic?period=7d"}} {
-		if w = bearerRequest(s.AdminHandler(), endpoint.method, endpoint.path, body, tokens.AccessToken); w.Code != 401 {
-			t.Fatal("device token reached server management")
+		if w = request(s.AdminHandler(), endpoint.method, endpoint.path, body, userCookie, userCSRF); w.Code != 401 {
+			t.Fatal("user session reached server management")
 		}
 		if w = request(s.PublicHandler(), endpoint.method, endpoint.path, body, cookie, csrf); w.Code != http.StatusNotFound {
 			t.Fatal("management endpoint registered on public listener")

@@ -93,7 +93,7 @@ function SubscriptionCard({ value }: { value: UserSubscription }) {
         </span>
       </div>
       <p className="user-sub-reserved">
-        离线应急已用 {bytes(value.emergencyUsedBytes || 0)} · 许可预留 {value.offlineReservations || 0} 个名额 · 待结算预留 {bytes(value.reservedBytes)}，与已用流量分别记录。
+        待结算 {bytes(value.reservedBytes)}，与已用流量分别记录。
       </p>
       <dl className="user-sub-facts">
         <div>
@@ -109,7 +109,7 @@ function SubscriptionCard({ value }: { value: UserSubscription }) {
           </dd>
         </div>
         <div>
-          <dt>VPN 连接</dt>
+          <dt>同时在线</dt>
           <dd>
             {value.occupied} / {value.maxConnections}
           </dd>
@@ -435,7 +435,7 @@ export function UserSubscriptionDetail() {
             </span>
           </div>
           <p className="user-sub-reserved">
-            离线应急已用 {bytes(value.emergencyUsedBytes || 0)} · 许可预留 {value.offlineReservations || 0} 个名额 · 待结算预留 {bytes(value.reservedBytes)}
+            待结算 {bytes(value.reservedBytes)}
             ；实际可继续分配的流量会扣除预留。
           </p>
         </Panel>
@@ -450,7 +450,7 @@ export function UserSubscriptionDetail() {
               </dd>
             </div>
             <div>
-              <dt>VPN 连接</dt>
+              <dt>同时在线</dt>
               <dd>
                 {value.occupied} / {value.maxConnections}
               </dd>
@@ -461,7 +461,7 @@ export function UserSubscriptionDetail() {
             </div>
           </dl>
           <small className="muted">
-            本订阅的全部连接共享带宽与额度；其他订阅独立计算。
+            HY2 每个在线客户端实例占一个名额，VLESS 按来源 IP 去重，两者合计。全部连接共享本订阅的上限、带宽与流量额度。
           </small>
         </Panel>
       </div>

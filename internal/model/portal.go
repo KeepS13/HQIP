@@ -19,7 +19,7 @@ type SubscriptionTemplate struct {
 	DefaultNodeID        string                `json:"defaultNodeId"`
 	BandwidthMbps        *float64              `json:"bandwidthMbps"`
 	QuotaBytes           *int64                `json:"quotaBytes"`
-	MaxConnections       int                   `json:"maxConnections"`
+	MaxConnections       int                   `json:"maxConnections"` // Concurrent HY2 instances plus distinct VLESS IPs per subscription.
 	Revision             int64                 `json:"revision"`
 }
 type AllocationShortfall struct {
@@ -58,8 +58,8 @@ type UserSubscription struct {
 	UsedBytes              int64     `json:"usedBytes"`
 	ReservedBytes          int64     `json:"reservedBytes"`
 	BandwidthMbps          *float64  `json:"bandwidthMbps"`
-	MaxConnections         int       `json:"maxConnections"`
-	Occupied               int       `json:"occupied"`
+	MaxConnections         int       `json:"maxConnections"` // Online cap; independent of allocated node count.
+	Occupied               int       `json:"occupied"`       // HY2 instances + VLESS IPs; unknown legacy peers count separately.
 	NodeIDs                []string  `json:"nodeIds"`
 	DefaultNodeID          string    `json:"defaultNodeId"`
 	Revision               int64     `json:"revision"`
@@ -92,6 +92,8 @@ type PortalSession struct {
 	Current    bool      `json:"current"`
 }
 type ConnectionLease struct {
+	// ClientIP is observed at ingress and immutable for this connection.
+	ClientIP                string         `json:"clientIP,omitempty"`
 	Billing                 *billing.Grant `json:"billing,omitempty"`
 	OfflineReservation      bool           `json:"offlineReservation,omitempty"`
 	LastForwardingReport    *time.Time     `json:"lastForwardingReport,omitempty"`

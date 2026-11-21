@@ -11,6 +11,7 @@ func (s *Server) agentAdmission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
+		ClientIP          string `json:"clientIP"`
 		ConnectionID      string `json:"connectionId"`
 		Password          string `json:"password"`
 		BillingProtocol   string `json:"billingProtocol,omitempty"`
@@ -19,13 +20,13 @@ func (s *Server) agentAdmission(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &b) {
 		return
 	}
-	var lease model.ConnectionLease
-	var err error
-	if b.BillingCapability == "traffic-billing-v1" {
-		lease, err = s.Store.AcquireProtocolLease(node, b.ConnectionID, b.Password, b.BillingProtocol, false)
-	} else {
-		lease, err = s.Store.AcquireLease(node, b.ConnectionID, b.Password)
+	ip, err := model.CanonicalClientIP(b.ClientIP)
+	if err != nil || b.BillingCapability != "traffic-billing-v1" {
+		fail(w, http.StatusBadRequest, "节点须升级以提供真实连接来源 IP")
+		return
 	}
+	var lease model.ConnectionLease
+	lease, err = s.Store.AcquireProtocolLease(node, b.ConnectionID, b.Password, b.BillingProtocol, ip)
 	portalResult(w, lease, err)
 }
 func (s *Server) agentLeaseRenew(w http.ResponseWriter, r *http.Request) {

@@ -66,7 +66,7 @@ def validate_manifest(manifest, *, allow_legacy=False):
     billing = manifest.get('trafficBillingVersion', 0)
     quota = manifest.get('nodeQuotaVersion', 0)
     slots = manifest.get('connectionSlotsVersion', 0)
-    if type(slots) is not int or slots not in (0, 1) or slots == 1 and quota != 1:
+    if type(slots) is not int or slots not in (0, 1, 2, 3) or slots >= 1 and quota != 1:
         raise ValueError('Unsupported connection slots capability')
     if type(quota) is not int or quota not in (0, 1) or quota == 1 and (billing != 1 or offline != 1):
         raise ValueError('Unsupported node quota capability')

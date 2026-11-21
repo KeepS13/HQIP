@@ -37,7 +37,7 @@ func TestNodeQuotaOfflineOverspendReconcilesWithoutLosingUsage(t *testing.T) {
 	enableBilling(t, s, 150, 150)
 	var grants []model.OfflineGrant
 	for i, entry := range []struct{ node, password, protocol string }{{first.ID, password, "hysteria2"}, {second.ID, p2, "vless"}} {
-		g, err := s.AcquireNodeQuotaGrant(entry.node, strings.Repeat(string(rune('a'+i)), 64), entry.password, entry.protocol)
+		g, err := s.legacyNodeQuotaGrant(entry.node, strings.Repeat(string(rune('a'+i)), 64), entry.password, entry.protocol)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func TestNodeQuotaOfflineOverspendReconcilesWithoutLosingUsage(t *testing.T) {
 	if err != nil || !ack.Revoked || ack.NodeQuota.UsedUnits != 30_000_000 {
 		t.Fatal("other node did not learn aggregate exhaustion", err)
 	}
-	if _, err = s.AcquireNodeQuotaGrant(first.ID, strings.Repeat("c", 64), password, "vless"); !errors.Is(err, ErrEntitlement) {
+	if _, err = s.legacyNodeQuotaGrant(first.ID, strings.Repeat("c", 64), password, "vless"); !errors.Is(err, ErrEntitlement) {
 		t.Fatal("exhausted subscription admitted", err)
 	}
 	for _, g := range grants {
@@ -97,7 +97,7 @@ func TestNodeQuotaSnapshotRetainsLegacyReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := s.AcquireNodeQuotaGrant(node.ID, strings.Repeat("b", 64), password, "hysteria2")
+	g, err := s.legacyNodeQuotaGrant(node.ID, strings.Repeat("b", 64), password, "hysteria2")
 	if err != nil {
 		t.Fatal(err)
 	}

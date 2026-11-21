@@ -38,7 +38,7 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 		t.Fatal("requires release tag with_utls")
 	}
 	f := newPortalE2E(t, core)
-	user, subscription, passwords := f.account("billing", 8<<20, 2)
+	user, subscription, passwords := f.account("billing", 64<<20, 3)
 	f.wait(10*time.Second, func() bool {
 		nodes, err := f.db.Nodes()
 		if err != nil {
@@ -107,8 +107,8 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 			}
 			return passwords[0], nil
 		},
-		Connect: func(_ context.Context, password string) (hy.Client, error) {
-			ticket, err := agent.RealityBillingPasswordForTest(f.nodes[0].ID, token, password)
+		Connect: func(_ context.Context, password, clientIP string) (hy.Client, error) {
+			ticket, err := agent.RealityBillingPasswordForTest(f.nodes[0].ID, token, password, clientIP)
 			if err != nil {
 				return nil, err
 			}
@@ -154,8 +154,11 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	second := &http.Client{Transport: transport, Timeout: 65 * time.Second}
 	first.http.Timeout = 65 * time.Second
-	results := make(chan error, 2)
-	for _, client := range []*http.Client{first.http, second} {
+	third := f.client("sing-box", binary, 1, passwords[1], target.Certificate())
+	defer third.stop()
+	third.http.Timeout = 65 * time.Second
+	results := make(chan error, 3)
+	for _, client := range []*http.Client{first.http, second, third.http} {
 		go func(client *http.Client) {
 			response, err := client.Get(target.URL)
 			if err == nil {
@@ -194,7 +197,7 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 	}
 	confirmed := func(version int64) bool {
 		values := states()
-		if len(values) != 2 {
+		if len(values) != 3 {
 			return false
 		}
 		for _, state := range values {
@@ -205,6 +208,13 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 		return true
 	}
 	f.wait(15*time.Second, func() bool { return confirmed(version1) }, "initial segments not confirmed")
+	// All clients originate from loopback. HY2 instances remain separate from
+	// the VLESS source slot, and all three compete against the same cap.
+	current, err := f.db.UserSubscription(user.ID, subscription.ID)
+	if err != nil || current.Occupied != 3 {
+		t.Fatal("two HY2 instances plus one VLESS source did not occupy three slots", current, err)
+	}
+	f.rejectSourceIP(0, passwords[0], "127.0.0.1")
 	leases, _ := f.db.PortalConnections(user.ID, "")
 	ids := map[string]bool{}
 	for _, l := range leases {
@@ -215,15 +225,15 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 	version3 := set(25, 300)
 	f.wait(15*time.Second, func() bool { return confirmed(version3) }, "second hot update not confirmed")
 	leases, _ = f.db.PortalConnections(user.ID, "")
-	if len(leases) != 2 {
+	if len(leases) != 3 {
 		t.Fatal("hot update reconnected a lease")
 	}
 	for _, l := range leases {
-		if !ids[l.ID] || l.BandwidthBytesPerSecond != 50000 || l.Closed {
+		if !ids[l.ID] || l.BandwidthBytesPerSecond != 33333 || l.Closed {
 			t.Fatalf("hot update changed transport or real rate: %+v", l)
 		}
 	}
-	for range 2 {
+	for range 3 {
 		select {
 		case err := <-results:
 			if err != nil {
@@ -243,5 +253,5 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 		sub, err := f.db.UserSubscription(user.ID, subscription.ID)
 		return err == nil && sub.UsedBytes == units/100 && units > 0
 	}, "weighted ledger did not match confirmed raw segments")
-	t.Log("real HY2 + Reality, Agent-validated ingress, two hot switches, unchanged leases and bandwidth, exact weighted settlement passed")
+	t.Log("real two HY2 instances + one Reality source occupy three slots; full cap rejects another instance; two hot switches preserve leases, shared bandwidth and exact weighted settlement")
 }

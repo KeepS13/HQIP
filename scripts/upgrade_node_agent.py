@@ -55,15 +55,18 @@ def require_node_quota_compatible(ledger, version):
 
 def require_connection_slots_compatible(ledger, version):
     """A cached or in-flight slot release cannot be reinterpreted as held."""
-    if version == 1:
-        return
     with closing(sqlite3.connect(ledger.as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='offline_grants'").fetchone():
             for raw, in db.execute('SELECT state FROM offline_grants'):
                 state = json.loads(raw)
                 grant = state.get('grant', {})
-                if (grant.get('connectionSlotsVersion', 0) or grant.get('slotReleased')
-                        or state.get('slotAction') or (state.get('pending') or {}).get('slotAction')):
+                required = grant.get('connectionSlotsVersion', 0)
+                if grant.get('clientIP'):
+                    required = max(required, 2)
+                if (grant.get('slotReleased') or state.get('slotAction')
+                        or (state.get('pending') or {}).get('slotAction')):
+                    required = max(required, 1)
+                if version < required:
                     raise ValueError('Connection slots require a compatible Agent; preserve its ledger and fix forward')
 
 
@@ -81,8 +84,10 @@ def previous_offline_version(override, capability='offline'):
         if marker.is_symlink() or not marker.is_file():
             return 0
         record = json.loads(marker.read_text())
-        if record.get('sha256') == node_ops.digest(binary) and record.get('version') == 1:
-            return 1
+        version = record.get('version')
+        supported = (1, 2, 3) if capability == 'connection-slots' else (1,)
+        if record.get('sha256') == node_ops.digest(binary) and type(version) is int and version in supported:
+            return version
     return 0
 
 

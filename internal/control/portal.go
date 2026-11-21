@@ -434,9 +434,7 @@ func (s *Server) portalConnections(w http.ResponseWriter, r *http.Request, user,
 	if e == nil || e.Status != "active" {
 		code = "SUBSCRIPTION_UNAVAILABLE"
 		message = "请选择有效订阅；当前订阅可能已到期、移除或流量耗尽"
-	} else if occupied >= max {
-		code = "CONNECTION_LIMIT"
-		message = "在线连接数已达此订阅上限，请先断开使用此订阅的其他连接"
+
 	}
 	reply(w, 200, map[string]any{"subscriptionId": id, "selectionRevision": selectionRevision, "connections": v, "maxConnections": max, "occupied": occupied, "admissionErrorCode": code, "message": message})
 }

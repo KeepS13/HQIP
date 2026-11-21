@@ -45,7 +45,7 @@ func TestRetiredLegacyKeepsUncertainAllocationAndAcceptsLateFinal(t *testing.T) 
 			if e.UsedBytes != used || e.ReservedBytes != 10_000-used {
 				t.Fatal("unissued capacity not returned or uncertain bytes lost", e)
 			}
-			if _, err = s.AcquireNodeQuotaGrant(node.ID, strings.Repeat("b", 64), password, "hysteria2"); err != nil {
+			if _, err = s.legacyNodeQuotaGrant(node.ID, strings.Repeat("b", 64), password, "hysteria2"); err != nil {
 				t.Fatal("retired parent still blocks new slot", err)
 			}
 			u.Version = 2

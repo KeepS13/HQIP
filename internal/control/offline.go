@@ -11,6 +11,7 @@ func (s *Server) agentOfflineAdmission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		ClientIP          string `json:"clientIP"`
 		ConnectionID      string `json:"connectionId"`
 		Password          string `json:"password"`
 		BillingProtocol   string `json:"billingProtocol,omitempty"`
@@ -20,18 +21,12 @@ func (s *Server) agentOfflineAdmission(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	var grant model.OfflineGrant
-	var err error
-	if body.QuotaCapability == model.NodeQuotaCapability && body.BillingCapability == "traffic-billing-v1" {
-		grant, err = s.Store.AcquireNodeQuotaGrant(node, body.ConnectionID, body.Password, body.BillingProtocol)
-	} else if body.QuotaCapability != "" {
-		http.Error(w, "unsupported node quota capability", http.StatusBadRequest)
+	ip, err := model.CanonicalClientIP(body.ClientIP)
+	if err != nil || body.QuotaCapability != model.NodeQuotaCapability || body.BillingCapability != "traffic-billing-v1" {
+		fail(w, http.StatusBadRequest, "节点须升级以提供来源 IP 和节点额度计费")
 		return
-	} else if body.BillingCapability == "traffic-billing-v1" {
-		grant, err = s.Store.AcquireProtocolOfflineGrant(node, body.ConnectionID, body.Password, body.BillingProtocol)
-	} else {
-		grant, err = s.Store.AcquireOfflineGrant(node, body.ConnectionID, body.Password)
 	}
+	grant, err := s.Store.AcquireNodeQuotaGrant(node, body.ConnectionID, body.Password, body.BillingProtocol, ip)
 	portalResult(w, grant, err)
 }
 

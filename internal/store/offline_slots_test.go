@@ -13,7 +13,7 @@ func TestOfflineSlotsReleaseReacquireAndSettleWhileFull(t *testing.T) {
 	quota := int64(200_000_000)
 	s, now, node, password := offlineFixture(t, 1, &quota)
 	enableBilling(t, s, 150, 150)
-	first, err := s.AcquireNodeQuotaGrant(node.ID, strings.Repeat("a", 64), password, "hysteria2")
+	first, err := s.legacyNodeQuotaGrant(node.ID, strings.Repeat("a", 64), password, "hysteria2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestOfflineSlotsReleaseReacquireAndSettleWhileFull(t *testing.T) {
 	if e.Occupied != 0 || e.UsedBytes != 1500 || e.ReservedBytes != 0 {
 		t.Fatalf("release: %+v", e)
 	}
-	second, err := s.AcquireNodeQuotaGrant(node.ID, strings.Repeat("b", 64), password, "vless")
+	second, err := s.legacyNodeQuotaGrant(node.ID, strings.Repeat("b", 64), password, "vless")
 	if err != nil {
 		t.Fatal("released slot still blocks other protocol", err)
 	}
@@ -75,7 +75,7 @@ func TestOfflineSlotsConcurrentReacquisitionPreservesCap(t *testing.T) {
 	s, _, node, password := offlineFixture(t, 1, &quota)
 	var grants []model.OfflineGrant
 	for _, ch := range []string{"a", "b"} {
-		g, err := s.AcquireNodeQuotaGrant(node.ID, strings.Repeat(ch, 64), password, "hysteria2")
+		g, err := s.legacyNodeQuotaGrant(node.ID, strings.Repeat(ch, 64), password, "hysteria2")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestOfflineSlotsConcurrentReacquisitionPreservesCap(t *testing.T) {
 func TestOfflineSlotsReleaseRejectsLiveOrLegacyGrant(t *testing.T) {
 	quota := int64(200_000_000)
 	s, _, node, password := offlineFixture(t, 2, &quota)
-	g, err := s.AcquireNodeQuotaGrant(node.ID, strings.Repeat("a", 64), password, "hysteria2")
+	g, err := s.legacyNodeQuotaGrant(node.ID, strings.Repeat("a", 64), password, "hysteria2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestOfflineSlotsReacquireRejectsRevokedOrExhaustedSubscription(t *testing.T
 	for _, revoke := range []bool{false, true} {
 		quota := int64(200_000_000)
 		s, now, node, password := offlineFixture(t, 1, &quota)
-		g, err := s.AcquireNodeQuotaGrant(node.ID, strings.Repeat("a", 64), password, "hysteria2")
+		g, err := s.legacyNodeQuotaGrant(node.ID, strings.Repeat("a", 64), password, "hysteria2")
 		if err != nil {
 			t.Fatal(err)
 		}

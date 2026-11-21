@@ -171,15 +171,15 @@ func TestRecoveryWaitsForCapacityAndReadiness(t *testing.T) {
 	f.state.Occupied = 2
 	f.mu.Unlock()
 	_, err := f.c.recoveryAttempt(r)
-	if !retryable(err) || f.e.probes.Load() != 0 {
-		t.Fatal("full capacity was probed or stolen")
+	if !retryable(err) || f.e.probes.Load() != 1 {
+		t.Fatal("full IP count prevented ingress admission or resumed without a lease")
 	}
 	f.mu.Lock()
 	f.state.Occupied = 0
 	f.profile.Nodes[0].Ready = false
 	f.mu.Unlock()
 	_, err = f.c.recoveryAttempt(r)
-	if !retryable(err) || f.e.probes.Load() != 0 {
+	if !retryable(err) || f.e.probes.Load() != 1 {
 		t.Fatal("unready node rebuilt transport")
 	}
 	assertSilent(t, f.c)

@@ -205,7 +205,7 @@ func TestPortalNativeAuthorizationAndScopedDrain(t *testing.T) {
 	if w = bearerRequest(public, "POST", "/api/v3/client/connections/drain", map[string]any{"subscriptionId": "", "expectedRevision": profile.SelectionRevision}, tokens.AccessToken); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	if w = bearerRequest(public, "GET", "/api/v1/client/profile", nil, tokens.AccessToken); w.Code != 401 {
+	if w = bearerRequest(public, "GET", "/api/v1/client/profile", nil, tokens.AccessToken); w.Code != http.StatusGone {
 		t.Fatal("v2 token worked on legacy client surface")
 	}
 }

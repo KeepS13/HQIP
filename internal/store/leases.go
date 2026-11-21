@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const leaseSelect = `SELECT id,node_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget,upload,download,closed,revoked,COALESCE((SELECT version FROM portal_rates WHERE lease_id=id),1),COALESCE((SELECT pending FROM portal_rates WHERE lease_id=id),1) FROM portal_leases `
+const leaseSelect = `SELECT id,node_id,user_id,session_id,subscription_id,revision,created_at,expires,bandwidth,budget,upload,download,closed,revoked,COALESCE((SELECT version FROM portal_rates WHERE lease_id=id),1),COALESCE((SELECT pending FROM portal_rates WHERE lease_id=id),1),client_ip FROM portal_leases `
 
 type storedLease struct {
 	model.ConnectionLease
@@ -18,7 +18,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanLease(row rowScanner) (storedLease, error) {
 	var l storedLease
 	var created, expires int64
-	err := row.Scan(&l.ID, &l.NodeID, &l.UserID, &l.SessionID, &l.SubscriptionID, &l.Revision, &created, &expires, &l.BandwidthBytesPerSecond, &l.BudgetBytes, &l.UploadBytes, &l.DownloadBytes, &l.Closed, &l.revoked, &l.RateVersion, &l.RatePending)
+	err := row.Scan(&l.ID, &l.NodeID, &l.UserID, &l.SessionID, &l.SubscriptionID, &l.Revision, &created, &expires, &l.BandwidthBytesPerSecond, &l.BudgetBytes, &l.UploadBytes, &l.DownloadBytes, &l.Closed, &l.revoked, &l.RateVersion, &l.RatePending, &l.ClientIP)
 	l.LeaseID = l.ID
 	l.AccountingID = "subscription_" + l.SubscriptionID
 	l.CreatedAt = time.Unix(created, 0).UTC()
@@ -83,27 +83,30 @@ func activeCredentialSession(tx *sql.Tx, user, subscription, scope string, now t
 	}
 	return n == 1, err
 }
-func (s *Store) AcquireLease(node, connection, password string, offline ...bool) (model.ConnectionLease, error) {
-	return s.acquireLease(node, connection, password, "", len(offline) == 1 && offline[0])
-}
 
-func (s *Store) AcquireProtocolLease(node, connection, password, protocol string, offline bool) (model.ConnectionLease, error) {
+// AcquireProtocolLease admits a short online lease. The trusted node must
+// provide its observed peer IP; account/download addresses are not substitutes.
+func (s *Store) AcquireProtocolLease(node, connection, password, protocol, clientIP string) (model.ConnectionLease, error) {
 	if protocol != "hysteria2" && protocol != "vless" {
 		return model.ConnectionLease{}, ErrConflict
 	}
-	return s.acquireLease(node, connection, password, protocol, offline)
+	ip, err := model.CanonicalClientIP(clientIP)
+	if err != nil {
+		return model.ConnectionLease{}, ErrUnauthorized
+	}
+	return s.acquireLease(node, connection, password, protocol, ip, false)
 }
 
 func reconcileSubscriptionLeases(tx *sql.Tx, e *model.UserSubscription, now time.Time) error {
-	rows, err := tx.Query("SELECT id,node_id FROM portal_leases WHERE subscription_id=? AND closed=0 AND revoked=0 AND expires>? ORDER BY created_at,rowid", e.ID, now.Unix())
+	rows, err := tx.Query("SELECT l.id,l.node_id,l.client_ip,"+onlineProtocolSQL+" FROM portal_leases l WHERE l.subscription_id=? AND l.closed=0 AND l.revoked=0 AND l.expires>? ORDER BY l.created_at,l.rowid", e.ID, now.Unix())
 	if err != nil {
 		return err
 	}
-	type record struct{ id, node string }
+	type record struct{ id, node, ip, protocol string }
 	leases := []record{}
 	for rows.Next() {
 		var r record
-		if err = rows.Scan(&r.id, &r.node); err != nil {
+		if err = rows.Scan(&r.id, &r.node, &r.ip, &r.protocol); err != nil {
 			rows.Close()
 			return err
 		}
@@ -114,14 +117,12 @@ func reconcileSubscriptionLeases(tx *sql.Tx, e *model.UserSubscription, now time
 	if err != nil {
 		return err
 	}
-	retained := 0
+	retained := map[string]bool{}
 	for _, l := range leases {
-		if !entitlementAllows(e, l.node) || retained >= e.MaxConnections || e.QuotaBytes != nil && e.UsedBytes+e.ReservedBytes > *e.QuotaBytes {
+		if !entitlementAllows(e, l.node) || e.QuotaBytes != nil && e.UsedBytes+e.ReservedBytes > *e.QuotaBytes || !keepOnlineSlot(retained, l.protocol, l.ip, l.id, e.MaxConnections) {
 			if _, err = tx.Exec("UPDATE portal_leases SET revoked=1 WHERE id=?", l.id); err != nil {
 				return err
 			}
-		} else {
-			retained++
 		}
 	}
 	return rebalancePortalRates(tx, e.ID, e, now)

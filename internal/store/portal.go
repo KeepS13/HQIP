@@ -13,7 +13,7 @@ import (
 )
 
 var ErrEntitlement = errors.New("订阅不可用、已到期、额度不足或连接已撤销")
-var ErrSlots = errors.New("并发连接数已满，请先断开其他连接")
+var ErrSlots = errors.New("同时在线数已达上限，请先断开其他客户端")
 
 type portalQuery interface{ QueryRow(string, ...any) *sql.Row }
 

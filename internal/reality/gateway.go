@@ -30,7 +30,7 @@ import (
 type Config struct {
 	TLS     *utls.RealityConfig
 	Resolve func(context.Context, string) (string, error)
-	Connect func(context.Context, string) (hy.Client, error)
+	Connect func(context.Context, string, string) (hy.Client, error)
 	Idle    time.Duration
 }
 
@@ -118,9 +118,10 @@ func (g *Gateway) serveConn(ctx context.Context, raw net.Conn) {
 	}
 	// VLESS opens streams, not a QUIC VPN session. Streams sharing a credential
 	// and source IP use one local HY2 connection/lease. Different credentials or
-	// source IPs never share a budget reservation or a connection slot.
+	// source IPs keep separate local meters; central admission deduplicates the
+	// source IP across VLESS credentials/nodes belonging to the same subscription.
 	key := id + "@" + host
-	backend, err := g.acquire(ctx, key, id)
+	backend, err := g.acquire(ctx, key, id, host)
 	if err != nil {
 		return
 	}
@@ -158,7 +159,7 @@ func (c *replayConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
-func (g *Gateway) acquire(ctx context.Context, key, id string) (*group, error) {
+func (g *Gateway) acquire(ctx context.Context, key, id, clientIP string) (*group, error) {
 	g.mu.Lock()
 	if g.closed {
 		g.mu.Unlock()
@@ -191,7 +192,7 @@ func (g *Gateway) acquire(ctx context.Context, key, id string) (*group, error) {
 	g.mu.Unlock()
 	password, err := g.cfg.Resolve(ctx, id)
 	if err == nil {
-		b.client, err = g.cfg.Connect(ctx, password)
+		b.client, err = g.cfg.Connect(ctx, password, clientIP)
 	}
 	g.mu.Lock()
 	if g.closed && err == nil {

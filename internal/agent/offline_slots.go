@@ -18,17 +18,17 @@ func idleOfflineSlot(s *offlineState) bool {
 }
 
 func slotAcknowledgementValid(s *offlineState, g model.OfflineGrant, u model.OfflineUsage) bool {
-	if g.ConnectionSlotsVersion < s.Grant.ConnectionSlotsVersion || g.SlotReleased && (g.NodeQuota == nil || g.ConnectionSlotsVersion != 1) {
+	if g.ConnectionSlotsVersion < s.Grant.ConnectionSlotsVersion || g.SlotReleased && (g.NodeQuota == nil || (g.ConnectionSlotsVersion < 1 || g.ConnectionSlotsVersion > model.ConnectionSlotsVersion)) {
 		return false
 	}
-	return u.SlotAction != "release" || g.SlotReleased
+	return g.ClientIP == s.Grant.ClientIP && (u.SlotAction != "release" || g.SlotReleased)
 }
 
 // The caller holds offlineMu. Never change an in-flight report: replay it
 // first, then persist the new intent before dispatch. Lost replies cannot
 // resurrect a slot that the website has already assigned to another node.
 func (a *Agent) requestOfflineSlot(ctx context.Context, s *offlineState, action string) error {
-	if s.Grant.ConnectionSlotsVersion != 1 || s.Grant.NodeQuota == nil || !idleOfflineSlot(s) {
+	if s.Grant.ConnectionSlotsVersion < 1 || s.Grant.NodeQuota == nil || !idleOfflineSlot(s) {
 		return errOfflineDenied
 	}
 	if s.Pending != nil || s.SlotAction != "" {
@@ -49,7 +49,7 @@ func (a *Agent) requestOfflineSlot(ctx context.Context, s *offlineState, action 
 // A disconnected website retains the centrally held slot for cached reconnect;
 // the first successful synchronization releases it once the node proves idle.
 func (a *Agent) releaseIdleOfflineSlot(ctx context.Context, s *offlineState) error {
-	if s.Grant.ConnectionSlotsVersion != 1 || s.Grant.NodeQuota == nil || s.Grant.Closed || s.Grant.SlotReleased || !s.Online || !idleOfflineSlot(s) {
+	if s.Grant.ConnectionSlotsVersion < 1 || s.Grant.NodeQuota == nil || s.Grant.Closed || s.Grant.SlotReleased || !s.Online || !idleOfflineSlot(s) {
 		return nil
 	}
 	return a.requestOfflineSlot(ctx, s, "release")
@@ -58,7 +58,7 @@ func (a *Agent) releaseIdleOfflineSlot(ctx context.Context, s *offlineState) err
 // Every new connection checks control when reachable. Offline fallback is
 // allowed only for a slot still held centrally; released slots need a new ACK.
 func (a *Agent) prepareOfflineSlot(ctx context.Context, s *offlineState) error {
-	if err := a.syncOfflineState(ctx, s, s.Grant.ConnectionSlotsVersion == 1); err != nil {
+	if err := a.syncOfflineState(ctx, s, s.Grant.ConnectionSlotsVersion >= 1); err != nil {
 		return err
 	}
 	if s.Grant.SlotReleased {

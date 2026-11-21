@@ -28,7 +28,7 @@ func TestAdmissionSlowSuccessfulControlResponseIsDelivered(t *testing.T) {
 	local.Config.WriteTimeout = admissionWriteTimeout
 	local.Start()
 	defer local.Close()
-	body := `{"connectionId":"` + strings.Repeat("a", 64) + `","password":"` + firstPassword + `"}`
+	body := `{"clientIP":"198.51.100.1","billingCapability":"traffic-billing-v1","connectionId":"` + strings.Repeat("a", 64) + `","password":"` + firstPassword + `"}`
 	req, _ := http.NewRequest(http.MethodPost, local.URL+"/admission", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+testSecret)
 	response, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)

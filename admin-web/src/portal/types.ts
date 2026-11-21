@@ -121,6 +121,7 @@ export const requestLabels: Record<string, string> = {
 };
 
 export interface Connection {
+  clientIP?: string;
   id: string;
   subscriptionId: string;
   nodeId: string;
