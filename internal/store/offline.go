@@ -213,11 +213,17 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 					g.OfflineUntil = time.Unix(expires, 0).UTC()
 				}
 			}
-			// Keep each reservation's fair share topped up while online. Do not
-			// take bytes already delegated to another (possibly offline) node.
+			// Include this grant's unspent share before calculating a top-up.
+			// Repeated heartbeats must not reserve the other connection slots'
+			// shares. Billing reservations are billed bytes, not raw traffic.
 			if !g.NormalUnlimited && e.QuotaBytes != nil {
 				available := max(int64(0), *e.QuotaBytes-e.UsedBytes-e.ReservedBytes)
-				add := available / int64(max(1, e.MaxConnections-e.Occupied+1))
+				remaining := g.NormalBudgetBytes - normal
+				if billingState != nil {
+					remaining = billingState.Reserved
+				}
+				share := (available + remaining) / int64(max(1, e.MaxConnections-e.Occupied+1))
+				add := max(int64(0), share-remaining)
 				if add > 0 {
 					g.NormalBudgetBytes += add
 					if billingState != nil {
