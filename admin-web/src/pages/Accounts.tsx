@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -25,7 +25,6 @@ import {
   Loading,
   Meter,
   Modal,
-  Notice,
   PageHeader,
   Panel,
   RefreshButton,
@@ -43,7 +42,7 @@ import {
   type UserRow,
   type UserSubscription,
 } from "../portal/types";
-import { TemplateFacts } from "./SubscriptionTemplates";
+import { GrantSubscription } from "./GrantSubscription";
 import { SubscriptionExpiry } from "./SubscriptionExpiry";
 import { SubscriptionNodes } from "./SubscriptionNodes";
 import { canAdjustSubscriptionExpiry } from "../subscription-expiry";
@@ -236,96 +235,6 @@ export function Users() {
         )}
       </Panel>
     </>
-  );
-}
-
-function GrantSubscription({
-  user,
-  templates,
-  onClose,
-  onDone,
-}: {
-  user: UserProfile;
-  templates: SubscriptionTemplate[];
-  onClose: () => void;
-  onDone: () => Promise<void>;
-}) {
-  const [templateId, setTemplate] = useState("");
-  const [requestId] = useState(() => crypto.randomUUID());
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const selected = templates.find((t) => t.id === templateId);
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api(`/users/${user.user.id}/subscriptions`, "POST", {
-        templateId,
-        templateRevision: selected.revision,
-        expectedRevision: user.user.revision,
-        requestId,
-      });
-      await onDone();
-      onClose();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal
-      title="为用户赠送订阅"
-      description={user.user.email}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form className="form-stack" onSubmit={submit}>
-        <Field label="订阅模板">
-          <select
-            required
-            value={templateId}
-            onChange={(e) => setTemplate(e.target.value)}
-          >
-            <option value="">选择订阅模板</option>
-            {templates
-              .filter((t) => t.enabled)
-              .map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                  {!t.listed ? "（仅后台分配）" : ""}
-                </option>
-              ))}
-          </select>
-        </Field>
-        {selected && <TemplateFacts value={selected} />}
-        <Notice>
-          本次为管理员赠送，不收取费用、不生成付款订单。新增一份独立订阅，从现在开始计时，已有订阅继续有效。
-        </Notice>
-        <ErrorNotice message={error} />
-        <div className="modal-actions">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
-            取消
-          </Button>
-          <Button
-            type="submit"
-            busy={busy}
-            disabled={!selected?.enabled}
-            icon={Plus}
-          >
-            确认开通
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 
@@ -733,11 +642,12 @@ export function UserPage() {
       {grant &&
         (templates.data ? (
           <GrantSubscription
+            key={data.user.id}
             user={data}
             templates={templates.data}
             onClose={() => setGrant(false)}
-            onDone={async () => {
-              await profile.refresh();
+            onDone={() => {
+              void profile.refresh();
               toast("新的订阅已开通");
             }}
           />

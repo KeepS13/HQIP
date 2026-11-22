@@ -39,6 +39,10 @@
 
 导入链接接口返回 `{url: string}`；缺失或无有效订阅时 GET 返回空字符串，不产生写入。合并配置使用既有 `/usub/{token}` 格式入口，逐份保留额度；合并链接是当前订阅集合的快照。鉴权、轮换与在途响应保护见 [subscription-admission.import-links v1](contracts/subscription-import-links.md)。
 
+手动分配契约 `subscription-admission.manual-grant v1`：`POST /api/v1/users/{id}/subscriptions` 提交 `{templateId,templateRevision,expectedRevision,requestId}`，其中 `expectedRevision` 是用户版本，`requestId` 为 8–128 字节且不含 CR/LF/NUL。管理员界面提交其确认快照的版本；历史内部调用保留负数用户版本跳过检查的兼容行为。按用户与 `requestId` 幂等，重试必须沿用原模板、请求标识及版本；已提交结果的查找先于版本检查，重复请求返回同一个 `UserSubscription`。换模板必须先确认原请求结果，不能把原请求标识复用于另一模板。一次新分配在事务内创建订阅、节点分配、用量账本、首周期和 `subscription.assigned` 审计，成功重放不重复写审计。
+
+分配成功返回 200；明确的输入无效、停用、记录不存在、版本冲突或库存不足分别返回 400/403/404/409，并带 `code: SUBSCRIPTION_ASSIGNMENT_REJECTED`，允许重新加载资料、确认后发起新请求。数据库异常或提交后读取结果失败返回 503、`Retry-After: 1`、`code: SUBSCRIPTION_ASSIGNMENT_UNAVAILABLE`；不泄露数据库详情，也不表示未开通。网络超时、无有效订阅回执、普通鉴权/CSRF 失败均不能用于放弃待确认请求，必须保留原标识恢复。该业务错误码只用于分配接口，其他接口错误语义保持原样。
+
 管理和用户写请求均执行各自会话授权、CSRF、修订版本冲突检查和审计。用户实例查询始终从认证会话解析 userId；不得使用请求体中的用户 ID 决定访问权限。同一个下单请求 ID 的重试返回原订单，不重复向支付平台下单；用户明确再次购买使用新 ID。收款状态与开通状态独立，按唯一 `payment:{orderId}` 原子发放，浏览器回跳参数不构成付款证明。完整配置、异常处理与迁移说明见 [支付 FM](payments.md)。
 
 ## 认证与限制

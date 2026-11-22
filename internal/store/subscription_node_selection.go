@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
@@ -29,9 +30,19 @@ func (s *Store) automaticSubscriptionNode(ids []string) (string, error) {
 			return "", err
 		}
 		defer tx.Rollback()
-		candidates, err := subscriptionNodeCandidates(tx, ids, s.Now())
+		now := s.Now()
+		candidates, err := subscriptionNodeCandidates(tx, ids, now)
 		if err != nil {
 			return "", err
+		}
+		// Live online ranking belongs only to client selection. Allocation ranks
+		// by persisted holders and must not read the accounting identity table.
+		audience, err := nodeOnlineAudience(tx, now)
+		if err != nil {
+			return "", err
+		}
+		for i := range candidates {
+			candidates[i].users = *audience[candidates[i].id].OnlineUsers
 		}
 		sort.Slice(candidates, func(i, j int) bool {
 			a, b := candidates[i], candidates[j]
@@ -54,19 +65,24 @@ func (s *Store) automaticSubscriptionNode(ids []string) (string, error) {
 	})
 }
 
-// subscriptionNodeCandidates reads health and whole-server capacity once per snapshot.
+// subscriptionNodeCandidates reads eligibility and whole-server capacity in the
+// caller's snapshot. It deliberately leaves users unset: allocation fills that
+// field from stable holders, while client selection supplies live online counts.
 func subscriptionNodeCandidates(tx *sql.Tx, ids []string, now time.Time) ([]subscriptionNodeCandidate, error) {
-	audience, err := nodeOnlineAudience(tx, now)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []subscriptionNodeCandidate{}, nil
 	}
 	allowed := make(map[string]bool, len(ids))
+	args := make([]any, 0, len(ids))
 	for _, id := range ids {
-		allowed[id] = true
+		if !allowed[id] {
+			allowed[id] = true
+			args = append(args, id)
+		}
 	}
-	rows, err := tx.Query(`SELECT n.id,n.config,n.capabilities,s.id,s.config
+	rows, err := tx.Query(`SELECT n.id,n.config,n.capabilities,s.id,s.config,n.last_seen,n.core_healthy,n.online
 	 FROM nodes n JOIN servers s ON s.id=json_extract(n.config,'$.serverId')
-	 WHERE n.lifecycle='active' AND s.deleted_at=0`)
+	 WHERE n.lifecycle='active' AND s.deleted_at=0 AND n.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +90,15 @@ func subscriptionNodeCandidates(tx *sql.Tx, ids []string, now time.Time) ([]subs
 	nodes := []nodeServer{}
 	servers := map[string]model.Server{}
 	for rows.Next() {
-		var id, raw, caps, serverID, serverRaw string
-		if err = rows.Scan(&id, &raw, &caps, &serverID, &serverRaw); err != nil {
+		var id, raw, caps, serverID, serverRaw, online string
+		var last int64
+		var healthy bool
+		if err = rows.Scan(&id, &raw, &caps, &serverID, &serverRaw, &last, &healthy, &online); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		if !allowed[id] || audience[id].OnlineUsers == nil || !containsCapability(caps, "admission-v1") {
+		var sample map[string]int
+		if !healthy || last <= now.Add(-30*time.Second).Unix() || last > now.Unix() || json.Unmarshal([]byte(online), &sample) != nil || sample == nil || !containsCapability(caps, "admission-v1") {
 			continue
 		}
 		var node model.Node
@@ -142,7 +161,7 @@ func subscriptionNodeCandidates(tx *sql.Tx, ids []string, now time.Time) ([]subs
 	candidates := []subscriptionNodeCandidate{}
 	for _, node := range nodes {
 		if value, ok := capacity[node.server]; ok {
-			value.id, value.users = node.node, *audience[node.node].OnlineUsers
+			value.id = node.node
 			candidates = append(candidates, value)
 		}
 	}

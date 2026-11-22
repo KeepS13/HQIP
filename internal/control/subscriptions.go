@@ -1,6 +1,8 @@
 package control
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -89,11 +91,38 @@ func (s *Server) adminAssignSubscription(w http.ResponseWriter, r *http.Request)
 	if !readJSON(w, r, &b) {
 		return
 	}
+	if b.TemplateID == "" || len(b.RequestID) < 8 || len(b.RequestID) > 128 || strings.ContainsAny(b.RequestID, "\r\n\x00") {
+		reply(w, http.StatusBadRequest, map[string]string{"code": "SUBSCRIPTION_ASSIGNMENT_REJECTED", "error": "开通请求缺少有效模板或请求标识，请刷新后重试"})
+		return
+	}
 	v, err := s.Store.AssignSubscription(r.PathValue("id"), b.TemplateID, b.RequestID, b.ExpectedRevision, b.TemplateRevision)
 	if err == nil {
-		s.Store.Audit("subscription.assign", v.ID)
+		reply(w, http.StatusOK, v)
+		return
 	}
-	portalResult(w, v, err)
+	status := 0
+	if !errors.Is(err, store.ErrSubscriptionAssignmentUnconfirmed) {
+		switch {
+		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrSubscriptionStock):
+			status = http.StatusConflict
+		case errors.Is(err, store.ErrEntitlement):
+			status = http.StatusForbidden
+		case errors.Is(err, store.ErrNotFound):
+			status = http.StatusNotFound
+		}
+	}
+	if status == 0 {
+		// Do not expose database parameters or call an uncertain commit a failed
+		// grant. The caller must retain its key to recover the same subscription.
+		log.Printf("HQIP 手动订阅开通暂未确认 (%s)", databaseFailureClass(err))
+		w.Header().Set("Retry-After", "1")
+		reply(w, http.StatusServiceUnavailable, map[string]string{"code": "SUBSCRIPTION_ASSIGNMENT_UNAVAILABLE", "error": "开通结果暂未确认，请重试本次开通；不会重复赠送"})
+		return
+	}
+	// Only this explicit business rejection permits a client to discard its
+	// pending key. Authentication/CSRF errors can precede a replay of a grant
+	// whose first response was lost, so HTTP status alone is insufficient.
+	reply(w, status, map[string]string{"code": "SUBSCRIPTION_ASSIGNMENT_REJECTED", "error": err.Error()})
 }
 
 func (s *Server) adminRemoveSubscription(w http.ResponseWriter, r *http.Request) {

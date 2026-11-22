@@ -4,14 +4,24 @@ let csrfToken = "";
 export function setCSRF(value: string) {
   csrfToken = value;
 }
+// Preserve HTTP semantics for feature-specific recovery. Shared requests never
+// retry writes automatically; the caller must own an idempotency key first.
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code = "") {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 export async function api<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`${API_URL}/api/v1${path}`, {
     method,
     credentials: "include",
+    signal,
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(method !== "GET" ? { "X-CSRF-Token": csrfToken } : {}),
@@ -24,7 +34,7 @@ export async function api<T>(
   if (!response.ok) {
     if (response.status === 401 && path !== "/login")
       window.dispatchEvent(new Event("hqip:unauthorized"));
-    throw new Error(data.error || `请求失败 (${response.status})`);
+    throw new ApiError(data.error || `请求失败 (${response.status})`, response.status, data.code || "");
   }
   return data as T;
 }
