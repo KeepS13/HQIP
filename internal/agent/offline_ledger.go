@@ -39,6 +39,9 @@ func (c offlineChild) emergencyUsed() int64 {
 }
 
 type offlineState struct {
+	// A durable acknowledgement lets an idle, released grant sleep without
+	// discarding its ledger or treating unknown child usage as final.
+	AcknowledgedReport string `json:"acknowledgedReport,omitempty"`
 	// A durable slot transition fences reuse until its exact report is ACKed.
 	SlotAction string `json:"slotAction,omitempty"`
 	// Computed under offlineMu from the complete ledger; never persisted as

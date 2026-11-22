@@ -58,6 +58,17 @@ func leasePeriod(q portalQuery, lease string) (string, error) {
 // Both ledgers change in the same subscription-scoped transaction. A late
 // report uses its lease's immutable period, never the server's current period.
 func updatePeriodUsage(tx *sql.Tx, subscription, period string, upload, download, reserved int64) error {
+	if upload == 0 && download == 0 && reserved == 0 {
+		// Keep the period ownership/existence check without writing both ledgers.
+		var count int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM subscription_periods WHERE id=? AND subscription_id=?", period, subscription).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("订阅周期记录不存在")
+		}
+		return nil
+	}
 	result, err := tx.Exec("UPDATE subscription_periods SET upload=upload+?,download=download+?,reserved=reserved+? WHERE id=? AND subscription_id=?", upload, download, reserved, period, subscription)
 	if err != nil {
 		return err

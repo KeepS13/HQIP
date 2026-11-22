@@ -77,6 +77,7 @@ func settleBilling(tx *sql.Tx, subscription, period string, state *leaseBilling,
 	if err = tx.QueryRow("SELECT remainder FROM subscription_periods WHERE id=?", period).Scan(&remainder); err != nil {
 		return 0, 0, 0, err
 	}
+	previousRemainder := remainder
 	// One period remainder across both directions: splitting a byte
 	// between upload/download must not change total billed usage.
 	up := deltaUpload/100 + (deltaUpload%100+remainder)/100
@@ -95,8 +96,10 @@ func settleBilling(tx *sql.Tx, subscription, period string, state *leaseBilling,
 	if _, err = billing.Add(usedUp, usedDown); err != nil {
 		return 0, 0, 0, err
 	}
-	if _, err = tx.Exec("UPDATE subscription_periods SET remainder=? WHERE id=?", (deltaDownload%100+remainder)%100, period); err != nil {
-		return 0, 0, 0, err
+	if nextRemainder := (deltaDownload%100 + remainder) % 100; nextRemainder != previousRemainder {
+		if _, err = tx.Exec("UPDATE subscription_periods SET remainder=? WHERE id=?", nextRemainder, period); err != nil {
+			return 0, 0, 0, err
+		}
 	}
 	reserved := billing.Ceiling(max(int64(0), state.Grant.BudgetUnits-normalUnits))
 	if state.NodeQuota != nil {

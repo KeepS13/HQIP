@@ -35,12 +35,7 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 	if now.Before(s.LastWall) {
 		s.Denied = true
 	}
-	if !force && now.Before(s.RetryAt) {
-		if s.Denied {
-			return errOfflineDenied
-		}
-		return nil
-	}
+	var next model.OfflineUsage
 	if s.Pending == nil {
 		u, err := s.usage(now)
 		if err != nil {
@@ -53,9 +48,23 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 				return err
 			}
 		}
-		s.NextVersion = u.Version
-		s.Pending = &u
-		if err = a.ledger.saveOffline(*s); err != nil {
+		// Reconnects and explicit slot transitions still check control. Only
+		// periodic, unchanged reports for proven-idle grants may sleep.
+		if !force && s.idleReportConfirmed(u) {
+			return nil
+		}
+		next = u
+	}
+	if !force && now.Before(s.RetryAt) {
+		if s.Denied {
+			return errOfflineDenied
+		}
+		return nil
+	}
+	if s.Pending == nil {
+		s.NextVersion = next.Version
+		s.Pending = &next
+		if err := a.ledger.saveOffline(*s); err != nil {
 			return err
 		}
 	}
@@ -82,6 +91,7 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 			if err = s.rememberBilling(); err != nil {
 				return err
 			}
+			s.AcknowledgedReport = offlineReportDigest(u)
 			s.Pending = nil
 			if u.SlotAction == s.SlotAction {
 				s.SlotAction = ""

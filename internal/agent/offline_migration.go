@@ -76,14 +76,17 @@ func (a *Agent) retireIdleLegacyGrant(ctx context.Context, s *offlineState) erro
 	if !idleLegacyGrant(s, a.nodeQuotaEnabled()) {
 		return nil
 	}
+	force, hadPending := !s.Denied, s.Pending != nil
 	s.Denied = true
 	if err := a.ledger.saveOffline(*s); err != nil {
 		return err
 	}
-	if err := a.syncOfflineState(ctx, s, true); err != nil {
+	if err := a.syncOfflineState(ctx, s, force); err != nil {
 		return err
 	}
-	if !s.Grant.Closed && s.Pending == nil {
+	// Only an older in-flight report needs a second, updated migration report.
+	// Acknowledged unchanged retirements otherwise follow normal idle sleep.
+	if hadPending && !s.Grant.Closed && s.Pending == nil {
 		return a.syncOfflineState(ctx, s, true)
 	}
 	return nil

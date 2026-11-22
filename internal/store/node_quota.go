@@ -51,6 +51,9 @@ func addQuotaCounter(tx *sql.Tx, key string, delta int64) (int64, error) {
 	if err != nil || delta < 0 {
 		return 0, ErrConflict
 	}
+	if delta == 0 {
+		return value, nil
+	}
 	value, err = billing.Add(value, delta)
 	if err != nil {
 		return 0, err
