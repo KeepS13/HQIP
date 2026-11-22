@@ -30,7 +30,6 @@ import { SubscriptionCard, SubscriptionStatus } from "./SubscriptionCard";
 import { MyRequests } from "./SubscriptionRequests";
 export { UserOverview } from "./UserOverview";
 import "./subscriptions.css";
-import { RenewalButton } from "./Renewal";
 
 export function OwnedSubscriptions() {
   const list = useUserData<UserSubscription[]>("/subscriptions", 5000);
@@ -38,7 +37,7 @@ export function OwnedSubscriptions() {
     [status, setStatus] = useState("active");
   const requests = params.get("tab") === "requests",
     items = (list.data || []).filter(
-      (s) => status === "all" || s.status === "active",
+      (s) => status === "all" || s.status === "active" || s.status === "pending",
     );
   return (
     <>
@@ -87,7 +86,7 @@ export function OwnedSubscriptions() {
               value={status}
               onChange={(e) => setStatus(e.target.value)}
             >
-              <option value="active">有效订阅</option>
+              <option value="active">有效及待开通订阅</option>
               <option value="all">全部订阅</option>
             </select>
             <RefreshButton refresh={list.refresh} />
@@ -146,11 +145,10 @@ export function UserSubscriptionDetail() {
       <PageHeader
         eyebrow={`SUBSCRIPTION · ${value.id.slice(-8)}`}
         title={value.templateName}
-        description={`开通于 ${date(value.createdAt)} · 有效至 ${date(value.expiresAt)}`}
+        description={value.activationPending ? `创建于 ${date(value.createdAt)} · 待开通，开通后 ${value.validityDays} 天` : `开通于 ${date(value.activatedAt || value.createdAt)} · 有效至 ${date(value.expiresAt)}`}
         actions={
           <>
             <SubscriptionStatus status={value.status} />
-            <RenewalButton value={value} />
             <RefreshButton refresh={detail.refresh} />
           </>
         }
@@ -200,9 +198,9 @@ export function UserSubscriptionDetail() {
             </div>
             <div>
               <dt>总到期时间</dt>
-              <dd>{date(value.expiresAt)}</dd>
+              <dd>{value.activationPending ? "尚未开始计时" : date(value.expiresAt)}</dd>
             </div>
-            <div><dt>本期结束</dt><dd>{date(value.currentPeriodEndsAt)}</dd></div>
+            <div><dt>本期结束</dt><dd>{value.activationPending ? `正式开通后 ${value.validityDays} 天` : date(value.currentPeriodEndsAt)}</dd></div>
             {value.nextResetAt && <div><dt>下次流量重置</dt><dd>{date(value.nextResetAt)}</dd></div>}
           </dl>
           <small className="muted">
@@ -210,7 +208,8 @@ export function UserSubscriptionDetail() {
           </small>
         </Panel>
       </div>
-      {!active && (
+      {value.status === "pending" && <Notice>正在等待管理员分配节点并开通，等待期间不扣有效天数。订阅链接可以正常获取，开通后刷新原链接即可同步节点。</Notice>}
+      {!active && value.status !== "pending" && (
         <Notice tone="warning">
           这份订阅{subscriptionLabels[value.status] || "暂时不可用"}
           ，不会自动使用其他流量包。请在客户端手动选择有效订阅。

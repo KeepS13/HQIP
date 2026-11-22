@@ -2,10 +2,8 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
@@ -33,8 +31,8 @@ func grantSubscriptionWithValidity(tx *sql.Tx, user, template, key string, expec
 	return *value, nil
 }
 
-// createSubscriptionGrant owns the grant, node allocation and initial period in
-// the caller's transaction. Lock the user before checking request identity and
+// createSubscriptionGrant owns the grant, allocation and initial period (or
+// pending activation state) in the caller's transaction. Lock the user before checking request identity and
 // inventory. The returned created flag is false on replay, so audit is emitted
 // once. It never reads live lease/usage totals merely to construct a response.
 func createSubscriptionGrant(tx *sql.Tx, user, template, key string, expectedUser, expectedTemplate int64, now time.Time, validityDays int) (string, bool, error) {
@@ -73,30 +71,7 @@ func createSubscriptionGrant(tx *sql.Tx, user, template, key string, expectedUse
 	if p.Revision != expectedTemplate {
 		return "", false, ErrConflict
 	}
-	var allocated []string
-	target := p.NodesPerSubscription
-	if strings.HasPrefix(key, "payment:") {
-		orderID := strings.TrimPrefix(key, "payment:")
-		var raw string
-		if err = tx.QueryRow("SELECT template_snapshot FROM payment_orders WHERE id=?", orderID).Scan(&raw); err != nil {
-			return "", false, err
-		}
-		var snapshot model.SubscriptionTemplate
-		if err = json.Unmarshal([]byte(raw), &snapshot); err != nil {
-			return "", false, err
-		}
-		normalizeSubscriptionTemplate(&snapshot)
-		target = snapshot.NodesPerSubscription
-		var stored int
-		if e := tx.QueryRow("SELECT target_count FROM payment_node_reservations WHERE order_id=?", orderID).Scan(&stored); e == nil {
-			target = stored
-		} else if !errors.Is(e, sql.ErrNoRows) {
-			return "", false, e
-		}
-		allocated, err = reserveOrderNodes(tx, orderID, user, p, target, now)
-	} else {
-		allocated, err = allocateSubscriptionNodes(tx, user, p, now)
-	}
+	target, allocated, manual, err := initialSubscriptionAllocation(tx, user, key, p, now)
 	if err != nil {
 		return "", false, err
 	}
@@ -107,8 +82,11 @@ func createSubscriptionGrant(tx *sql.Tx, user, template, key string, expectedUse
 	if validityDays < 1 || validityDays > 36500 {
 		return "", false, errors.New("订阅有效期无效")
 	}
-	expires := now.Add(time.Duration(validityDays) * 24 * time.Hour)
-	if _, err = tx.Exec("INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", id, user, template, now.Unix(), expires.Unix(), key); err != nil {
+	expires := now.Add(time.Duration(validityDays) * 24 * time.Hour).Unix()
+	if manual {
+		expires = 0 // No deadline or accounting period exists before activation.
+	}
+	if _, err = tx.Exec("INSERT INTO portal_subscriptions(id,user_id,template_id,created_at,expires,grant_key) VALUES(?,?,?,?,?,?)", id, user, template, now.Unix(), expires, key); err != nil {
 		return "", false, err
 	}
 	if _, err = tx.Exec("INSERT INTO subscription_allocations(subscription_id,target_count,node_ids) VALUES(?,?,?)", id, target, jsonString(allocated)); err != nil {
@@ -117,7 +95,12 @@ func createSubscriptionGrant(tx *sql.Tx, user, template, key string, expectedUse
 	if _, err = tx.Exec("INSERT INTO portal_usage(subscription_id) VALUES(?)", id); err != nil {
 		return "", false, err
 	}
-	if _, err = tx.Exec("INSERT INTO subscription_periods(id,subscription_id,starts_at,ends_at) VALUES(?,?,?,?)", id, id, now.Unix(), expires.Unix()); err != nil {
+	if manual {
+		_, err = tx.Exec("INSERT INTO subscription_provisioning(subscription_id,validity_days) VALUES(?,?)", id, validityDays)
+	} else {
+		_, err = tx.Exec("INSERT INTO subscription_periods(id,subscription_id,starts_at,ends_at) VALUES(?,?,?,?)", id, id, now.Unix(), expires)
+	}
+	if err != nil {
 		return "", false, err
 	}
 	if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id=?", user); err != nil {

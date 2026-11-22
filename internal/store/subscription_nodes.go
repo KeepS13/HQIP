@@ -172,6 +172,8 @@ func (s *Store) SubscriptionNodes(user, id string) (SubscriptionNodeOptions, err
 // user lock serializes inventory changes; revision checks, node replacement and
 // lease revocation commit together. Usage, periods and unsettled reservations
 // remain owned by the same subscription so removed nodes can still settle usage.
+// The first complete assignment of a pending grant also starts its saved term;
+// later replacements cannot restart the clock or change purchased node count.
 // Invalid selections return ErrSubscriptionNodes; stale inventory/revisions
 // return ErrConflict. Reordering an unchanged selection is an unaudited no-op.
 func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected int64) (model.UserSubscription, error) {
@@ -203,7 +205,7 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 		if err != nil {
 			return empty, err
 		}
-		if current.Status == "revoked" || !current.ExpiresAt.After(now) {
+		if current.Status == "revoked" || !current.ActivationPending && !current.ExpiresAt.After(now) {
 			return empty, ErrSubscriptionNodesState
 		}
 		if current.Revision != expected {
@@ -241,7 +243,7 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 				return empty, fmt.Errorf("%w：%s（%s），请刷新节点列表", ErrConflict, v.Name, v.Reason)
 			}
 		}
-		result, err := tx.Exec(`UPDATE portal_subscriptions SET revision=revision+1 WHERE id=? AND user_id=? AND revision=? AND revoked=0 AND expires>?`, id, user, expected, s.Now().Unix())
+		result, err := tx.Exec(`UPDATE portal_subscriptions SET revision=revision+1 WHERE id=? AND user_id=? AND revision=? AND revoked=0 AND (expires>? OR EXISTS (SELECT 1 FROM subscription_provisioning p WHERE p.subscription_id=portal_subscriptions.id AND p.activated_at=0))`, id, user, expected, s.Now().Unix())
 		if err != nil {
 			return empty, err
 		}
@@ -253,6 +255,9 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 			return empty, ErrConflict
 		}
 		if _, err = tx.Exec("UPDATE subscription_allocations SET node_ids=? WHERE subscription_id=?", jsonString(ids), id); err != nil {
+			return empty, err
+		}
+		if err = activatePendingSubscription(tx, current, now); err != nil {
 			return empty, err
 		}
 		if _, err = tx.Exec("UPDATE portal_users SET revision=revision+1 WHERE id=?", user); err != nil {
@@ -269,7 +274,7 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.nodes_updated',?)", s.Now().Unix(), audit); err != nil {
 			return empty, err
 		}
-		if !current.ExpiresAt.After(s.Now()) {
+		if !updated.ExpiresAt.After(s.Now()) {
 			return empty, ErrSubscriptionNodesState
 		}
 		return *updated, tx.Commit()

@@ -141,11 +141,11 @@ function PurchaseDialog({
         <ProductFacts value={draft.template} />
         <SubscriptionDescription text={draft.template.description} />
         <Notice>
-          本次购买一份独立订阅，支付核验成功后自动开通。有效期从实际开通时起算，不会合并或延长已有订阅。
+          {draft.template.nodeIds.length === 0 ? "本次购买定制订阅，付款后提供订阅链接。管理员分配节点并正式开通时才开始计算有效期，等待期间不扣天数。" : "本次购买一份独立订阅，支付核验成功后自动开通。有效期从实际开通时起算，不会合并或延长已有订阅。"}
         </Notice>
         <p className="commerce-hint">
           下单后请在 {duration}{" "}
-          分钟内付款。价格、有效天数及分配数量在下单时锁定；节点在支付有效期内预留，使用限额以订阅当前设置为准。
+          分钟内付款。价格、有效天数及分配数量在下单时锁定；{draft.template.nodeIds.length ? "节点在支付有效期内预留" : "节点由管理员在付款后分配"}，使用限额以订阅当前设置为准。
         </p>
         <ErrorNotice message={error} />
         {error && (
@@ -219,7 +219,7 @@ export function SubscriptionCatalog({ userId }: { userId: string }) {
       <PageHeader
         eyebrow="SUBSCRIPTION CATALOG"
         title="订阅商城"
-        description="选择一份适合你的流量包，付款后自动开通，每份独立生效。"
+        description="每份订阅独立生效；定制订阅付款后由管理员分配节点并开通。"
         actions={
           <RefreshButton
             refresh={async () => {
@@ -274,14 +274,14 @@ export function SubscriptionCatalog({ userId }: { userId: string }) {
               Number.isSafeInteger(t.priceCents) &&
               t.priceCents !== null &&
               t.priceCents >= 100;
-            const hasStock = t.availableCopies > 0;
+            const hasStock = t.manualProvisioning || t.availableCopies > 0;
             return (
               <article key={t.id} className="user-sub-card commerce-product">
                 <div className="user-sub-heading">
                   <span className="user-sub-icon">
                     <Package size={23} />
                   </span>
-                  <Badge tone={hasStock ? "info" : "warning"}>{hasStock ? `您还可购买 ${t.availableCopies} 份` : "无货"}</Badge>
+                  <Badge tone={hasStock ? "info" : "warning"}>{t.manualProvisioning ? "定制 · 人工开通" : hasStock ? `您还可购买 ${t.availableCopies} 份` : "无货"}</Badge>
                 </div>
                 <h2>{t.name}</h2>
                 <p className="muted">每份独立生效，同一套餐的节点不重复分配。</p>
@@ -291,7 +291,7 @@ export function SubscriptionCatalog({ userId }: { userId: string }) {
                 </div>
                 <ProductFacts value={t} />
                 <SubscriptionDescription text={t.description} />
-                {!hasStock && (
+                {(!hasStock || t.manualProvisioning) && (
                   <p className="commerce-hint">
                     {t.availabilityReason || "暂无足够的可分配节点。"}
                   </p>

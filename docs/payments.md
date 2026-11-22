@@ -1,6 +1,6 @@
 # 支付 FM 与自动开通
 
-用户在 `https://hqip.sharevps.online/catalog` 新购订阅，每笔新购付款开通一份独立流量包，有效期从实际开通开始计算。已购且未到期的套餐也可在订阅卡片或详情手动续费，保留原订阅并追加一期，详见[套餐续费](subscription-renewals.md)。先在管理端 `/payments` 设置同一支付 FM 商户，再在 `/subscriptions` 设置模板价格。最低 1 元，金额按整数分保存；未定价模板不支持在线购买，管理员仍能直接分配。
+用户在 `https://hqip.sharevps.online/catalog` 新购订阅，每笔新购付款开通一份独立流量包，有效期从实际开通开始计算。持有且未到期的套餐（包括管理员分配）仅在账户概览“正在生效的订阅”卡片手动续费，保留原订阅和原节点并追加一期，详见[套餐续费](subscription-renewals.md)。先在管理端 `/payments` 设置同一支付 FM 商户，再在 `/subscriptions` 设置模板价格。最低 1 元，金额按整数分保存；未定价模板不支持在线购买，管理员仍能直接分配。
 
 ## 商户配置
 
@@ -36,3 +36,7 @@ PostgreSQL 新库初始化包含支付表。已有 PostgreSQL 库需停止控制
 真实验收由用户完成小额付款，再验证通知和独立订阅开通；自动化测试仅使用模拟网关，不自动付款。旧设备和 Agent 无需因支付功能升级。
 
 协议参考：[创建订单](https://docs.zhifux.com/read/zhifufm/startorder)、[通知签名](https://docs.zhifux.com/read/zhifufm/notify)、[查单权限](https://docs.zhifux.com/read/zhifufm/querybyoutno)。
+
+## 空节点订单的履约
+
+定制套餐允许候选节点为空。付款履约成功代表独立订阅已生成；这类订阅由管理员随后分配节点并正式开通，有效期从正式开通时起算。普通有节点套餐继续自动开通。定制模式、有效天数和所需节点数使用下单快照，不受付款前后的模板修改影响；未开通时提供原订阅链接，开通不更换链接。参见 [人工开通](subscription-activation.md)。

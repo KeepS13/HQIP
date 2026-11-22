@@ -1,13 +1,7 @@
 import { useState } from "react";
 import { Cpu, HardDrive, MemoryStick, RefreshCw } from "lucide-react";
-import { usePolling } from "./api";
+import { useHostResources, type Usage } from "./useHostResources";
 import "./HostResources.css";
-
-type Usage = { used: number; total: number };
-type HostResourcesView = {
-  sample: { sampledAt: string; cpuPercent: number | null; memory: Usage | null; disk: Usage | null } | null;
-  refreshing: boolean;
-};
 
 function capacity(value: number) {
   if (value >= 1024 ** 4) return `${(value / 1024 ** 4).toFixed(1)} TiB`;
@@ -16,7 +10,7 @@ function capacity(value: number) {
 }
 
 export function HostResources() {
-  const { data, error, loading, refresh } = usePolling<HostResourcesView>("/host-resources", 5000);
+  const { data, error, loading, refresh } = useHostResources();
   const [busy, setBusy] = useState(false);
   const sample = data?.sample;
   const age = sample ? Date.now() - Date.parse(sample.sampledAt) : 0;

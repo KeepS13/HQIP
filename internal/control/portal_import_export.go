@@ -1,9 +1,8 @@
 package control
 
 import (
-	"mime"
+	"errors"
 	"net/http"
-	"slices"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/store"
@@ -14,11 +13,15 @@ import (
 // node IDs/names prevents identical servers and template copies from colliding.
 func (s *Server) portalImportProfile(user string, subscriptions []string) (model.ClientProfile, error) {
 	combined := model.ClientProfile{Nodes: []model.ClientNode{}}
-	active := false
+	active, pending := false, false
 	for _, id := range subscriptions {
 		profile, subscription, err := s.Store.PortalClientProfile(user, "subscription", id)
 		if err != nil {
 			return combined, err
+		}
+		if subscription != nil && subscription.Status == "pending" {
+			pending = true
+			continue
 		}
 		if subscription == nil || subscription.Status != "active" {
 			continue
@@ -44,6 +47,9 @@ func (s *Server) portalImportProfile(user string, subscriptions []string) (model
 		}
 	}
 	if !active {
+		if pending {
+			return combined, errPortalActivationPending
+		}
 		return combined, store.ErrEntitlement
 	}
 	return combined, nil
@@ -65,6 +71,11 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.portalImportProfile(user, subscriptions)
+	if errors.Is(err, errPortalActivationPending) {
+		body, contentType := pendingPortalConfig(format)
+		s.writePortalImport(w, r, user, subscriptions, format, body, contentType)
+		return
+	}
 	if err != nil {
 		if _, _, tokenErr := s.Store.ResolvePortalImport(r.PathValue("token")); tokenErr != nil {
 			fail(w, 404, "订阅不存在或已撤销")
@@ -131,19 +142,5 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		portalResult(w, nil, err)
 		return
 	}
-	// Profile construction can span a subscription rotation. Never deliver
-	// replacement credentials to a request authenticated by the previous URL.
-	current, currentSubscriptions, err := s.Store.ResolvePortalImport(r.PathValue("token"))
-	if err != nil || current != user || !slices.Equal(currentSubscriptions, subscriptions) {
-		fail(w, 404, "订阅不存在或已撤销")
-		return
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Profile-Update-Interval", "1")
-	if r.URL.Query().Get("download") == "1" {
-		extension := map[string]string{"clash": "yaml", "v2ray": "txt", "singbox": "json"}[format]
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "hqip-" + format + "." + extension}))
-	}
-	_, _ = w.Write(body)
+	s.writePortalImport(w, r, user, subscriptions, format, body, contentType)
 }

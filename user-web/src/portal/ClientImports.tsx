@@ -8,8 +8,10 @@ import { useImportLink, type LinkAction } from "./useImportLink";
 import "./client-imports.css";
 
 function ImportSubscription({ subscription, subscriptions, client, onBusyChange }: { subscription: UserSubscription | null; subscriptions: UserSubscription[]; client: ImportClient; onBusyChange: (busy: boolean) => void }) {
-  const activeCount = subscriptions.filter((item) => item.status === "active").length;
-  const active = subscription ? subscription.status === "active" : activeCount > 0;
+  // Pending subscriptions can own an import link, but export no proxy nodes
+  // until an administrator activates them. This never authorizes connections.
+  const activeCount = subscriptions.filter((item) => ["active", "pending"].includes(item.status)).length;
+  const active = subscription ? ["active", "pending"].includes(subscription.status) : activeCount > 0;
   const detail = useImportLink(subscription?.id ?? null, active, onBusyChange);
   const [action, setAction] = useState<LinkAction | null>(null);
   const toast = useToast();
@@ -44,7 +46,7 @@ function ImportSubscription({ subscription, subscriptions, client, onBusyChange 
   }
   const scope = subscription ? "这份订阅" : "全部订阅";
   return <>
-    <Panel title={subscription?.templateName || "全部订阅的合并链接"} subtitle={subscription ? `订阅 #${subscription.id.slice(-8)} · 有效至 ${date(subscription.expiresAt)}` : `包含当前 ${activeCount} 份有效订阅，节点按所属订阅独立计量。`} action={<Badge tone={active ? "success" : "warning"}>{subscription ? subscriptionLabels[subscription.status] || "暂时不可用" : `${activeCount} 份有效订阅`}</Badge>}>
+    <Panel title={subscription?.templateName || "全部订阅的合并链接"} subtitle={subscription ? `订阅 #${subscription.id.slice(-8)} · ${subscription.activationPending ? "待开通，尚未开始计时" : `有效至 ${date(subscription.expiresAt)}`}` : `包含当前 ${activeCount} 份有效及待开通订阅，节点按所属订阅独立计量。`} action={<Badge tone={active ? "success" : "warning"}>{subscription ? subscriptionLabels[subscription.status] || "暂时不可用" : `${activeCount} 份订阅`}</Badge>}>
       <div className="client-import-body">
         <div className="client-import-context">
           <span>当前客户端：<strong>{client.name}</strong></span>
@@ -52,6 +54,7 @@ function ImportSubscription({ subscription, subscriptions, client, onBusyChange 
         </div>
         <ErrorNotice message={detail.error ? `${detail.error}；请刷新后再导入或导出。` : ""} retry={() => void detail.refresh()} />
         <ErrorNotice message={action ? "" : detail.actionError} />
+        {subscription?.status === "pending" && <Notice>订阅链接已可使用，当前配置不含节点。管理员分配节点并正式开通后开始计时，届时刷新同一链接即可获取节点。</Notice>}
         {!active && <Notice tone="warning">{subscription ? `这份订阅${subscriptionLabels[subscription.status] || "暂时不可用"}` : "目前没有有效订阅"}，暂时不能复制、轮换、导入或导出配置。</Notice>}
         {detail.loading ? <Loading /> : <>
           {url && <Field label="订阅链接"><input type="password" readOnly value={detail.busy ? "" : url} aria-label="此订阅的导入链接" /></Field>}

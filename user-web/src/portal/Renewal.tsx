@@ -46,18 +46,21 @@ function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: (
   return <Modal title="确认续费" description={`${value.templateName} · #${value.id.slice(-8)}`} onClose={() => { if (!busy) onClose(); }}>
     {detail.loading || catalog.loading || payment.loading ? <Loading /> : <form className="form-stack" onSubmit={submit}>
       <ErrorNotice message={dataError} retry={() => { void Promise.all([detail.refresh(), catalog.refresh(), payment.refresh()]); }} />
-      {!available && <Notice tone="warning">当前暂不可新建续费订单。仅支持未到期、仍在售且启用的已购套餐，并需开放在线支付。若此前已提交，请到<Link to="/orders">我的订单</Link>核对结果。</Notice>}
+      {!available && <Notice tone="warning">当前暂不可新建续费订单。仅支持本人持有、未到期、仍在售且启用的套餐，并需开放在线支付。若此前已提交，请到<Link to="/orders">我的订单</Link>核对结果。</Notice>}
       {draft && <>
         {draft.attempted && <Notice>将继续确认上一次续费请求，沿用原订单参数。请先核对<Link to="/orders">我的订单</Link>，避免重复付款。</Notice>}
         <div className="commerce-checkout-total"><span>续费一期</span><strong>{money(draft.template.priceCents!)}</strong></div>
         <dl className="user-sub-facts">
           <div><dt>续费天数</dt><dd>{draft.template.validityDays} 天</dd></div>
           <div><dt>每期流量</dt><dd>{draft.template.quotaBytes === null ? "不限量" : bytes(draft.template.quotaBytes)}</dd></div>
+          {/* Renewal targets the instance, never the template's candidate node pool. */}
+          <div><dt>保留原节点</dt><dd>{detail.data?.nodes.map(node => node.name).join("、") || "暂无分配节点"}</dd></div>
+          <div><dt>同时在线</dt><dd>{current?.occupied} / {current?.maxConnections}</dd></div>
           <div><dt>本期结束</dt><dd>{date(draft.currentPeriodEndsAt)}</dd></div>
           <div><dt>目前总到期</dt><dd>{date(draft.expiresAt)}</dd></div>
           <div><dt>预计续费后到期</dt><dd>{date(renewalExpiry(draft.expiresAt, draft.template.validityDays))}</dd></div>
         </dl>
-        <Notice>付款核验成功后延长原订阅期限，节点和导入链接保留。本期流量不变，下一期开始时重置；剩余流量不结转，也不能提前使用下一期额度。</Notice>
+        <Notice>付款核验成功后延长原订阅期限，保留原节点和导入链接，不重新分配节点。续费不增加设备名额，也不清空当前在线数。本期流量不变，下一期开始时重置；剩余流量不结转，也不能提前使用下一期额度。</Notice>
         <p className="commerce-hint">价格与天数在下单时锁定，使用限额跟随套餐设置。请在付款期限内完成支付；若核验通知到达时订阅已过期，收款将转人工处理，不会恢复过期订阅。</p>
         <ErrorNotice message={error} />
         {draft.attempted && !discard && <Button type="button" variant="ghost" disabled={busy} onClick={() => setDiscard(true)}>需要另建一笔续费订单？</Button>}
@@ -77,6 +80,6 @@ function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: (
 export function RenewalButton({ value }: { value: UserSubscription }) {
   const [open, setOpen] = useState(false);
   if (!value.renewable && !open) return null;
-  return <><Button variant="primary" icon={RefreshCw} onClick={() => setOpen(true)}>续费套餐</Button>
+  return <><Button variant="primary" icon={RefreshCw} onClick={() => setOpen(true)}>续费订阅</Button>
     {open && <RenewalDialog value={value} onClose={() => setOpen(false)} />}</>;
 }

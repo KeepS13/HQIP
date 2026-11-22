@@ -11,11 +11,11 @@ import (
 
 func userSubscription(q portalQuery, user, id string, now time.Time) (*model.UserSubscription, error) {
 	e := &model.UserSubscription{}
-	var created, expires int64
+	var created, expires, activated int64
 	var revoked, userEnabled bool
 	var liveBudget bool
 	var raw string
-	err := q.QueryRow(`SELECT s.id,s.user_id,s.template_id,s.created_at,s.expires,s.revoked,s.revision,u.enabled,t.config,x.upload+x.download,x.reserved FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id JOIN portal_templates t ON t.id=s.template_id JOIN portal_usage x ON x.subscription_id=s.id WHERE s.id=? AND s.user_id=?`, id, user).Scan(&e.ID, &e.UserID, &e.TemplateID, &created, &expires, &revoked, &e.Revision, &userEnabled, &raw, &e.UsedBytes, &e.ReservedBytes)
+	err := q.QueryRow(`SELECT s.id,s.user_id,s.template_id,s.created_at,s.expires,s.revoked,s.revision,u.enabled,t.config,x.upload+x.download,x.reserved,COALESCE(p.validity_days,0),COALESCE(p.activated_at,0) FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id JOIN portal_templates t ON t.id=s.template_id JOIN portal_usage x ON x.subscription_id=s.id LEFT JOIN subscription_provisioning p ON p.subscription_id=s.id WHERE s.id=? AND s.user_id=?`, id, user).Scan(&e.ID, &e.UserID, &e.TemplateID, &created, &expires, &revoked, &e.Revision, &userEnabled, &raw, &e.UsedBytes, &e.ReservedBytes, &e.ValidityDays, &activated)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -25,6 +25,13 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	}
 	e.CreatedAt = time.Unix(created, 0).UTC()
 	e.ExpiresAt = time.Unix(expires, 0).UTC()
+	e.ActivationPending = e.ValidityDays > 0 && activated == 0
+	if e.ActivationPending {
+		e.ExpiresAt = time.Time{}
+	} else if activated > 0 {
+		at := time.Unix(activated, 0).UTC()
+		e.ActivatedAt = &at
+	}
 	e.TemplateName = t.Name
 	e.QuotaBytes = t.QuotaBytes
 	e.BandwidthMbps = t.BandwidthMbps
@@ -32,11 +39,10 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 	if err = readSubscriptionPeriods(q, e, now); err != nil {
 		return nil, err
 	}
-	var grantKey string
-	if err = q.QueryRow("SELECT grant_key FROM portal_subscriptions WHERE id=?", id).Scan(&grantKey); err != nil {
-		return nil, err
-	}
-	e.Renewable = strings.HasPrefix(grantKey, "payment:") && !revoked && userEnabled && t.Enabled && t.Listed && t.PriceCents != nil && expires > now.Unix()
+	// Renewal extends this owned instance regardless of purchase/manual origin.
+	// Exhausted traffic and occupied slots do not prevent prepaying another term;
+	// neither the current ledger nor its connection limit changes on payment.
+	e.Renewable = !e.ActivationPending && !revoked && userEnabled && t.Enabled && t.Listed && t.PriceCents != nil && expires > now.Unix()
 	var allocated string
 	if err = q.QueryRow("SELECT target_count,node_ids FROM subscription_allocations WHERE subscription_id=?", id).Scan(&e.NodesPerSubscription, &allocated); err != nil {
 		return nil, err
@@ -92,6 +98,8 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 		e.Status = "revoked"
 	case !userEnabled || !t.Enabled:
 		e.Status = "disabled"
+	case e.ActivationPending:
+		e.Status = "pending"
 	case expires <= now.Unix():
 		e.Status = "expired"
 	case e.QuotaBytes != nil && (e.UsedBytes >= *e.QuotaBytes || !liveBudget && *e.QuotaBytes-e.UsedBytes < minimum):

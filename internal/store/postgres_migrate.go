@@ -69,7 +69,7 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	if err = snapshot.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='subscription_allocations_version'").Scan(&version); err != nil || version != "1" {
 		return report, errors.New("请先升级订阅节点分配后重新制作快照")
 	}
-	if err = snapshot.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='subscription_renewals_version'").Scan(&version); err != nil || version != "1" {
+	if err = snapshot.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='subscription_renewals_version'").Scan(&version); err != nil || version != "2" {
 		return report, errors.New("请先升级订阅周期后重新制作快照")
 	}
 	var brokenReferences int

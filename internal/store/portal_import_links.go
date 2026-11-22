@@ -82,7 +82,7 @@ func (s *Store) importSubscriptionIDs(tx *sql.Tx, user, subscription, action str
 		if err != nil {
 			return nil, err
 		}
-		if e.Status != "active" && action != "revoke" {
+		if e.Status != "active" && e.Status != "pending" && action != "revoke" {
 			if action == "get" {
 				return nil, nil
 			}
@@ -93,7 +93,7 @@ func (s *Store) importSubscriptionIDs(tx *sql.Tx, user, subscription, action str
 	if action == "revoke" {
 		return nil, nil
 	}
-	rows, err := tx.Query("SELECT id FROM portal_subscriptions WHERE user_id=? AND revoked=0 AND expires>? ORDER BY id", user, s.Now().Unix())
+	rows, err := tx.Query("SELECT s.id FROM portal_subscriptions s LEFT JOIN subscription_provisioning p ON p.subscription_id=s.id WHERE s.user_id=? AND s.revoked=0 AND (s.expires>? OR p.activated_at=0) ORDER BY s.id", user, s.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (s *Store) importSubscriptionIDs(tx *sql.Tx, user, subscription, action str
 		if err != nil {
 			return nil, err
 		}
-		if e.Status == "active" {
+		if e.Status == "active" || e.Status == "pending" {
 			active = append(active, id)
 		}
 	}

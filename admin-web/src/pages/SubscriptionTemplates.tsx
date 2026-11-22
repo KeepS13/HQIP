@@ -480,7 +480,7 @@ function TemplateEditor({
                   分配与生效说明 <ChevronDown size={14} aria-hidden="true" />
                 </summary>
                 <p>
-                  每次开通从候选池分配指定数量的节点，优先选择已分配用户较少、剩余流量较多和较早到期的服务器。同一用户在同一套餐内不会重复分配节点。
+                  已选节点时，从候选池自动分配；留空时作为定制订阅出售，付款后提供订阅链接，等待你分配节点并正式开通才开始计时。同一用户在同一套餐内不会重复分配节点。
                 </p>
                 <p>
                   修改有效期不延长已有订阅；每份分配节点数仅影响新订单和新开通。商城隐藏后，管理员仍可主动分配。
@@ -498,7 +498,7 @@ function TemplateEditor({
               )}
               {template && !preview && (
                 <Notice>
-                  保存前会预览影响范围。节点池变化会尝试补齐已有分配；分配数量只影响新开通，已用流量与到期时间保留。
+                  保存前会预览影响范围。节点池变化会尝试补齐自动分配的订阅；定制订阅仍由管理员分配，不会自动开通或替换节点。分配数量只影响新订阅。
                 </Notice>
               )}
               {preview && (
@@ -545,14 +545,14 @@ function TemplateEditor({
               <div className="subscription-picker-heading">
                 <h3 id="subscription-picker-title">
                   <Network size={17} aria-hidden="true" />
-                  可用节点
+                  可用节点（可留空）
                 </h3>
                 <span className="subscription-picker-count">
                   {selected.length} 个已选
                 </span>
               </div>
               <p className="subscription-picker-hint">
-                勾选节点组成候选池，按名称排序。
+                勾选节点组成候选池；全部留空则需付款后手动分配节点并开通，有效期从正式开通时起算。
               </p>
               <div className="subscription-picker-body">
                 <div className="subscription-picker-searchbox">

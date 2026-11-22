@@ -262,12 +262,12 @@ function OwnedSubscription({
       </div>
       <h2>{value.templateName}</h2>
       <p>
-        #{value.id.slice(-8)} · 开通于 {date(value.createdAt)}
+        #{value.id.slice(-8)} · {value.activationPending ? "创建于" : "开通于"} {date(value.activatedAt || value.createdAt)}
       </p>
       <dl className="subscription-facts">
         <div>
           <dt>到期时间</dt>
-          <dd>{date(value.expiresAt)}</dd>
+          <dd>{value.activationPending ? `待开通，开通后 ${value.validityDays} 天` : date(value.expiresAt)}</dd>
         </div>
         <div>
           <dt>独立共享带宽</dt>
@@ -302,9 +302,9 @@ function OwnedSubscription({
       {!["removed", "revoked"].includes(value.status) && (
         <div className="subscription-owned-actions">
           <Button variant="secondary" icon={CalendarClock} disabled={!canAdjustSubscriptionExpiry(value.status, value.expiresAt)} onClick={onExpiry}>调整到期时间</Button>
-          <Button variant="secondary" icon={Network} disabled={!canAdjustSubscriptionExpiry(value.status, value.expiresAt)} onClick={onNodes}>修改节点</Button>
+          <Button variant="secondary" icon={Network} disabled={value.activationPending ? value.status !== "pending" : !canAdjustSubscriptionExpiry(value.status, value.expiresAt)} onClick={onNodes}>{value.activationPending ? "分配节点并开通" : "修改节点"}</Button>
           <Button variant="danger" icon={Trash2} onClick={onRemove}>移除这一份订阅</Button>
-          {!canAdjustSubscriptionExpiry(value.status, value.expiresAt) && <small>已到期订阅不能调整时间</small>}
+          {!canAdjustSubscriptionExpiry(value.status, value.expiresAt) && <small>{value.activationPending ? "首次分配节点并开通时开始计时" : "已到期订阅不能调整时间"}</small>}
         </div>
       )}
     </article>
@@ -419,7 +419,7 @@ export function UserPage() {
     sessions = data.sessions || [],
     connections = data.connections || [];
   const shown = subscriptions.filter(
-    (s) => filter === "all" || s.status === "active",
+    (s) => filter === "all" || s.status === "active" || s.status === "pending",
   );
   return (
     <>
@@ -455,7 +455,7 @@ export function UserPage() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           >
-            <option value="active">有效订阅</option>
+            <option value="active">有效及待开通订阅</option>
             <option value="all">全部订阅</option>
           </select>
         }
@@ -490,7 +490,7 @@ export function UserPage() {
           <Empty
             icon={Package}
             title={subscriptions.length ? "没有有效订阅" : "尚未开通订阅"}
-            description="用户付款后自动开通；管理员也可直接赠送已设置的订阅。"
+            description="用户付款后生成订阅；空节点的定制订阅等待管理员分配节点并开通。"
             action={
               <Button icon={Plus} onClick={() => setGrant(true)}>
                 添加订阅
@@ -648,7 +648,7 @@ export function UserPage() {
             onClose={() => setGrant(false)}
             onDone={() => {
               void profile.refresh();
-              toast("新的订阅已开通");
+              toast("订阅已分配；空节点订阅需分配节点后正式开通");
             }}
           />
         ) : (

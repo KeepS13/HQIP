@@ -8,7 +8,7 @@ def prepare(deploy, manifest):
     version = manifest.get('subscriptionRenewalsVersion', 0)
     if not version or not deploy.postgres_enabled():
         return None
-    if version != 1:
+    if version not in (1, 2):
         raise ValueError('Unsupported subscription renewal schema')
     if deploy.postgres_info().get('subscriptionRenewalsVersion', 0) >= version:
         return None
@@ -27,7 +27,7 @@ def migrate(release, environment, state, info, execute=subprocess.run):
         return
     # A lost result is not proof of rollback. Persist the gate before execution.
     info['renewalMigrationAttempted'] = True
-    info['renewalTarget'] = 1
+    info['renewalTarget'] = 2
     (state / 'domains-state.json').write_text(json.dumps(info, indent=2))
     try:
         result = execute([str(release / 'hqip'), 'migrate-subscription-renewals'],

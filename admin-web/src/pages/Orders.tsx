@@ -343,7 +343,7 @@ export function OrderDetail() {
     none: "等待付款",
     pending: "等待开通",
     blocked: "开通受阻",
-    fulfilled: "已开通",
+    fulfilled: "订阅已生成",
   };
   return (
     <>
@@ -487,7 +487,7 @@ export function OrderDetail() {
                       <p>
                         {order.fulfilledAt
                           ? date(order.fulfilledAt)
-                          : order.orderType === "renewal" ? "到期前核验付款后追加一期；逾期收款转人工处理" : "付款确认后自动开通独立订阅"}
+                          : order.orderType === "renewal" ? "到期前核验付款后追加一期；逾期收款转人工处理" : "付款后生成独立订阅；定制订阅待分配节点并开通"}
                       </p>
                     </section>
                   </div>

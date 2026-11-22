@@ -200,16 +200,13 @@ func TestRenewalConcurrentReceiptsAppendExactlyOnce(t *testing.T) {
 }
 
 func TestRenewalEligibilityAndIdempotency(t *testing.T) {
-	for _, mode := range []string{"foreign", "admin-grant", "expired", "revoked", "disabled-user", "disabled-template", "unlisted", "unpriced", "exhausted", "stale"} {
+	for _, mode := range []string{"foreign", "expired", "revoked", "disabled-user", "disabled-template", "unlisted", "unpriced", "exhausted", "stale"} {
 		t.Run(mode, func(t *testing.T) {
 			s, now, user, template, sub, _ := renewalFixture(t)
 			in := renewalInput(template, sub, "eligibility-request")
 			switch mode {
 			case "foreign":
 				user, _ = s.RegisterPortal("foreign-renewal@example.com", "password-123")
-			case "admin-grant":
-				in.RenewalSubscriptionID = user.Subscriptions[0].ID
-				in.ExpectedSubscriptionRevision = user.Subscriptions[0].Revision
 			case "expired":
 				*now = sub.ExpiresAt
 			case "revoked":

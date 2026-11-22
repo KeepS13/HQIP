@@ -6,6 +6,8 @@ Version: 1（兼容现有单份导入链接）
 
 Consumers: user-web、第三方 Clash/Mihomo、V2Ray、sing-box 客户端。
 
+人工开通扩展：`pending` 订阅同样允许创建/复制/轮换链接并进入合并集合，见 [activation v1](../subscription-activation.md)。尚未开通的单份或仅含待开通成员的合并链接返回 200 空节点配置；Clash/sing-box 拒绝转发，V2Ray 为零条 URI。它不授予连接权限；首次分配节点并开通后刷新原链接即可。以下“有效订阅集合”在链接管理语境包含待开通成员；全部失效 403、没有合格自动节点 503 不适用于仅待开通的集合。
+
 ## 请求与响应
 
 - `GET /api/v1/user/subscriptions/{id}/import-link` 读取单份链接。

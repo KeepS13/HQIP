@@ -31,6 +31,7 @@ type AllocationShortfall struct {
 }
 type CatalogSubscription struct {
 	SubscriptionTemplate
+	ManualProvisioning bool   `json:"manualProvisioning"` // Empty pool is an orderable custom plan, not exhausted stock.
 	AvailableCopies    int    `json:"availableCopies"`
 	AvailabilityReason string `json:"availabilityReason"`
 }
@@ -43,6 +44,9 @@ type PortalUser struct {
 	Subscriptions []UserSubscription `json:"subscriptions"`
 }
 type UserSubscription struct {
+	ActivationPending      bool                 `json:"activationPending"` // No expiry/period until full manual node assignment.
+	ActivatedAt            *time.Time           `json:"activatedAt,omitempty"`
+	ValidityDays           int                  `json:"validityDays,omitempty"` // Immutable duration for manual activation.
 	CurrentPeriodID        string               `json:"currentPeriodId"`
 	CurrentPeriodStartsAt  time.Time            `json:"currentPeriodStartsAt"`
 	CurrentPeriodEndsAt    time.Time            `json:"currentPeriodEndsAt"`

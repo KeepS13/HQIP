@@ -1,4 +1,4 @@
-import { RenewalButton } from "./Renewal";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Package } from "lucide-react";
 import { Badge, Meter, bytes, date } from "../components";
@@ -20,7 +20,9 @@ export function SubscriptionStatus({ status }: { status: string }) {
     </Badge>
   );
 }
-export function SubscriptionCard({ value }: { value: UserSubscription }) {
+// The page owns optional actions so sharing this card cannot add renewal entry
+// points outside the account overview. Counts always come from the server.
+export function SubscriptionCard({ value, actions }: { value: UserSubscription; actions?: ReactNode }) {
   return (
     <article className="user-sub-card">
       <div className="user-sub-heading">
@@ -31,7 +33,7 @@ export function SubscriptionCard({ value }: { value: UserSubscription }) {
       </div>
       <h2>{value.templateName}</h2>
       <small className="user-sub-id">
-        #{value.id.slice(-8)} · {date(value.createdAt)} 开通
+        #{value.id.slice(-8)} · {date(value.activatedAt || value.createdAt)} {value.activationPending ? "创建" : "开通"}
       </small>
       <div className="user-sub-remaining">
         <strong>
@@ -54,9 +56,9 @@ export function SubscriptionCard({ value }: { value: UserSubscription }) {
       <dl className="user-sub-facts">
         <div>
           <dt>总到期时间</dt>
-          <dd>{date(value.expiresAt)}</dd>
+          <dd>{value.activationPending ? `开通后 ${value.validityDays} 天` : date(value.expiresAt)}</dd>
         </div>
-        <div><dt>本期结束</dt><dd>{date(value.currentPeriodEndsAt)}</dd></div>
+        <div><dt>本期结束</dt><dd>{value.activationPending ? "待分配节点并开通" : date(value.currentPeriodEndsAt)}</dd></div>
         <div>
           <dt>带宽</dt>
           <dd>
@@ -72,13 +74,15 @@ export function SubscriptionCard({ value }: { value: UserSubscription }) {
           </dd>
         </div>
       </dl>
-      <Link
-        className="button button-secondary full-width"
-        to={`/subscriptions/${value.id}`}
-      >
-        查看节点与导入链接 <ArrowRight size={16} />
-      </Link>
-      <div className="user-sub-actions"><RenewalButton value={value} /></div>
+      <div className="user-sub-actions">
+        <Link
+          className="button button-secondary full-width"
+          to={`/subscriptions/${value.id}`}
+        >
+          查看节点与导入链接 <ArrowRight size={16} />
+        </Link>
+        {actions}
+      </div>
     </article>
   );
 }

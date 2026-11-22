@@ -4,13 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
 )
 
-var ErrSubscriptionRenewal = errors.New("该订阅不可续费：仅支持本人已购且尚未到期的在售套餐")
+var ErrSubscriptionRenewal = errors.New("该订阅不可续费：仅支持本人持有且尚未到期的在售套餐")
 var ErrSubscriptionPeriodExpiry = errors.New("到期时间必须晚于最后一期的开始时间，不能截断已续费周期")
 
 func validateRenewalOrder(tx *sql.Tx, user string, in model.PaymentOrderInput, now time.Time) (*model.UserSubscription, error) {
@@ -31,6 +30,9 @@ func validateRenewalOrder(tx *sql.Tx, user string, in model.PaymentOrderInput, n
 // handling. Receipt, extension and fulfillment commit atomically; no provider
 // request is made here. A delayed worker cannot turn a timely receipt into an
 // expired renewal, and a late receipt can never resurrect the subscription.
+// Only append a period and extend the same instance. Keep its original grant
+// key (including manual-grant replay identity), allocations, credentials and
+// online leases; the template's candidate pool is never allocated here.
 func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time.Time) (bool, error) {
 	o := r.Order
 	claimed, err := tx.Exec("UPDATE payment_orders SET revision=revision WHERE id=? AND payment_state='paid' AND fulfillment_state!='fulfilled'", o.ID)
@@ -42,10 +44,10 @@ func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time
 	} else if n != 1 {
 		return false, nil
 	}
-	var user, template, grant string
+	var user, template string
 	var expires, revision int64
 	var revoked, enabled bool
-	err = tx.QueryRow("SELECT s.user_id,s.template_id,s.grant_key,s.expires,s.revision,s.revoked,u.enabled FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id WHERE s.id=?", o.RenewalSubscriptionID).Scan(&user, &template, &grant, &expires, &revision, &revoked, &enabled)
+	err = tx.QueryRow("SELECT s.user_id,s.template_id,s.expires,s.revision,s.revoked,u.enabled FROM portal_subscriptions s JOIN portal_users u ON u.id=s.user_id WHERE s.id=?", o.RenewalSubscriptionID).Scan(&user, &template, &expires, &revision, &revoked, &enabled)
 	if err != nil {
 		return false, err
 	}
@@ -55,7 +57,7 @@ func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time
 	}
 	message := ""
 	switch {
-	case user != o.UserID || template != o.TemplateID || !strings.HasPrefix(grant, "payment:"):
+	case user != o.UserID || template != o.TemplateID:
 		message = "续费目标不符合条件，已付款订单等待管理员处理"
 	case revoked:
 		message = "订阅已移除，已付款订单等待管理员处理"

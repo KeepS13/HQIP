@@ -3,11 +3,15 @@ import { ArrowRight, ArrowUpRight, ClipboardList, Globe2, Package, Plus, ShieldC
 import { CopyButton, Empty, Panel } from "../components";
 import type { UserProfile } from "./types";
 import { SubscriptionCard } from "./SubscriptionCard";
+import { RenewalButton } from "./Renewal";
 
 // Account summary and onboarding actions, including the public support group.
 export function UserOverview({ profile }: { profile: UserProfile }) {
   const subscriptions = profile.subscriptions || [],
-    active = subscriptions.filter((s) => s.status === "active");
+    // Exhaustion does not end the term: keep the sole renewal entry available
+    // without implying that prepaying restores this period's used traffic.
+    active = subscriptions.filter((s) => s.status === "active" || s.status === "exhausted"),
+    pending = subscriptions.filter((s) => s.status === "pending");
   return (
     <>
       <div className="portal-welcome">
@@ -58,16 +62,16 @@ export function UserOverview({ profile }: { profile: UserProfile }) {
           </div>
           <div className="user-sub-grid">
             {active.map((s) => (
-              <SubscriptionCard key={s.id} value={s} />
+              <SubscriptionCard key={s.id} value={s} actions={<RenewalButton value={s} />} />
             ))}
           </div>
         </>
-      ) : (
+      ) : !pending.length ? (
         <Panel title="开始你的连接">
           <Empty
             icon={Package}
             title="还没有有效订阅"
-            description="在商城选择一份订阅，付款核验成功后即可使用。"
+            description="在商城选择一份订阅，正式开通后即可使用。"
             action={
               <Link to="/catalog" className="button button-primary">
                 浏览订阅商城 <ArrowRight size={16} />
@@ -75,7 +79,11 @@ export function UserOverview({ profile }: { profile: UserProfile }) {
             }
           />
         </Panel>
-      )}
+      ) : null}
+      {!!pending.length && <>
+        <div className="user-sub-section-title"><h2>待开通的订阅</h2><span className="muted">分配节点并正式开通后开始计时</span></div>
+        <div className="user-sub-grid">{pending.map(s => <SubscriptionCard key={s.id} value={s} />)}</div>
+      </>}
       <Panel title="从这里开始">
         <div className="portal-start-grid">
           <Link to="/downloads">

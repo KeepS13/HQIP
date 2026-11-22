@@ -20,6 +20,8 @@ type hostResourceCache struct {
 	view hostResourceView
 	next time.Time
 	read func() hostmetrics.Sample
+	// Tests may shorten the baseline interval; production uses one second.
+	warmup time.Duration
 }
 
 func (c *hostResourceCache) snapshot(now time.Time) hostResourceView {
@@ -30,6 +32,23 @@ func (c *hostResourceCache) snapshot(now time.Time) hostResourceView {
 		c.next = now.Add(hostResourceInterval)
 		go func() {
 			sample := c.read()
+			if sample.CPUPercent == nil {
+				// CPU is a delta, so a cold/resumed reader needs a second sample.
+				// Publish memory/disk immediately, retaining the single worker while
+				// it establishes the baseline. At most one extra read per refresh:
+				// unsupported or failing CPU sources never start a retry loop.
+				c.mu.Lock()
+				baseline := sample // Published samples are immutable for HTTP readers.
+				c.view.Sample = &baseline
+				c.mu.Unlock()
+				interval := c.warmup
+				if interval <= 0 {
+					interval = time.Second
+				}
+				time.Sleep(interval)
+				updated := c.read()
+				sample = updated
+			}
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			c.view = hostResourceView{Sample: &sample}

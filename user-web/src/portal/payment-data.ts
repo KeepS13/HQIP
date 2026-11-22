@@ -105,7 +105,7 @@ export const orderLabels: Record<string, string> = {
   expired: "付款入口已过期",
   closed: "付款入口已关闭",
   paid_pending: "已付款，等待开通",
-  fulfilled: "已开通",
+  fulfilled: "订阅已生成",
 };
 
 export function money(cents: number) {

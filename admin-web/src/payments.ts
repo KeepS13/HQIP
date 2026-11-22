@@ -77,7 +77,7 @@ export const orderStates: Record<
   expired: { label: "已超时", tone: "muted" },
   closed: { label: "已关闭", tone: "muted" },
   paid_pending: { label: "已付款 · 待开通", tone: "warning" },
-  fulfilled: { label: "已开通", tone: "success" },
+  fulfilled: { label: "订阅已生成", tone: "success" },
 };
 
 export function priceText(cents: number | null | undefined) {

@@ -34,6 +34,7 @@ func sameNodeSet(a, b []string) bool {
 type nodeAllocation struct {
 	id, user, template string
 	order              bool
+	manual             bool
 	target             int
 	nodes              []string
 }
@@ -47,8 +48,9 @@ const activeNodeReservation = `r.released=0 AND o.fulfillment_state!='fulfilled'
  (o.payment_state='paid' OR (o.closed_at=0 AND o.creation_state!='failed' AND o.expires_at>?))`
 
 func allocationHolders(tx *sql.Tx, now time.Time) ([]*nodeAllocation, error) {
-	rows, err := tx.Query(`SELECT s.id,s.user_id,s.template_id,a.target_count,a.node_ids
+	rows, err := tx.Query(`SELECT s.id,s.user_id,s.template_id,a.target_count,a.node_ids,CASE WHEN p.subscription_id IS NULL THEN 0 ELSE 1 END
  FROM portal_subscriptions s JOIN subscription_allocations a ON a.subscription_id=s.id
+ LEFT JOIN subscription_provisioning p ON p.subscription_id=s.id
  WHERE s.revoked=0 AND s.expires>? ORDER BY s.created_at,s.id`, now.Unix())
 	if err != nil {
 		return nil, err
@@ -59,7 +61,7 @@ func allocationHolders(tx *sql.Tx, now time.Time) ([]*nodeAllocation, error) {
 		for rows.Next() {
 			h := &nodeAllocation{order: order}
 			var raw string
-			if err := rows.Scan(&h.id, &h.user, &h.template, &h.target, &raw); err != nil {
+			if err := rows.Scan(&h.id, &h.user, &h.template, &h.target, &raw, &h.manual); err != nil {
 				return err
 			}
 			if err := json.Unmarshal([]byte(raw), &h.nodes); err != nil {
@@ -72,7 +74,7 @@ func allocationHolders(tx *sql.Tx, now time.Time) ([]*nodeAllocation, error) {
 	if err = read(rows, false); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(`SELECT o.id,o.user_id,o.template_id,r.target_count,r.node_ids
+	rows, err = tx.Query(`SELECT o.id,o.user_id,o.template_id,r.target_count,r.node_ids,0
  FROM payment_orders o JOIN payment_node_reservations r ON r.order_id=o.id
  WHERE `+activeNodeReservation+` ORDER BY o.created_at,o.id`, now.Unix())
 	if err != nil {
@@ -216,7 +218,8 @@ func reconcileNodeAllocations(tx *sql.Tx, p model.SubscriptionTemplate, now time
 	}
 	changed := []*nodeAllocation{}
 	for _, h := range a.holders {
-		if h.template != p.ID {
+		// Custom allocations remain administrator-owned after activation too.
+		if h.template != p.ID || h.manual {
 			continue
 		}
 		kept := []string{}
@@ -298,6 +301,11 @@ func (s *Store) SubscriptionCatalog(user string) ([]model.CatalogSubscription, e
 		}
 		for i := range items {
 			p := &items[i]
+			p.ManualProvisioning = len(p.NodeIDs) == 0
+			if p.ManualProvisioning {
+				p.AvailabilityReason = "付款后提供订阅链接，管理员分配节点并开通后开始计时"
+				continue
+			}
 			p.AvailableCopies = len(a.choices(user, p.ID, p.NodeIDs, nil)) / p.NodesPerSubscription
 			if p.AvailableCopies == 0 {
 				p.AvailabilityReason = "暂无足够的可分配节点，请等待已有订阅到期或节点恢复"

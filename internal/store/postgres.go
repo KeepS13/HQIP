@@ -67,7 +67,7 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	if err = migrateOnlineIPs(tx); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('subscription_renewals_version','1')"); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('subscription_renewals_version','2')"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -88,7 +88,7 @@ func OpenPostgres(dataDir, baseURL, dsn string) (*Store, error) {
 		return nil, err
 	}
 	var version string
-	if err = db.QueryRow("SELECT value FROM metadata WHERE key='subscription_renewals_version'").Scan(&version); err != nil || version != "1" {
+	if err = db.QueryRow("SELECT value FROM metadata WHERE key='subscription_renewals_version'").Scan(&version); err != nil || version != "2" {
 		db.Close()
 		return nil, errors.New("订阅周期尚未升级，请使用迁移账号执行 hqip migrate-subscription-renewals")
 	}

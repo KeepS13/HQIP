@@ -34,7 +34,8 @@ export function SubscriptionNodes({ userId, value, onClose, onSaved }: {
   // changed later or its current nodes have a shortfall. The server rechecks it.
   const requiredCount = original?.nodesPerSubscription ?? 0;
   const countMatches = selected.length === requiredCount;
-  const editable = !!original && !["removed", "revoked"].includes(original.status) && Date.parse(original.expiresAt) > Date.now();
+  const pending = original?.activationPending;
+  const editable = !!original && (original.status === "pending" || !pending && !["removed", "revoked"].includes(original.status) && Date.parse(original.expiresAt) > Date.now());
   const added = selected.filter(id => !original?.nodeIds.includes(id));
   const removed = original?.nodeIds.filter(id => !selected.includes(id)) || [];
   const changed = added.length > 0 || removed.length > 0;
@@ -55,13 +56,13 @@ export function SubscriptionNodes({ userId, value, onClose, onSaved }: {
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
-  return <Modal title="修改节点" description={`${value.templateName} · #${value.id.slice(-8)}`} onClose={() => { if (!busy) onClose(); }}>
+  return <Modal title={value.activationPending ? "分配节点并开通" : "修改节点"} description={`${value.templateName} · #${value.id.slice(-8)}`} onClose={() => { if (!busy) onClose(); }}>
     <form className="form-stack subscription-node-editor" onSubmit={submit}>
-      <Notice>仅更换这一份订阅使用的节点，分配数量保持不变。已用流量、剩余额度、计费周期及到期时间保持不变，新旧节点的流量继续记入同一份订阅。可选择套餐外节点；同用户的同套餐订阅和订单不能重复占用节点。</Notice>
+      <Notice>{value.activationPending ? `选择完整的节点后保存，即正式开通此订阅，并从保存成功时开始计算 ${value.validityDays} 天有效期。原订阅链接继续有效。` : "仅更换这一份订阅使用的节点，分配数量保持不变。已用流量、剩余额度、计费周期及到期时间保持不变，新旧节点的流量继续记入同一份订阅。"}可选择套餐外节点；同用户的同套餐订阅和订单不能重复占用节点。</Notice>
       {loading ? <Loading /> : snapshot && <>
-        {!editable && <Notice tone="warning">订阅已到期或已移除，不能修改节点。</Notice>}
+        {!editable && <Notice tone="warning">当前订阅不可操作，请确认用户和套餐已启用，且订阅未到期或移除。</Notice>}
         <Field label="搜索节点" hint="支持节点名称、IP 和域名"><div className="subscription-node-search"><Search size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索全站节点" /></div></Field>
-        <div className="subscription-node-count" role="status"><strong>已选 {selected.length} / {requiredCount} 个节点</strong><span>先取消原节点，再勾选替换节点</span></div>
+        <div className="subscription-node-count" role="status"><strong>已选 {selected.length} / {requiredCount} 个节点</strong><span>{pending ? "选满节点后可正式开通" : "先取消原节点，再勾选替换节点"}</span></div>
         <div className="subscription-assignment-options" role="group" aria-label="可分配节点">
           {nodes.map(node => {
             const checked = selected.includes(node.id);
@@ -80,7 +81,7 @@ export function SubscriptionNodes({ userId, value, onClose, onSaved }: {
       </>}
       <ErrorNotice message={error} />
       <div className="subscription-node-reload"><Button type="button" variant="secondary" icon={RefreshCw} disabled={busy || loading} onClick={() => setReload(n => n + 1)}>重新加载</Button><small>重新加载会清除未保存的选择。</small></div>
-      <div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" icon={Network} busy={busy} disabled={loading || !editable || !changed || invalid || !countMatches}>保存节点</Button></div>
+      <div className="modal-actions"><Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" icon={Network} busy={busy} disabled={loading || !editable || !changed || invalid || !countMatches}>{pending ? "保存节点并开通" : "保存节点"}</Button></div>
     </form>
   </Modal>;
 }

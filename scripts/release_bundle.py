@@ -58,8 +58,8 @@ def validate_manifest(manifest, *, allow_legacy=False):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
     renewal = manifest.get('subscriptionRenewalsVersion', 0)
-    if type(renewal) is not int or renewal not in ((0, 1) if allow_legacy else (1,)):
-        raise ValueError('New releases require subscriptionRenewalsVersion 1')
+    if type(renewal) is not int or renewal not in ((0, 1, 2) if allow_legacy else (2,)):
+        raise ValueError('New releases require subscriptionRenewalsVersion 2')
     if renewal == 0:
         required = required - {'scripts/subscription_renewal_deployment.py'}
     reality = manifest.get('vlessRealityVersion', 0)

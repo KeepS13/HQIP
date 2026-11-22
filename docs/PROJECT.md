@@ -13,6 +13,7 @@
 | subscription-admission / 第三方导入 | internal/store/portal_import_links.go、internal/control/portal_import_export.go、user-web | [subscription-admission.import-links v1](contracts/subscription-import-links.md)：默认合并复制、单份复制与凭据轮换 |
 | subscription-admission / 管理员赠送 | internal/store/subscription_grants.go、internal/control/subscriptions.go、admin-web/src/pages/GrantSubscription.tsx | [subscription-admission.manual-grant v1](interfaces.md)：提交后读取结果、原请求恢复、明确拒绝后重新确认 |
 | subscription-renewals | internal/store/subscription_renewals.go、subscription_periods.go；internal/control；user-web、admin-web | [按周期续费](subscription-renewals.md)：原订阅延期、周期账本、幂等付款；[node-quota v1](contracts/node-quota.md) 的 periodId 扩展隔离跨期节点预算 |
+| subscription-admission / 人工开通 | internal/store/subscription_activation.go；internal/control/portal_import_pending.go；admin-web、user-web | [activation v1](subscription-activation.md)：空节点购买、待开通链接、首次分配节点起算；周期 schema 2 |
 
 本次边界变更的规范见 [节点额度契约](contracts/node-quota.md)，已有行为见 [离线授权](offline-admission.md) 和 [部署](automatic-deployment.md)。数据库仅存业务状态，操作证据保存在 docs/incidents 或库外诊断记录。
 

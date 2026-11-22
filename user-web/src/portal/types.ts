@@ -23,6 +23,9 @@ export interface SubscriptionTemplate {
   revision: number;
 }
 export interface UserSubscription {
+  activationPending?: boolean;
+  activatedAt?: string;
+  validityDays?: number;
 	currentPeriodId: string;
 	currentPeriodStartsAt: string;
 	currentPeriodEndsAt: string;
@@ -111,6 +114,7 @@ export interface TurnstileSettings {
   revision: number;
 }
 export const subscriptionLabels: Record<string, string> = {
+  pending: "待开通",
   active: "可使用",
   expired: "已到期",
   exhausted: "流量用尽",
@@ -138,5 +142,6 @@ export interface SubscriptionDetail {
 
 export interface CatalogSubscription extends SubscriptionTemplate {
   availableCopies: number;
+  manualProvisioning?: boolean;
   availabilityReason: string;
 }

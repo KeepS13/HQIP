@@ -158,12 +158,10 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if !enabled || !template.Enabled || len(template.NodeIDs) == 0 {
+		if !enabled || !template.Enabled {
 			message := "用户已停用，已付款订单等待管理员处理"
 			if !template.Enabled {
 				message = "订阅模板已停用，已付款订单等待管理员处理"
-			} else if len(template.NodeIDs) == 0 {
-				message = "订阅模板暂无可用节点，已付款订单等待管理员处理"
 			}
 			if r.Order.FulfillmentState != "blocked" || r.Order.LastError != message {
 				if _, err = tx.Exec("UPDATE payment_orders SET fulfillment_state='blocked',last_error=?,revision=revision+1 WHERE id=?", message, id); err != nil {
@@ -206,7 +204,11 @@ func (s *Store) fulfillPaymentOrder(id string) (bool, error) {
 		if _, err = tx.Exec("UPDATE payment_orders SET fulfillment_state='fulfilled',fulfilled_at=?,subscription_id=?,last_error='',revision=revision+1 WHERE id=?", now.Unix(), e.ID, id); err != nil {
 			return false, err
 		}
-		if err = paymentActivity(tx, id, "fulfilled", "订阅已开通，有效期从本次开通时开始计算", now.Unix()); err != nil {
+		message := "订阅已开通，有效期从本次开通时开始计算"
+		if e.ActivationPending {
+			message = "订阅已生成，待管理员分配节点并开通；订阅链接可获取，有效期尚未开始"
+		}
+		if err = paymentActivity(tx, id, "fulfilled", message, now.Unix()); err != nil {
 			return false, err
 		}
 		if _, err = tx.Exec("UPDATE payment_node_reservations SET released=1 WHERE order_id=?", id); err != nil {

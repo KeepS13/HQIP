@@ -40,6 +40,9 @@ func readSubscriptionPeriods(q portalQuery, e *model.UserSubscription, now time.
 		return err
 	}
 	if e.CurrentPeriodID == "" {
+		if e.ActivationPending {
+			return nil // Pending grants intentionally own no accounting period yet.
+		}
 		return errors.New("订阅周期记录缺失或服务器时间异常")
 	}
 	if e.CurrentPeriodEndsAt.Before(e.ExpiresAt) && e.CurrentPeriodEndsAt.After(now) {

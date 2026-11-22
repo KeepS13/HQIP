@@ -21,10 +21,8 @@ func TestRenewalRoutesRequireOwnerCSRFAndReturnOriginalSubscription(t *testing.T
 	u, cookie, userCSRF := portalLoginFixture(t, s, "renewal-owner@example.com")
 	_, foreignCookie, foreignCSRF := portalLoginFixture(t, s, "renewal-other@example.com")
 	sub := subscriptionFixture(t, s, u, nil, "", 2)
-	// Model an existing purchased subscription, with its original allocation.
-	if _, err := s.Store.DB.Exec("UPDATE portal_subscriptions SET grant_key='payment:fixture' WHERE id=?", sub.ID); err != nil {
-		t.Fatal(err)
-	}
+	// A real administrator-assigned instance is eligible too; payment must
+	// extend that same instance without changing its allocation or owner.
 	p, err := s.Store.SubscriptionTemplate(sub.TemplateID)
 	if err != nil {
 		t.Fatal(err)

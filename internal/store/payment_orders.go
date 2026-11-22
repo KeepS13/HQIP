@@ -286,7 +286,7 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		if template.Revision != in.TemplateRevision {
 			return out, ErrConflict
 		}
-		if !template.Enabled || !template.Listed || template.PriceCents == nil || (in.RenewalSubscriptionID == "" && len(template.NodeIDs) == 0) {
+		if !template.Enabled || !template.Listed || template.PriceCents == nil {
 			return out, errors.New("该订阅暂不可购买")
 		}
 		if e = validSubscriptionTemplate(template); e != nil {
@@ -345,6 +345,8 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		if in.RenewalSubscriptionID != "" {
 			_, e = tx.Exec("INSERT INTO payment_renewals(order_id,subscription_id,expected_revision) VALUES(?,?,?)", out.id, in.RenewalSubscriptionID, in.ExpectedSubscriptionRevision)
 			message = "续费订单已创建，保留原订阅与节点；付款后延期，下期开始时重置流量"
+		} else if len(template.NodeIDs) == 0 {
+			message = "定制订阅订单已创建，付款后提供订阅链接；管理员分配节点并开通后开始计时"
 		} else {
 			_, e = reserveOrderNodes(tx, out.id, userID, template, template.NodesPerSubscription, now)
 		}

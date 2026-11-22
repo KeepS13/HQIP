@@ -314,7 +314,7 @@ func backup(args []string) error {
 	if err = os.WriteFile(filepath.Join(temp, "master.key"), key, 0600); err != nil {
 		return err
 	}
-	manifest, _ := json.Marshal(map[string]any{"version": 1, "backend": backend, "createdAt": time.Now().UTC(), "containsSecrets": true, "subscriptionRenewalsVersion": 1})
+	manifest, _ := json.Marshal(map[string]any{"version": 1, "backend": backend, "createdAt": time.Now().UTC(), "containsSecrets": true, "subscriptionRenewalsVersion": 2})
 	if err = os.WriteFile(filepath.Join(temp, "manifest.json"), manifest, 0600); err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ func restore(args []string) error {
 		var manifest struct {
 			SubscriptionRenewalsVersion int `json:"subscriptionRenewalsVersion"`
 		}
-		if e != nil || json.Unmarshal(data, &manifest) != nil || manifest.SubscriptionRenewalsVersion < 0 || manifest.SubscriptionRenewalsVersion > 1 {
+		if e != nil || json.Unmarshal(data, &manifest) != nil || manifest.SubscriptionRenewalsVersion < 0 || manifest.SubscriptionRenewalsVersion > 2 {
 			return errors.New("备份的订阅周期版本不兼容")
 		}
 	}
