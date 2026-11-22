@@ -49,3 +49,30 @@ Agent 将任何授权截止缩短判为协议错误，设置拒绝状态并保�
 追加验证：`go vet -tags=with_utls ./...`、全仓库 `go test -tags=with_utls -race ./...` 均通过（本次 Agent 约 30 秒、control 64 秒、store 226 秒）。隔离 PostgreSQL 18 上的 Offline、OnlineIP、SubscriptionNodes、SubscriptionExpiry、PostgresConcurrentAdmission 专项竞态测试通过（store 约 86 秒、control 3 秒），测试容器及匿名卷已按精确身份移除。真实客户端期限修改场景再次通过约 132 秒；同批节点切换测试曾因 `no isolated test port` 中断，保留该失败日志，之后单独重跑通过约 102 秒，验证节点 0→1→0 的退出、重新申请与持久化父账本复用。没有修改系统端口规则或降低验收断言。
 
 最终 GitNexus 变更分析覆盖 26 个文件、58 个符号及 12 条已索引流程，整体风险 HIGH，包含用户已有客户端修改；本次准入与恢复入口的编辑前 upstream 风险 LOW，原同步回执函数 MEDIUM。已经针对准入、续约、持久化恢复、接口鉴权进行回归。分析命令未报告 partial/truncated；索引构建器另提示部分执行流程因静态图预算未展开，因此不将此结果当作全仓库流程无遗漏的证明。
+
+## 生产发布与验收
+
+2026-11-22 已发布 `1f16b030488fd4e319ef3ebf4c8cd5ece279b127`。Actions 运行 `45022236613` 的全部检查通过后，先部署控制端、网页和同提交客户端下载包，再升级全部 16 个活动节点的 Agent。升级复用仓库现有账本备份与兼容回滚流程；16 个 HY2 核心的运行摘要和 InvocationID 均与升级前一致。
+
+控制端备份为 `/root/backups/hqip-ci-1f16b030488fd4e319ef3ebf4c8cd5ece279b127-45022236613-1`。各节点独立备份路径保存在库外 `device-slots-result-<节点名>.json`，不将密钥或运行账本写入源码库。
+
+zus2 在 12:45 UTC 升级后，原来卡住的两份授权通过正常补报推进到报告版本 4299、4342，均确认 `closed=true`、`slotReleased=true`，节点端没有活动子连接或待确认报告。目标 NTT 订阅占用由 2/2 恢复为 0/2；12:55 UTC 再次只读核验仍为 0/2，另一份活动订阅为 1/3。没有手动清零数据库、删除账本或伪造流量结算。
+
+最终逐节点读取 `/proc/<PID>/exe` 的 SHA256，全部匹配本次 CI 的 Agent 产物 `a10be2703ead16a6b28fa2c5a77a9b75728e1492b99e435cae6e7f80fab31d29`。16 个 Agent/HY2 服务均 active，Reality 与 coreHealthy 均通过，控制端所见节点均 ready、配置版本同步；两路本机 readyz、两个公网网页和公网 healthz/readyz 全部通过。验收证明名额已释放和服务就绪，未代替该用户实际操作客户端。
+
+itp0、wjp2、ytjp1 的本机直连 SSH 传输出现中断，未完成校验的文件没有用于升级。之后通过已固定主机身份的控制服务器建立 SSH 跳转连接，继续固定节点 ECDSA 指纹校验并补传完整文件。itp0 的一次最终只读检查也遇到 SSH banner 中断，单独重试后通过；初次失败证据与重试结果均保留。没有变更节点 SSH 安全配置，也没有在控制服务器安装传输依赖或保存节点密码。
+
+库外验收证据：`device-slots-acceptance-before/canary/after.json`、`device-slots-node-ledgers-after.json`、`device-slots-nodes-accepted.json`、`device-slots-result-*.json`。控制数据库与节点账本中的两条释放记录相互一致。
+
+## CI 优化实测
+
+Windows 全量回归与打包改为独立并行作业，真实客户端回归使用同一次运行的客户端包，再分成计费/断网、跨节点名额、期限修改三组。下载后校验提交、干净构建标记、包摘要及固定 sing-box 内核摘要；部署必须等待全部分组和原有 Linux、PostgreSQL/Redis 检查成功。补齐根模块、桌面端、HY2 子模块的 Go 缓存输入。
+
+| 成功运行 | 实际运行起止（UTC） | 单次耗时 |
+| --- | --- | --- |
+| 45013452125，第 2 次尝试，优化前 | 10:41:19–11:01:14 | 19 分 55 秒 |
+| 45022236613，第 1 次尝试，优化后 | 12:25:54–12:40:27 | 14 分 33 秒 |
+
+本次实测减少 5 分 22 秒，约 27%。优化前从最初创建到最终结束是 22 分 25 秒，但包含重试前等待，不能用它计算单次执行提速。新缓存键首次建立也计入本次耗时，未以预估的热缓存耗时替代实测。
+
+原有 race、支付并发幂等、Vision、真实断网与流量统计检查全部保留，并新增 CI 中的真实期限修改与跨节点重连验证。Actions 日志确认五项 Agent 真实客户端测试、Vision 两种模式和代理统计均实际 PASS，无跳过。工作流通过 actionlint，256 项部署脚本测试在 Python 3.12 Linux 隔离容器全部通过；Windows 本机的同套部署测试曾因符号链接权限和路径差异失败，未把该次结果当作通过。CI 结果和逐步耗时保存在 `.diagnostics/ci-45022236613.json`、`ci-e2e-*.log` 及基线日志中。
