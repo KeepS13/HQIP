@@ -83,6 +83,11 @@ type Agent struct {
 	revokeWake        chan struct{}
 	closeOnce         sync.Once
 	closeErr          error
+
+	// Recovery scheduling is owned by offlineMu. Requests themselves are durable;
+	// losing this cursor/backoff on restart only causes an earlier retry.
+	offlineRecoveryCursor  string
+	offlineRecoveryRetryAt time.Time
 }
 
 func New(cfg model.AgentConfig, logger *slog.Logger) (*Agent, error) {

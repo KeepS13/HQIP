@@ -231,7 +231,11 @@ func (s *Store) ReportOfflineGrant(node, id string, u model.OfflineUsage) (model
 			if _, err = tx.Exec("UPDATE portal_emergency_usage SET reserved=reserved-? WHERE subscription_id=?", g.EmergencyBudgetBytes-u.EmergencyUsedBytes, g.SubscriptionID); err != nil {
 				return empty, err
 			}
-		} else if !g.Revoked && extend && u.Active {
+		} else if !g.Revoked && extend && (u.Active || g.NodeQuota != nil) {
+			// Node-quota parents survive an idle slot. Refresh their verified
+			// deadline even on release/reacquisition, so an administrator edit
+			// cannot leave the next connection using the old offline lifetime.
+			// SlotReleased is independent and still requires explicit acquisition.
 			g.AuthorizedAt, g.OfflineUntil = now.UTC(), offlineExpiry(now, e)
 			if g.NodeQuota != nil {
 				g.OfflineUntil = e.CurrentPeriodEndsAt

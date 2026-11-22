@@ -17,6 +17,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            runtime/hysteria/**/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -121,6 +124,34 @@ jobs:
           if [ -f "$RUNNER_TEMP/hqip-storage/compose.yaml" ]; then
             docker compose -f "$RUNNER_TEMP/hqip-storage/compose.yaml" down --volumes --remove-orphans
           fi
+  # Platform regression and packaging are independent. The production gate
+  # below still requires both, plus every real-client matrix entry.
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            admin-web/package-lock.json
+            user-web/package-lock.json
+      - run: npm --prefix admin-web ci
+      - run: npm --prefix user-web ci
+      - run: npm --prefix user-web test
+      - run: npm --prefix admin-web run build
+      - run: npm --prefix user-web run build
+      - run: go vet -tags=with_utls ./...
+      - run: go test -tags=with_utls ./...
+      - run: New-Item -ItemType Directory -Force dist | Out-Null
+        shell: pwsh
+      - run: go build -trimpath -o dist/hqip-windows-amd64.exe ./cmd/hqip
   windows:
     runs-on: windows-latest
     permissions:
@@ -132,46 +163,24 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             go.sum
-            desktop/go.sum
+            desktop/**/go.sum
+            runtime/hysteria/**/go.sum
+            scripts/build_billing_core.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: |
-            admin-web/package-lock.json
-            user-web/package-lock.json
-            desktop/frontend/package-lock.json
+          cache-dependency-path: desktop/frontend/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: npm --prefix admin-web ci
-      - run: npm --prefix user-web ci
-      - run: npm --prefix user-web test
-      - run: npm --prefix admin-web run build
-      - run: npm --prefix user-web run build
       - run: npm --prefix desktop/frontend ci
       - run: npm --prefix desktop/frontend run build
-      - run: go vet -tags=with_utls ./...
-      - run: go test -tags=with_utls ./...
-      - run: New-Item -ItemType Directory -Force dist | Out-Null
-        shell: pwsh
-      - run: go build -trimpath -o dist/hqip-windows-amd64.exe ./cmd/hqip
       - run: go vet ./...
         working-directory: desktop
       - run: go test ./...
         working-directory: desktop
       - run: python scripts/build_desktop.py --skip-web
-      - name: Verify Vision with the packaged sing-box core
-        shell: pwsh
-        run: |
-          $env:HQIP_SINGBOX_EXE = (Resolve-Path dist/desktop/sing-box.exe).Path
-          # The pinned upstream TLS adapter transports field pointers as uintptr.
-          # Scope the checkptr exception to that dependency; race checks remain on.
-          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/reality -run TestSingBoxRealityGuardedWire -count=1 -v
-          go test ./internal/client -run TestPinnedCoreProxyStatistics -count=1 -v
-          go build -C runtime/hysteria/app -trimpath -o ../../../dist/hysteria-billing-test.exe .
-          $env:HQIP_E2E_CORE = (Resolve-Path dist/hysteria-billing-test.exe).Path
-          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/agent -run "TestTrafficBillingRealDualProtocolHotUpdate|TestNodeQuotaRealWebsiteOutageAndReconciliation|TestOnlineIPRealTwoNodesAndDifferentSource" -count=1 -v
       - uses: actions/upload-artifact@v4
         id: upload_windows
         continue-on-error: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
@@ -187,9 +196,90 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/ci_artifacts.py upload windows-release
+  windows-e2e:
+    needs: windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      # Each worker owns its ports, core processes and ledgers. Keep all results
+      # when one group fails, rather than cancelling useful regression evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - group: billing
+            tests: TestTrafficBillingRealDualProtocolHotUpdate|TestNodeQuotaRealWebsiteOutageAndReconciliation
+          - group: slots
+            tests: TestOnlineIPRealTwoNodesAndDifferentSource|TestConnectionSlotsRealTwoNodeSwitchAndReconnect
+          - group: expiry
+            tests: TestOfflineExpiryRealClientsReleaseAfterAdministrativeEdit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            runtime/hysteria/**/go.sum
+            .github/workflows/ci.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        id: download_windows
+        continue-on-error: true
+        with:
+          name: windows-release
+          path: dist
+      - name: Recover the same-run Windows artifact if necessary
+        if: steps.download_windows.outcome == 'failure' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci_artifacts.py download windows-release --root dist
+      - name: Verify same-commit package and extract the pinned test core
+        shell: python
+        run: |
+          import hashlib, json, os, sys, zipfile
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from ci_artifacts import verify_files
+          from build_billing_core import CORE_HASH
+          verify_files('windows-release', Path('dist'), os.environ['GITHUB_SHA'])
+          with zipfile.ZipFile('dist/HQIP-Windows-x64.zip') as package:
+              inner = json.loads(package.read('HQIP/manifest.json'))
+              if inner.get('sourceSHA') != os.environ['GITHUB_SHA'] or inner.get('dirty') is not False:
+                  raise ValueError('Test core must belong to this clean build')
+              output = Path('dist/test-core')
+              output.mkdir()
+              # Read only explicit members; never extract archive-selected paths.
+              for name in ('sing-box.exe', 'libcronet.dll'):
+                  data = package.read('HQIP/' + name)
+                  expected = CORE_HASH if name == 'sing-box.exe' else inner['sha256'][name]
+                  if hashlib.sha256(data).hexdigest() != expected:
+                      raise ValueError('Test core checksum mismatch: ' + name)
+                  (output / name).write_bytes(data)
+      - name: Verify Vision and outbound statistics with the packaged core
+        if: matrix.group == 'expiry'
+        shell: pwsh
+        run: |
+          $env:HQIP_SINGBOX_EXE = (Resolve-Path dist/test-core/sing-box.exe).Path
+          # The pinned upstream TLS adapter transports field pointers as uintptr.
+          # Scope the checkptr exception to that dependency; race checks remain on.
+          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/reality -run TestSingBoxRealityGuardedWire -count=1 -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test ./internal/client -run TestPinnedCoreProxyStatistics -count=1 -v
+      - name: Run real-client regression group
+        shell: pwsh
+        env:
+          E2E_TESTS: ${{ matrix.tests }}
+        run: |
+          go build -C runtime/hysteria/app -trimpath -o ../../../dist/hysteria-billing-test.exe .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:HQIP_E2E_CORE = (Resolve-Path dist/hysteria-billing-test.exe).Path
+          $env:HQIP_SINGBOX_EXE = (Resolve-Path dist/test-core/sing-box.exe).Path
+          go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/agent -run "^($env:E2E_TESTS)$" -count=1 -v
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.HQIP_DEPLOY_PAUSED != 'true'
-    needs: [check, windows, postgres]
+    needs: [check, windows, windows-test, windows-e2e, postgres]
     runs-on: ubuntu-latest
     permissions:
       contents: write # Read and clean only this run's unpublished fallback drafts.

@@ -72,21 +72,9 @@ func (a *Agent) syncOfflineState(ctx context.Context, s *offlineState, force boo
 	status, data, err := a.requestAdmission(ctx, "/api/v1/agents/offline-grants/"+s.Grant.ID+"/report", u)
 	if status == 200 && err == nil {
 		var g model.OfflineGrant
-		if json.Unmarshal(data, &g) != nil || g.ID != s.Grant.ID || g.NodeID != s.Grant.NodeID || g.CredentialHash != s.Grant.CredentialHash || g.UserID != s.Grant.UserID || g.SubscriptionID != s.Grant.SubscriptionID || g.SessionID != s.Grant.SessionID || g.AuthorizedAt.Before(s.Grant.AuthorizedAt) || (g.OfflineUntil.Before(s.Grant.OfflineUntil) && u.RetainedNormalUnits == nil) || g.ReportVersion != u.Version || g.UploadBytes != u.UploadBytes || g.DownloadBytes != u.DownloadBytes || g.EmergencyUsedBytes != u.EmergencyUsedBytes || g.Closed != u.Closed || (g.NormalBudgetBytes < s.Grant.NormalBudgetBytes && u.RetainedNormalUnits == nil) || g.EmergencyBudgetBytes != s.Grant.EmergencyBudgetBytes || g.RateVersion < s.Grant.RateVersion || g.NormalUnlimited != s.Grant.NormalUnlimited || (!g.Closed && !g.Revoked && !validOfflineGrant(g, a.cfg.NodeID, g.CredentialHash, now)) {
+		if json.Unmarshal(data, &g) != nil || !offlineReceiptValid(s, g, u, now) {
 			err = &admissionProtocolError{}
 		} else {
-			if !slotAcknowledgementValid(s, g, u) {
-				return &admissionProtocolError{}
-			}
-			if (s.Grant.NodeQuota != nil) != (g.NodeQuota != nil) || g.NodeQuota != nil && (!validNodeQuotaSnapshot(g.NodeQuota) || g.NodeQuota.Revision < s.Grant.NodeQuota.Revision) {
-				return &admissionProtocolError{}
-			}
-			if s.Grant.Billing != nil && (g.Billing == nil || g.Billing.Protocol != s.Grant.Billing.Protocol || g.Billing.Version < s.Grant.Billing.Version || (g.Billing.BudgetUnits < s.Grant.Billing.BudgetUnits && u.RetainedNormalUnits == nil)) {
-				return &admissionProtocolError{}
-			}
-			if u.RetainedNormalUnits != nil && (!g.Revoked || g.NormalBudgetBytes != (*u.RetainedNormalUnits+99)/100 || g.Billing != nil && g.Billing.BudgetUnits != *u.RetainedNormalUnits) {
-				return &admissionProtocolError{}
-			}
 			s.Grant = g
 			if err = s.rememberBilling(); err != nil {
 				return err
@@ -191,58 +179,6 @@ func (a *Agent) offlineRenew(w http.ResponseWriter, r *http.Request, id string, 
 	_ = writeAdmissionResponse(w, 200, data, nil)
 }
 
-func (a *Agent) syncOfflineGrants(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, admissionControlTimeout)
-	defer cancel()
-	a.offlineMu.Lock()
-	defer a.offlineMu.Unlock()
-	states, err := a.ledger.offlineStates()
-	if err != nil {
-		return err
-	}
-	// A changed core generation or elapsed monotonic child lease proves the
-	// transport ended, not its final counters. Persist this before releasing
-	// slots; unknown byte allocations remain reserved in the local ledger.
-	if a.nodeQuotaEnabled() {
-		generation, generationErr := a.generation(ctx)
-		if generationErr != nil {
-			generation = ""
-		}
-		for i := range states {
-			if !states[i].Grant.Closed {
-				a.reconcileOfflineChildren(ctx, &states[i], generation)
-				if err = a.ledger.saveOffline(states[i]); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	// Only an upgraded core proves new connections use protocol billing.
-	// Probe once per sweep, and only if a legacy grant still needs migration.
-	migrate := a.hasIdleLegacyGrant(states) && a.coreUsesProtocolBilling(ctx)
-	for i := range states {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		s := &states[i]
-		a.cacheMu.RLock()
-		allowed := a.cache.PortalEnabled && a.cache.Retirement == nil
-		a.cacheMu.RUnlock()
-		if !allowed {
-			s.Denied = true
-		}
-		if migrate {
-			if err = a.retireIdleLegacyGrant(ctx, s); err != nil {
-				return err
-			}
-		}
-		if err = a.syncOfflineState(ctx, s, false); err == nil {
-			_ = a.releaseIdleOfflineSlot(ctx, s)
-		}
-	}
-	return nil
-}
-
 func (a *Agent) offlineAllowed() bool {
 	a.cacheMu.RLock()
 	defer a.cacheMu.RUnlock()
@@ -273,6 +209,13 @@ func (a *Agent) flushOfflineRetirement(ctx context.Context) error {
 	}
 	a.offlineMu.Lock()
 	defer a.offlineMu.Unlock()
+	requests, err := a.ledger.offlineRequests("")
+	if err != nil {
+		return err
+	}
+	if len(requests) > 0 {
+		return errors.New("offline admission outcome pending; ledger retained")
+	}
 	states, err := a.ledger.offlineStates()
 	if err != nil {
 		return err

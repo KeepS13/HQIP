@@ -68,35 +68,42 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 		// Persist an IP/protocol/credential request key before dispatch. A lost
 		// response must not issue duplicate accounting parents, and a different
 		// IP must never inherit this request's approved identity.
-		a.ledger.mu.Lock()
-		_, err = a.ledger.db.Exec("INSERT OR IGNORE INTO offline_requests(hash,request_id) VALUES(?,?)", requestHash, connection)
-		var requestID string
-		if err == nil {
-			err = a.ledger.db.QueryRow("SELECT request_id FROM offline_requests WHERE hash=?", requestHash).Scan(&requestID)
-		}
-		a.ledger.mu.Unlock()
-		if err != nil {
+		requestID, fresh, requestErr := a.ledger.trackOfflineRequest(requestHash, connection)
+		if requestErr != nil {
 			http.Error(w, "offline request persistence failed", 503)
 			return
 		}
 		body := map[string]string{"connectionId": requestID, "password": password, "clientIP": clientIP, "billingProtocol": protocol, "billingCapability": "traffic-billing-v1", "quotaCapability": model.NodeQuotaCapability}
 		status, data, requestErr := a.requestAdmission(ctx, "/api/v1/agents/offline-grants", body)
 		if requestErr != nil || status != 200 {
-			if !offlineRetryable(status, requestErr) {
-				a.ledger.mu.Lock()
-				_, _ = a.ledger.db.Exec("DELETE FROM offline_requests WHERE hash=?", requestHash)
-				a.ledger.mu.Unlock()
+			// A definitive first rejection did not reserve a slot. Once a prior
+			// outcome is unknown, a later rejection (e.g. rotated credentials)
+			// cannot erase its recovery key. Malformed/truncated 200s are unknown.
+			if fresh && requestErr == nil && status >= 400 && status < 500 && !offlineRetryable(status, nil) {
+				_ = a.ledger.forgetOfflineRequest(offlineRequest{Hash: requestHash, ID: requestID})
 			}
 			_ = writeAdmissionResponse(w, status, data, requestErr)
 			return
 		}
 		var g model.OfflineGrant
-		if json.Unmarshal(data, &g) != nil || g.NodeQuota == nil || g.Billing == nil || g.Billing.Protocol != protocol || g.ClientIP != clientIP || g.ConnectionSlotsVersion != model.ConnectionSlotsVersion || !validOfflineGrant(g, a.cfg.NodeID, hash, now) || g.ReportVersion != 0 || g.UploadBytes != 0 || g.DownloadBytes != 0 || g.EmergencyUsedBytes != 0 {
+		if json.Unmarshal(data, &g) != nil {
 			http.Error(w, "invalid offline grant", 403)
 			return
 		}
-		s := offlineState{Grant: g, Children: map[string]offlineChild{}, Online: true, LastWall: now, NextVersion: g.ReportVersion, RetryAt: now.Add(5 * time.Second)}
-		if err = s.rememberBilling(); err != nil {
+		// A crash can leave both a saved parent and its request key. If that
+		// parent is busy/denied it was not selected above; replay must never
+		// overwrite its children with a new, empty accounting state.
+		for _, existing := range states {
+			if existing.Grant.ID == g.ID {
+				if sameOfflineIdentity(existing.Grant, g) {
+					_ = a.ledger.forgetOfflineRequest(offlineRequest{Hash: requestHash, ID: requestID})
+				}
+				http.Error(w, "previous offline admission already tracked", 503)
+				return
+			}
+		}
+		s, initialErr := initialOfflineState(g, a.cfg.NodeID, hash, protocol, clientIP, a.now())
+		if initialErr != nil {
 			http.Error(w, "invalid billing grant", 503)
 			return
 		}
@@ -104,9 +111,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 			http.Error(w, "offline grant persistence failed", 503)
 			return
 		}
-		a.ledger.mu.Lock()
-		_, err = a.ledger.db.Exec("DELETE FROM offline_requests WHERE hash=?", requestHash)
-		a.ledger.mu.Unlock()
+		err = a.ledger.forgetOfflineRequest(offlineRequest{Hash: requestHash, ID: requestID})
 		if err != nil {
 			http.Error(w, "offline request persistence failed", 503)
 			return
