@@ -1,6 +1,6 @@
 # API 边界与主要接口
 
-正式环境由 Nginx 分别托管用户端 `hqip.sharevps.online`、管理端 `cms-hqip.sharevps.online` 和 API `api-hqip.sharevps.online`。控制服务仍使用管理员与公共两个回环监听器：管理员浏览器 API 只到管理监听，用户、客户端、Agent、订阅及健康检查只到公共监听。JSON 使用 camelCase；错误响应为 `{ "error": "..." }`。浏览器 fetch 使用 `credentials: include`，写请求携带登录时取得的 `X-CSRF-Token`。
+正式环境由 Nginx 分别托管用户端 `hqip.sharevps.online` 和管理端 `cms-hqip.sharevps.online`。API、订阅、下载及健康检查从 `hqip.sharevps.online` 提供；管理页面跨域调用该域名的管理 API。Nginx 按路径转发到管理员与公共两个回环监听器：管理员浏览器 API 只到管理监听，用户、客户端、Agent、订阅及健康检查只到公共监听；具体路由以 `deploy/nginx-hqip.conf` 为准。JSON 使用 camelCase；错误响应为 `{ "error": "..." }`，部分接口附带契约中列明的 `code`。浏览器 fetch 使用 `credentials: include`，写请求携带登录时取得的 `X-CSRF-Token`。
 
 管理会话和用户会话分别使用 host-only Secure、HttpOnly Cookie；各自 Origin 精确限制在对应网页来源。用户登录不能访问管理员 API，客户端 Bearer token 和节点 Agent token 也不能代替浏览器会话。订阅 URL、密码、SSH 信息和授权令牌不得进入访问日志。
 
