@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,9 +69,21 @@ func TestOfflineRecoveryTimeoutStillAllowsKnownSlotRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := s.Grant
+	// Exercise the production budget. A 300 ms sweep leaves only 150 ms for
+	// durable SQLite reconciliation and slot release on a loaded Windows runner.
+	// Assert the nested deadline explicitly instead of relying on a tiny clock.
+	ctx, cancel := context.WithTimeout(context.Background(), admissionControlTimeout)
+	defer cancel()
+	parentDeadline, _ := ctx.Deadline()
+	recoveryTimedOut := false
 	a.controlClient.Transport = offlineRecoveryTransport(func(r *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(r.URL.Path, "/recover") {
+			deadline, bounded := r.Context().Deadline()
+			if !bounded || parentDeadline.Sub(deadline) < admissionControlTimeout/3 {
+				t.Fatal("recovery failed to reserve the normal-report budget")
+			}
 			<-r.Context().Done()
+			recoveryTimedOut = errors.Is(r.Context().Err(), context.DeadlineExceeded)
 			return nil, r.Context().Err()
 		}
 		if err := r.Context().Err(); err != nil {
@@ -83,9 +96,10 @@ func TestOfflineRecoveryTimeoutStillAllowsKnownSlotRelease(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(g)
 		return w.Result(), nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	_ = a.syncOfflineGrants(ctx)
+	err := a.syncOfflineGrants(ctx)
+	if !recoveryTimedOut || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("recovery timeout was not exercised", err)
+	}
 	if !g.SlotReleased {
 		t.Fatal("unavailable recovery blocked a known idle slot's release")
 	}
