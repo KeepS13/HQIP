@@ -482,8 +482,9 @@ func (f *portalE2E) account(label string, quota int64, slots int) (model.PortalU
 }
 
 type portalE2EClient struct {
-	http *http.Client
-	stop func()
+	http       *http.Client
+	stop       func()
+	controller string // Private Mihomo test API; never a user client endpoint.
 }
 
 func (f *portalE2E) client(kind, binary string, node int, password string, targetCert *x509.Certificate) *portalE2EClient {
@@ -532,9 +533,11 @@ func (f *portalE2E) client(kind, binary string, node int, password string, targe
 	roots := x509.NewCertPool()
 	roots.AddCert(targetCert)
 	proxy, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	tr := &http.Transport{Proxy: http.ProxyURL(proxy), TLSClientConfig: &tls.Config{RootCAs: roots}, DisableKeepAlives: true}
+	// Tests retaining an online slot keep a real target TCP stream alive. QUIC
+	// keepalives alone are deliberately not an online business connection.
+	tr := &http.Transport{Proxy: http.ProxyURL(proxy), TLSClientConfig: &tls.Config{RootCAs: roots}}
 	t.Cleanup(tr.CloseIdleConnections)
-	return &portalE2EClient{http: &http.Client{Transport: tr, Timeout: 25 * time.Second}, stop: stop}
+	return &portalE2EClient{http: &http.Client{Transport: tr, Timeout: 25 * time.Second}, stop: stop, controller: controller}
 }
 
 func (f *portalE2E) fetch(c *portalE2EClient, address string, want int) {

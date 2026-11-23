@@ -15,6 +15,7 @@ import (
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admission", a.admitConnection)
+	mux.HandleFunc("POST /admission/check", a.admitConnection)
 	mux.HandleFunc("POST /leases/{id}/renew", a.renewConnection)
 	mux.HandleFunc("POST /auth", a.authenticate)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

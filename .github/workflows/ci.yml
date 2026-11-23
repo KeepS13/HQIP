@@ -209,7 +209,7 @@ jobs:
           - group: billing
             tests: TestTrafficBillingRealDualProtocolHotUpdate|TestNodeQuotaRealWebsiteOutageAndReconciliation|TestRealityDirectSurvivesHY2ProcessCrashAndRestart
           - group: slots
-            tests: TestOnlineIPRealTwoNodesAndDifferentSource|TestConnectionSlotsRealTwoNodeSwitchAndReconnect
+            tests: TestOnlineIPRealTwoNodesAndDifferentSource|TestConnectionSlotsRealTwoNodeSwitchAndReconnect|TestActivitySlotsRealProbesReleaseWhileClientsStayOpen
           - group: expiry
             tests: TestOfflineExpiryRealClientsReleaseAfterAdministrativeEdit
     steps:

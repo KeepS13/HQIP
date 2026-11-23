@@ -1,5 +1,7 @@
 # HQIP 项目地图
 
+测速空闲占位修复（2026-11-23）：归属 `subscription-admission`、`node-metering` 与 HY2 适配器，公共守卫新增只读 `Admission.Check`，控制端和 Agent 提供身份检查端点，内核按业务目标引用管理活动授权。空闲 QUIC 保活不占名额，最后一个目标结束即提交 final，再次使用重新准入。名额版本、数据库结构和累计计费不变。HY2 认证与 UDP 适配器从 `server.go` 拆出，均不超过 300 行。证据和验收见 [事故记录](incidents/2026-11-23-hy2-idle-slots.md)。
+
 本次架构调整（2026-11-23）：VLESS + Reality 由 Agent 内的独立出站连接目标；HY2 与 VLESS 共用 `runtime/nodepolicy` 的租约守卫、速率和固定点计费，以及 Agent 既有鉴权、节点额度、名额和撤权账本。VLESS 连接代次归 Agent 所有，HY2 停止或重启不结束 VLESS 授权。契约与迁移边界见 [协议公共业务能力](contracts/protocol-policy.md)。
 
 项目 ID：`hqip`。Go 控制端、节点 Agent 与 HY2/Reality 内核提供订阅授权、流量计费和代理服务；React 管理站、用户站与 Windows 桌面端消费独立 API。

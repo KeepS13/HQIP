@@ -61,6 +61,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/agents/offline-grants/recover", s.agentOfflineRecovery)
 	m.HandleFunc("POST /api/v1/agents/offline-grants/{id}/report", s.agentOfflineReport)
 	m.HandleFunc("POST /api/v1/agents/admission", s.agentAdmission)
+	m.HandleFunc("POST /api/v1/agents/admission/check", s.agentAdmissionIdentity)
 	m.HandleFunc("POST /api/v1/agents/reality-credential", s.agentRealityCredential)
 	m.HandleFunc("POST /api/v1/agents/leases/{id}/renew", s.agentLeaseRenew)
 }

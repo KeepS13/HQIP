@@ -23,3 +23,11 @@
 验证入口：store/agent 的 TestOfflineSlot 系列覆盖单名额、并发抢占、满额补账、丢回执重启、逐连接超时、撤销与迟到 final、失联重连边界；TestConnectionSlotsRealTwoNodeSwitchAndReconnect 使用真实客户端和双节点验证退出、切换与返回原节点。部署兼容性测试见 scripts/test_connection_slots_deployment.py。
 
 `TestOfflineRecovery*`、`TestOfflineRequestFailure*` 和 `TestOfflineSweepDoesNotStarveLaterIdleSlots` 补充首次准入丢回包后无人重连、半写入崩溃、晚提交、截断回包、身份不匹配、丢失本地用量、恢复超时隔离与同步公平性；控制端测试核对节点鉴权及恢复前后真实占用数。
+
+HY2 活动生命周期扩展（2026-11-23）：本机认证端点 `POST /admission/check` 经 Agent 转发到节点鉴权的 `POST /api/v1/agents/admission/check`。成功只返回 `authenticated=true` 与 `accountingId`，无 `leaseId`，不是转发许可。中央检查入口启用、凭据与节点归属、订阅会话和有效权益；名额已满不影响身份验证。网站失联时仅已有同 IP、同协议、仍持有名额且有效的本地授权可确认身份；实际使用仍通过原准入流程。
+
+首次目标拨号申请随机子连接 ID，最后一个目标关闭即 final，后续业务活动使用新子 ID 重新准入。每个传输的互斥锁串行化申请与结束，并发目标不重复占用；旧流的迟到关闭不会结束新授权。父账本可以复用，累计计费不重置；达到 4096 条历史子记录后为新活动选择新父账本，保留全部旧记录及迟到结算身份，不删除未知用量。
+
+此扩展无数据库迁移，名额事务版本仍为 v3。先发布控制端，再发布 Agent，最后切换 HY2；回退按相反顺序。新内核遇到旧 Agent 的 check 端点 404 会拒绝身份验证，禁止回退到会占名额的普通握手。旧内核配新 Agent 保持旧生命周期，只有内核切换后才修复空闲占位。上线采用同一提交完整发布包及现有 CI 门禁；节点 HY2 切换会让旧 QUIC 重连。
+
+回归：`TestActivitySlotsRealProbesReleaseWhileClientsStayOpen` 使用真实 sing-box（CI）及 Mihomo（设置 `HQIP_MIHOMO` 时），验证双进程持续运行、短请求结束后五秒内回收、活动业务仍受限、跨节点复用、六秒保活期间保持零占用和累计用量一致。`TestAdmissionIdentity*` 核验只读身份接口及离线边界；HY2 `TestHQIPActivity*` 覆盖 TCP/UDP、并发关闭、失败拨号与传输结束。

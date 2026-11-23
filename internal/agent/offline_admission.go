@@ -55,6 +55,13 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 				}
 			}
 			if available {
+				// Completed probes can fill a parent with historical children.
+				// Preserve every counter and replay identity, then use a fresh
+				// parent instead of permanently selecting the saturated one.
+				if _, replay := s.Children["off_"+connection]; !replay && len(s.Children) >= 4096 {
+					_ = a.releaseIdleOfflineSlot(ctx, s)
+					continue
+				}
 				selected = s
 				break
 			}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,20 +22,30 @@ func (f sourceIPFactory) New(net.Addr) (net.PacketConn, error) {
 	return net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(string(f))})
 }
 
-// Use a real alternate socket source. Only an authentication rejection proves
-// admission enforced the limit; a transport or certificate failure does not.
+// A full subscription can authenticate an idle QUIC transport. Only a rejected
+// target dial proves admission enforced the limit; TLS/network errors do not.
 func (f *portalE2E) rejectSourceIP(node int, password, ip string) {
 	f.t.Helper()
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM([]byte(f.certPEM))
 	other, _, err := hy.NewClient(&hy.Config{ConnFactory: sourceIPFactory(ip), ServerAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: f.nodes[node].Port}, Auth: password, TLSConfig: hy.TLSConfig{ServerName: "full-chain.invalid", RootCAs: roots}, QUICConfig: hy.QUICConfig{DisableChromeParrot: true}})
-	if err == nil {
-		other.Close()
-		f.t.Fatal("different source IP passed full subscription")
+	if err != nil {
+		f.t.Fatal("idle transport failed before target admission", err)
 	}
-	var denied hyErrors.AuthError
-	if !errors.As(err, &denied) {
-		f.t.Fatal("different-IP test failed before admission", err)
+	defer other.Close()
+	target, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer target.Close()
+	conn, err := other.TCP(target.Addr().String())
+	if err == nil {
+		conn.Close()
+		f.t.Fatal("another instance forwarded through a full subscription")
+	}
+	var denied hyErrors.DialError
+	if !errors.As(err, &denied) || !strings.Contains(denied.Message, "HQIP admission unavailable or denied") {
+		f.t.Fatal("different-IP target failed for a reason other than admission", err)
 	}
 }
 

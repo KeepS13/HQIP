@@ -42,7 +42,7 @@ func (l *connectionLease) acceptGrant(g LeaseGrant, requestStart time.Time, init
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	if l.closed || g.Legacy || g.LeaseID == "" || g.AccountingID == "" || g.UserID == "" || g.BandwidthBytesPerSecond < 0 || g.BudgetBytes <= 0 || g.ConsumedBytes < 0 || g.ConsumedBytes > g.BudgetBytes || g.Revision < 0 {
+	if l.closed || g.Legacy || g.Authenticated || g.LeaseID == "" || g.AccountingID == "" || g.UserID == "" || g.BandwidthBytesPerSecond < 0 || g.BudgetBytes <= 0 || g.ConsumedBytes < 0 || g.ConsumedBytes > g.BudgetBytes || g.Revision < 0 {
 		return errors.New("invalid lease grant")
 	}
 	if g.RateVersion < 0 || (!initial && !now.Before(l.deadline)) {

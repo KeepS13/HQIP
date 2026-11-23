@@ -93,6 +93,10 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing or invalid ingress client IP; upgrade core", 400)
 		return
 	}
+	if r.URL.Path == "/admission/check" {
+		a.checkAdmissionIdentity(w, r, body.Password, protocol, body.ClientIP)
+		return
+	}
 	if a.offlineAllowed() || a.cachedOfflineCredential(body.Password) {
 		a.offlineAdmit(w, r, body.ConnectionID, body.Password, protocol, body.ClientIP, body.Transport)
 		return

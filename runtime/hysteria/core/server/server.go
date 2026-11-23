@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"math/rand"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/apernet/quic-go/http3"
 	"github.com/apernet/quic-go/quicvarint"
 
-	"github.com/apernet/hysteria/core/v2/internal/congestion"
 	"github.com/apernet/hysteria/core/v2/internal/protocol"
 	"github.com/apernet/hysteria/core/v2/internal/utils"
 )
@@ -134,7 +132,7 @@ func (s *serverImpl) handleClient(conn *quic.Conn) {
 	}
 	// If the client is authenticated, we need to log the disconnect event
 	if handler.authenticated {
-		if tl := s.config.TrafficLogger; tl != nil {
+		if tl := s.config.TrafficLogger; tl != nil && s.config.HQIPAdmission == nil {
 			tl.LogOnlineState(handler.authID, false)
 		}
 		if el := s.config.EventLogger; el != nil {
@@ -166,95 +164,6 @@ func newH3sHandler(config *Config, conn *quic.Conn) *h3sHandler {
 		connID:      rand.Uint32(),
 		admissionID: randomConnectionID(),
 		outbound:    config.Outbound,
-	}
-}
-
-func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && r.Host == protocol.URLHost && r.URL.Path == protocol.URLPath {
-		h.authMutex.Lock()
-		defer h.authMutex.Unlock()
-		if h.authenticated {
-			// Already authenticated
-			protocol.AuthResponseToHeader(w.Header(), protocol.AuthResponse{
-				UDPEnabled: !h.config.DisableUDP,
-				Rx:         h.config.BandwidthConfig.MaxRx,
-				RxAuto:     h.config.IgnoreClientBandwidth,
-			})
-			w.WriteHeader(protocol.StatusAuthOK)
-			return
-		}
-		authReq := protocol.AuthRequestFromHeader(r.Header)
-		actualTx := authReq.Rx
-		var ok bool
-		var id string
-		if h.config.HQIPAdmission != nil {
-			var err error
-			peerIP, _, _ := net.SplitHostPort(h.conn.RemoteAddr().String())
-			h.lease, id, err = h.config.HQIPAdmission.open(h.conn.Context(), h.admissionID, authReq.Auth, peerIP, func() { _ = h.conn.CloseWithError(closeErrCodeTrafficLimitReached, "HQIP authorization ended") })
-			ok = err == nil
-			if h.lease != nil {
-				h.outbound = &leasedOutbound{base: h.config.Outbound, lease: h.lease}
-			}
-		} else {
-			ok, id = h.config.Authenticator.Authenticate(h.conn.RemoteAddr(), authReq.Auth, actualTx)
-		}
-		if ok {
-			// Set authenticated flag
-			h.authenticated = true
-			h.authID = id
-			if h.config.IgnoreClientBandwidth {
-				// Ignore client bandwidth and use the configured congestion controller.
-				congestion.UseConfigured(h.conn, h.config.CongestionConfig.Type, h.config.CongestionConfig.BBRProfile)
-				actualTx = 0
-			} else {
-				// actualTx = min(serverTx, clientRx)
-				if h.config.BandwidthConfig.MaxTx > 0 && actualTx > h.config.BandwidthConfig.MaxTx {
-					// We have a maxTx limit and the client is asking for more than that,
-					// return and use the limit instead
-					actualTx = h.config.BandwidthConfig.MaxTx
-				}
-				if actualTx > 0 {
-					congestion.UseBrutal(h.conn, actualTx, h.config.BandwidthConfig.DisableLossCompensation)
-				} else {
-					// Client doesn't know its own bandwidth, use the configured congestion controller.
-					congestion.UseConfigured(h.conn, h.config.CongestionConfig.Type, h.config.CongestionConfig.BBRProfile)
-				}
-			}
-			// Auth OK, send response
-			protocol.AuthResponseToHeader(w.Header(), protocol.AuthResponse{
-				UDPEnabled: !h.config.DisableUDP,
-				Rx:         h.config.BandwidthConfig.MaxRx,
-				RxAuto:     h.config.IgnoreClientBandwidth,
-			})
-			w.WriteHeader(protocol.StatusAuthOK)
-			// Call event logger
-			if tl := h.config.TrafficLogger; tl != nil {
-				tl.LogOnlineState(id, true)
-			}
-			if el := h.config.EventLogger; el != nil {
-				el.Connect(h.conn.RemoteAddr(), id, actualTx)
-			}
-			// Initialize UDP session manager (if UDP is enabled)
-			// We use sync.Once to make sure that only one goroutine is started,
-			// as ServeHTTP may be called by multiple goroutines simultaneously
-			if !h.config.DisableUDP {
-				go func() {
-					sm := newUDPSessionManager(
-						&udpIOImpl{h.conn, id, h.config.TrafficLogger, h.config.RequestHook, h.outbound},
-						&udpEventLoggerImpl{h.conn, id, h.config.EventLogger},
-						h.config.UDPIdleTimeout,
-					)
-					h.udpSM = sm
-					go sm.Run()
-				}()
-			}
-		} else {
-			// Auth failed, pretend to be a normal HTTP server
-			h.masqHandler(w, r)
-		}
-	} else {
-		// Not an auth request, pretend to be a normal HTTP server
-		h.masqHandler(w, r)
 	}
 }
 
@@ -374,89 +283,5 @@ func (h *h3sHandler) masqHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Return 404 for everything
 		http.NotFound(w, r)
-	}
-}
-
-// udpIOImpl is the IO implementation for udpSessionManager with TrafficLogger support
-type udpIOImpl struct {
-	Conn          *quic.Conn
-	AuthID        string
-	TrafficLogger TrafficLogger
-	RequestHook   RequestHook
-	Outbound      Outbound
-}
-
-func (io *udpIOImpl) ReceiveMessage() (*protocol.UDPMessage, error) {
-	for {
-		msg, err := io.Conn.ReceiveDatagram(context.Background())
-		if err != nil {
-			// Connection error, this will stop the session manager
-			return nil, err
-		}
-		udpMsg, err := protocol.ParseUDPMessage(msg)
-		if err != nil {
-			// Invalid message, this is fine - just wait for the next
-			continue
-		}
-		if io.TrafficLogger != nil {
-			ok := io.TrafficLogger.LogTraffic(io.AuthID, uint64(len(udpMsg.Data)), 0)
-			if !ok {
-				// TrafficLogger requested to disconnect the client
-				_ = io.Conn.CloseWithError(closeErrCodeTrafficLimitReached, "")
-				return nil, errDisconnect
-			}
-		}
-		return udpMsg, nil
-	}
-}
-
-func (io *udpIOImpl) SendMessage(buf []byte, msg *protocol.UDPMessage) error {
-	if io.TrafficLogger != nil {
-		ok := io.TrafficLogger.LogTraffic(io.AuthID, 0, uint64(len(msg.Data)))
-		if !ok {
-			// TrafficLogger requested to disconnect the client
-			_ = io.Conn.CloseWithError(closeErrCodeTrafficLimitReached, "")
-			return errDisconnect
-		}
-	}
-	msgN := msg.Serialize(buf)
-	if msgN < 0 {
-		// Message larger than buffer, silent drop
-		return nil
-	}
-	return io.Conn.SendDatagram(buf[:msgN])
-}
-
-func (io *udpIOImpl) Hook(packets [][]byte, reqAddr *string) (bool, error) {
-	if io.RequestHook != nil && io.RequestHook.Check(true, *reqAddr) {
-		return io.RequestHook.UDP(packets, reqAddr)
-	} else {
-		return true, nil
-	}
-}
-
-func (io *udpIOImpl) UDP(reqAddr string) (UDPConn, error) {
-	return io.Outbound.UDP(reqAddr)
-}
-
-func (io *udpIOImpl) CheckUDP(reqAddr string) error {
-	return io.Outbound.CheckUDP(reqAddr)
-}
-
-type udpEventLoggerImpl struct {
-	Conn        *quic.Conn
-	AuthID      string
-	EventLogger EventLogger
-}
-
-func (l *udpEventLoggerImpl) New(sessionID uint32, reqAddr string) {
-	if l.EventLogger != nil {
-		l.EventLogger.UDPRequest(l.Conn.RemoteAddr(), l.AuthID, sessionID, reqAddr)
-	}
-}
-
-func (l *udpEventLoggerImpl) Close(sessionID uint32, err error) {
-	if l.EventLogger != nil {
-		l.EventLogger.UDPError(l.Conn.RemoteAddr(), l.AuthID, sessionID, err)
 	}
 }

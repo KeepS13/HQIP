@@ -26,6 +26,7 @@ type AdmissionConfig struct {
 }
 
 type LeaseGrant struct {
+	Authenticated           bool           `json:"authenticated,omitempty"` // Identity only; never a forwarding grant.
 	Billing                 *billing.Grant `json:"billing,omitempty"`
 	LeaseID                 string         `json:"leaseId"`
 	UserID                  string         `json:"userId"`
@@ -116,6 +117,11 @@ func (a *Admission) open(ctx context.Context, connectionID, password, clientIP s
 	g, err := a.request(ctx, "/admission", map[string]string{"connectionId": connectionID, "password": password, "clientIP": clientIP, "billingCapability": billing.Capability, "transport": a.config.Transport})
 	if err != nil {
 		return nil, "", err
+	}
+	// Identity-only receipts must never turn into a forwarding permit, even
+	// if a malformed response also carries the legacy compatibility marker.
+	if g.Authenticated {
+		return nil, "", errors.New("identity receipt is not a forwarding grant")
 	}
 	if g.Legacy {
 		if g.AccountingID == "" || g.LeaseID != "" {
