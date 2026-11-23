@@ -65,7 +65,7 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 	for _, test := range []struct {
 		query string
 		count int
-	}{{"", 1}, {"?protocols=" + model.RealityCapability, 2}} {
+	}{{"", 1}, {"?protocols=" + model.RealityCapability, 2}, {"?protocols=future-v9," + model.RealityCapability, 2}, {"?protocols=future-v9&protocols=" + model.RealityCapability, 2}, {"?protocols=future-v9", 1}} {
 		w = bearerRequest(h, "GET", "/api/v3/client/profile"+test.query, nil, tokens.AccessToken)
 		var profile struct {
 			Nodes     []model.ClientNode
@@ -89,7 +89,7 @@ func TestNativeProtocolOptInAndCredentialFreeCatalog(t *testing.T) {
 	for _, test := range []struct {
 		query string
 		count int
-	}{{"", 1}, {"?protocols=" + model.RealityCapability, 2}} {
+	}{{"", 1}, {"?protocols=" + model.RealityCapability, 2}, {"?protocols=future-v9," + model.RealityCapability, 2}, {"?protocols=future-v9&protocols=" + model.RealityCapability, 2}, {"?protocols=future-v9", 1}} {
 		w = bearerRequest(h, "GET", "/api/v3/client/profile"+test.query, nil, tokens.AccessToken)
 		var profile model.ClientProfile
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &profile) != nil || len(profile.Nodes) != test.count {

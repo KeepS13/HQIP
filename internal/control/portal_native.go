@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/store"
@@ -89,7 +90,7 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 	}
 	// Older native clients interpret every endpoint as HY2. Their existing
 	// sessions keep the old shape until the client advertises protocol support.
-	if r.URL.Query().Get("protocols") != model.RealityCapability {
+	if !nativeProtocolSupported(r, model.RealityCapability) {
 		filtered := p.Nodes[:0]
 		for _, n := range p.Nodes {
 			if n.Protocol != "vless" {
@@ -130,6 +131,19 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 		return
 	}
 	reply(w, 200, v)
+}
+
+// Capabilities are a set, not an application version. New clients may advertise
+// additional protocols without losing ones this server already understands.
+func nativeProtocolSupported(r *http.Request, capability string) bool {
+	for _, value := range r.URL.Query()["protocols"] {
+		for _, item := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+			if item == capability {
+				return true
+			}
+		}
+	}
+	return false
 }
 func (s *Server) nativeStatus(w http.ResponseWriter, r *http.Request, user, session string) {
 	var b model.ClientStatus

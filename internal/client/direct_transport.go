@@ -17,6 +17,11 @@ func newDirectHTTPTransport() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.ForceAttemptHTTP2 = true
+	// Proxy=nil only bypasses HTTP proxies. The platform dialer also bypasses
+	// TUN routes, so account recovery never depends on a working VPN connection.
+	transport.DialContext = directAccountTCP
+	transport.ResponseHeaderTimeout = 10 * time.Second
+	transport.IdleConnTimeout = 30 * time.Second
 	transport.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -31,14 +36,22 @@ func newDirectHTTPTransport() *http.Transport {
 		if config.ServerName == "" {
 			config.ServerName = host
 		}
-		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		addresses, err := lookupAccountIPs(ctx, host)
 		if err != nil {
 			return nil, err
 		}
 		candidates := interleaveAddresses(addresses, port)
-		dialer := &tls.Dialer{NetDialer: &net.Dialer{KeepAlive: 30 * time.Second}, Config: config}
 		return raceTLSAddresses(ctx, candidates, 250*time.Millisecond, func(ctx context.Context, address string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, address)
+			conn, err := directAccountTCP(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			secured := tls.Client(conn, config)
+			if err = secured.HandshakeContext(ctx); err != nil {
+				_ = conn.Close()
+				return nil, err
+			}
+			return secured, nil
 		})
 	}
 	return transport

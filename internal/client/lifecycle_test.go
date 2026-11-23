@@ -124,8 +124,8 @@ func TestCloseJoinsApplyAndDiscardsQueuedApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitClosedSignal(t, engine.started, "first Apply did not start")
-	// A second intent queues another Apply behind the first worker's mutex.
-	if err := c.Connect(); err != nil {
+	// A real mode change queues Apply; duplicate Connect is intentionally a no-op.
+	if err := c.SetMode("global", false); err != nil {
 		t.Fatal(err)
 	}
 	awaitClosedSignal(t, engine.canceled, "superseded Apply was not canceled")

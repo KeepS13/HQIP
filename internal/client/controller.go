@@ -579,6 +579,12 @@ func (c *Controller) Connect() error {
 		c.mu.Unlock()
 		return errors.New("请先登录用户账户")
 	}
+	// Connect expresses intent, not a forced restart. Repeated clicks from a
+	// delayed view must preserve an in-flight apply or same-node recovery.
+	if c.view.ConnectionIntent {
+		c.mu.Unlock()
+		return nil
+	}
 	if c.view.SelectionPending {
 		c.mu.Unlock()
 		return errors.New("正在切换订阅，请稍后连接")
@@ -699,8 +705,20 @@ func (c *Controller) SetMode(mode string, tun bool) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	c.mu.Lock()
+	// The dashboard, settings and tray share this entry point. Selecting the
+	// current mode is idempotent and must not drain an active node lease.
+	if c.saved.Mode == mode && c.saved.TUN == tun {
+		c.mu.Unlock()
+		return nil
+	}
+	previousMode, previousTUN := c.saved.Mode, c.saved.TUN
 	c.saved.Mode = mode
 	c.saved.TUN = tun
+	if err := c.persistLocked(); err != nil {
+		c.saved.Mode, c.saved.TUN = previousMode, previousTUN
+		c.mu.Unlock()
+		return err
+	}
 	c.view.Mode = mode
 	c.view.TUNEnabled = tun
 	c.generation++
@@ -709,12 +727,11 @@ func (c *Controller) SetMode(mode string, tun bool) error {
 		c.cancelApply()
 	}
 	on := c.view.ConnectionIntent
-	e := c.persistLocked()
 	c.mu.Unlock()
-	if e == nil && on {
+	if on {
 		c.launch(c.applyLatest)
 	}
-	return e
+	return nil
 }
 func (c *Controller) applyLatest() {
 	c.applyMu.Lock()

@@ -3,6 +3,7 @@ module github.com/KeepS13/HQIP
 go 1.26.10
 
 require (
+	github.com/KeepS13/HQIP/runtime/nodepolicy v0.0.0
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/apernet/hysteria/core/v2 v2.0.0
 	github.com/apernet/quic-go v0.63.1-0.20261004180939-a10df75c260c
@@ -19,7 +20,7 @@ require (
 	modernc.org/sqlite v1.61.1
 )
 
-// The Reality ingress forwards through the same pinned admission-aware HY2 core.
+// HY2 and Reality consume the same independent nodepolicy business module.
 replace github.com/apernet/hysteria/core/v2 => ./runtime/hysteria/core
 
 require (
@@ -50,3 +51,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace github.com/KeepS13/HQIP/runtime/nodepolicy => ./runtime/nodepolicy

@@ -1,13 +1,19 @@
 # HQIP 项目地图
 
+本次架构调整（2026-11-23）：VLESS + Reality 由 Agent 内的独立出站连接目标；HY2 与 VLESS 共用 `runtime/nodepolicy` 的租约守卫、速率和固定点计费，以及 Agent 既有鉴权、节点额度、名额和撤权账本。VLESS 连接代次归 Agent 所有，HY2 停止或重启不结束 VLESS 授权。契约与迁移边界见 [协议公共业务能力](contracts/protocol-policy.md)。
+
 项目 ID：`hqip`。Go 控制端、节点 Agent 与 HY2/Reality 内核提供订阅授权、流量计费和代理服务；React 管理站、用户站与 Windows 桌面端消费独立 API。
+
+性能与稳定性维护（2026-11-23）：`client-presentation` 的两个网站共用无框架依赖的 `web-shared/polling.ts` 调度器，API/鉴权仍由各应用独立管理。目标为每个读取任务最多一个在途请求，提交后刷新最多合并一个后续读取，15 秒取消超时读取、后台暂停、故障退避最多 60 秒（原间隔更长时保留）。客户端采样和 `protocol-outbound` 的多地址连接优化及验证边界记录在 `docs/reviews/2026-11-23-performance-stability.md`；不改变计费、准入和协议凭据契约。
+
 
 本次精简：每份订阅的同时在线上限改为 HY2 在线客户端实例数加 VLESS 来源 IP 数，节点分配数独立保留。同 IP 的两个 HY2 实例加一个 VLESS 来源占三个名额。直接复用 portal_leases、订阅事务和 Agent 账本及已有计费协议字段，不新增设备表、缓存服务或授权额度。来源 IP 存在现有连接表，HY2 实例与 VLESS IP 合计不再增加数据库列。仅 VLESS 在同一订阅内按来源 IP 跨节点去重；HY2 每条独立客户端会话单独计数。旧记录缺少可信协议或 IP 时按许可逐条计数。发布先升级控制端，再统一升级节点与内核。完整语义见 [在线计数契约](contracts/online-ips.md)。
 
 | 模块 | 所有者与位置 | 契约 |
 | --- | --- | --- |
 | subscription-admission | control / internal/store、internal/control | offline-admission v1；node-quota v1；[connection-slots v3](contracts/connection-slots.md) |
-| node-metering | Agent / internal/agent，runtime/hysteria/core/server | 本地持久化子租约、协议计费段 |
+| node-metering | Agent / internal/agent，runtime/nodepolicy | [公共守卫](contracts/protocol-policy.md)、本地持久化子租约、协议计费段 |
+| protocol-outbound | internal/reality、internal/outbound；HY2 server 适配器 | VLESS 独立 TCP/UDP 出站、共同节点出口策略 |
 | traffic-billing | store、model、runtime billing | 固定点倍率与幂等累计报告 |
 | client-presentation | internal/client、desktop、user-web | 用户余额与原始链路统计 |
 | routing | internal/rules；internal/control；internal/client；internal/winclient | [大陆直连策略与兼容验证](mainland-routing.md)：统一域名/IP/DNS 分流，旧订阅在导出时应用，节点 URI 的路由由客户端管理 |

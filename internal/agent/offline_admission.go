@@ -11,7 +11,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/secure"
 )
 
-func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection, password, protocol, clientIP string) {
+func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection, password, protocol, clientIP string, transport ...string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), admissionControlTimeout)
 	defer cancel()
 	a.offlineMu.Lock()
@@ -22,7 +22,7 @@ func (a *Agent) offlineAdmit(w http.ResponseWriter, r *http.Request, connection,
 		a.offlineIssued = map[string]time.Time{}
 		a.offlineBoot = time.Now()
 	}
-	coreGeneration, coreErr := a.generation(ctx)
+	coreGeneration, coreErr := a.forwardingGeneration(ctx, transport...)
 	if coreErr != nil || coreGeneration == "" {
 		http.Error(w, "core state unavailable", 503)
 		return

@@ -16,17 +16,17 @@
 
 ## 准入与计量
 
-Agent 内置 Reality TCP 入口，VLESS 数据全部通过本机已有的 HQIP HY2 核心转发。入口没有直连目的地址的实现，因此保留原有 ACL、出口 IP、带宽、预算、租约撤销和有效载荷计量。TLS 与封装开销不重复计入用户流量；服务器网卡统计仍按原口径。
+Agent 内置 Reality TCP 入口，VLESS 通过自身的 `internal/outbound` 直接连接目标服务，不建立本机 HY2 连接。两种协议共同使用 `runtime/nodepolicy` 的授权守卫和 Agent 的业务账本，沿用带宽、套餐预算、连接名额、撤权和有效载荷计费规则。受管节点仍绑定节点 IPv4、使用 1.1.1.1 DNS，并拒绝相同的私网网段；默认拒绝列表统一生成 HY2 ACL。TLS 与封装开销不重复计入用户流量；VLESS 原始流量独立写入既有日、分钟、小时统计，与 HY2 合并展示但不重复扣套餐。
 
-VLESS UUID 是原随机凭据 SHA-256 前 128 位的别名。中央数据库仍保存原有按用户、订阅、节点、作用域隔离的凭据，鉴权 Agent 只能解析自己的节点。轮换第三方订阅使旧 HY2 密码与旧 UUID 同时失效；原生客户端的独立会话不受该轮换影响。解析成功仍须经过真正的 HY2 准入，不能绕过名额、流量或撤权。
+VLESS UUID 是原随机凭据 SHA-256 前 128 位的别名。中央数据库仍保存原有按用户、订阅、节点、作用域隔离的凭据，鉴权 Agent 只能解析自己的节点。轮换第三方订阅使旧 HY2 密码与旧 UUID 同时失效；原生客户端的独立会话不受该轮换影响。解析成功仍须经过同一 Agent 准入和公共租约守卫，不能绕过名额、流量或撤权。
 
-VLESS 每个请求建立流，同 UUID、同来源 IP 的流共用一个本机 HY2 连接；最后一条流结束 5 秒后释放。不同来源 IP 或不同凭据分别占连接名额。无法据此识别同 NAT 下共享凭据的物理设备，复制凭据也不会增加套餐额度。客户端不会把 VLESS 的正常空闲释放误判为故障。
+VLESS 每个请求建立流，同 UUID、同来源 IP 的流共用一个独立出站授权；最后一条流结束 5 秒后释放。不同凭据仍有各自账本，中央按原规则在同一订阅内对 VLESS 来源 IP 去重。无法据此识别同 NAT 下共享凭据的物理设备，复制凭据也不会增加套餐额度。客户端不会把 VLESS 的正常空闲释放误判为故障。
 
-新 VLESS 连接需要控制服务在线解析别名。已有本机后端继续遵守原 HY2 租约策略；不承诺 VLESS 离线冷重连，也不在节点持久化用户明文密码。HY2 的既有离线能力保持原样。
+新 VLESS 连接解析别名后按既有准入规则申请授权。网站暂时失联时，仅已加密缓存且仍有有效本地授权的凭据可走原有离线路径；已释放名额不能离线重新占用。节点不持久化用户明文密码。两种协议的短租约仍最多 120 秒，每 5 秒续约。VLESS 的运行代次属于 Agent，HY2 崩溃、停止或重启不会中断 VLESS 数据、撤销其名额或隐藏端点；Agent 重启会断开 VLESS。
 
 ## 配置、归属与回滚
 
-`agent.json` 的 `reality` 仅含 `port`、`backendPort`、`serverName`。默认握手目标为 `www.microsoft.com:443`；修改目标前需确认支持 TLS 1.3，并重新验证完整 Reality 握手。SNI 是握手目标，与用户拨号的节点域名分开；目标不能指回当前 Reality 入口形成自回环。私钥与 short ID 在节点状态目录的 `reality-identity.json` 一次生成，0600 保存，重启和升级不轮换。控制数据库仅保存公开业务端点；不保存私钥、素材路径或升级操作记录。
+`agent.json` 的 `reality` 使用 `port`、`serverName`；`backendPort` 仅兼容读取旧配置，可省略，不参与转发。默认握手目标为 `www.microsoft.com:443`；修改目标前需确认支持 TLS 1.3，并重新验证完整 Reality 握手。SNI 是握手目标，与用户拨号的节点域名分开；目标不能指回当前 Reality 入口形成自回环。私钥与 short ID 在节点状态目录的 `reality-identity.json` 一次生成，0600 保存，重启和升级不轮换。控制数据库仅保存公开业务端点；不保存私钥、素材路径或升级操作记录。
 
 启动时验证本机真实 Reality 握手，成功才报告端点。目标或端口故障时，Agent 保留 HY2 准入并定期重试；不会把单纯监听成功视为 Reality 可用。节点周期报告缺失能力或端点时，服务端取消其 Reality 展示。
 
@@ -37,6 +37,7 @@ VLESS 每个请求建立流，同 UUID、同来源 IP 的流共用一个本机 H
 ## 验证
 
 - Go 回归覆盖同一物理节点两种展示、凭据作用域、共享名额与用量、轮换、缺失能力、三种订阅格式、原生客户端协议选择及测速。
+- `HQIP_E2E_CORE=<本次构建的 HY2 路径> go test -tags=with_utls ./internal/agent -run TestRealityDirectSurvivesHY2ProcessCrashAndRestart -count=1 -v`：真实控制端、Agent 和本机测试核心，强制终止并重启 HY2，验证同一 VLESS 授权及目标 TCP 连接继续转发、停机期间新准入、续约、名额释放、计费和轮换撤权。下面的 Reality wire 测试不启动 HY2 服务。
 - `HQIP_SINGBOX_EXE=<已验证 sing-box 路径> go test -tags=with_utls ./internal/reality -run TestSingBoxRealityGuardedWire -count=1 -v`：同时验证旧 flow 与 Vision、TLS 1.2/1.3 多记录双向传输、TCP、XUDP、共享租约、累计计量和拒绝授权，并断言 sing-box 实际进入 Vision 直传。设置 `HQIP_XRAY_EXE` 可运行 `TestXrayRealityGuardedWire`，同样覆盖两种 flow。测试的服务、目标及凭据均在本机临时创建。
 - `HQIP_REALITY_TARGET_SMOKE=1 go test ./internal/reality -run TestDefaultRealityTargetHandshake -count=1 -v`：使用真实微软默认目标完成本机 Reality 身份握手；此项需要联网，普通 CI 不依赖外部目标可用性。
 - Python 回归覆盖配置恢复、保留实时账本、既有端口不重选、原有防火墙规则保留、启动及防火墙失败回滚。

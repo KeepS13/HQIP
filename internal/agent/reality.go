@@ -16,8 +16,9 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	"github.com/KeepS13/HQIP/internal/reality"
-	hy "github.com/apernet/hysteria/core/v2/client"
+	"github.com/KeepS13/HQIP/runtime/nodepolicy"
 	utls "github.com/metacubex/utls"
 )
 
@@ -214,27 +215,26 @@ func (a *Agent) resolveRealityCredential(ctx context.Context, uuid string) (stri
 	return response.Password, nil
 }
 
-// The loop-local HY2 connection uses the same server certificate validation and
-// per-scope password as ordinary clients. No probe or unlimited credential is
-// used; all business traffic remains charged by the existing forwarding core.
-func (a *Agent) connectRealityBackend(ctx context.Context, password, clientIP string) (hy.Client, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
+// The direct session uses the same authenticated Agent business endpoint as
+// HY2. The signed ticket binds protocol and peer IP; no HY2 process is dialed.
+func (a *Agent) connectRealityBackend(ctx context.Context, password, clientIP string) (outbound.Client, error) {
 	credential, err := a.realityBillingPassword(password, clientIP)
 	if err != nil {
 		return nil, err
 	}
-	client, _, err := hy.NewClient(&hy.Config{
-		ServerAddr: &net.UDPAddr{IP: net.ParseIP(a.cfg.PublicIP), Port: a.cfg.Reality.BackendPort}, Auth: credential,
-		TLSConfig:  hy.TLSConfig{ServerName: a.cfg.Domain},
-		QUICConfig: hy.QUICConfig{DisableChromeParrot: true, MaxIdleTimeout: 10 * time.Second, KeepAlivePeriod: 2 * time.Second},
-	})
-	if err == nil && ctx.Err() != nil {
-		_ = client.Close()
-		return nil, ctx.Err()
+	admission, err := nodepolicy.NewAdmission(nodepolicy.AdmissionConfig{URL: "http://" + a.cfg.Listen, Secret: a.cfg.StatsSecret, Transport: "vless-direct"})
+	if err != nil {
+		return nil, err
 	}
-	return client, err
+	direct, err := outbound.NewDirect(a.cfg.PublicIP)
+	if err != nil {
+		return nil, err
+	}
+	client, err := outbound.NewSession(ctx, admission, credential, clientIP, direct)
+	if err != nil {
+		return nil, err
+	}
+	return a.trackDirect(client)
 }
 
 func (a *Agent) realityReport() *model.RealityEndpoint {

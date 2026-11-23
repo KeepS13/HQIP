@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	"github.com/KeepS13/HQIP/internal/reality"
-	hy "github.com/apernet/hysteria/core/v2/client"
 	utls "github.com/metacubex/utls"
 )
 
@@ -50,7 +50,7 @@ func TestDefaultRealityTargetHandshake(t *testing.T) {
 		Resolve: func(context.Context, string) (string, error) {
 			return "", errors.New("probe must not authenticate a user")
 		},
-		Connect: func(context.Context, string, string) (hy.Client, error) {
+		Connect: func(context.Context, string, string) (outbound.Client, error) {
 			return nil, errors.New("probe must not open a lease")
 		},
 	})

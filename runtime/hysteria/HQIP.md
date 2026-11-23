@@ -2,9 +2,16 @@
 
 Based on the unmodified protocol and configuration of upstream `app/v2.13.0`.
 `UPSTREAM.json` records the source archive checksum and every original file's
-SHA-256. The upstream MIT license is retained in `LICENSE.md`. Local additions
+SHA-256. The upstream MIT license is retained in `LICENSE.md`. Local adapters
 are `core/server/hqip_*`, integration tests, and the small hooks in the server
 configuration and HTTP/3 connection handler. No client protocol was changed.
+
+The protocol-neutral guard and fixed-point billing implementation live in
+`../nodepolicy`, an independent Go module shared with the direct VLESS outbound.
+Server adapters retain their public configuration/API. VLESS neither creates a
+HY2 client nor requires this process to run. Run `go test ../nodepolicy/...` from
+this directory for the extracted guard regressions; the build source digest
+includes the shared module.
 
 Build with `python scripts/build_hy2.py --test`. Release binaries and the exact
 source digest are written to `dist/hqip-hysteria-manifest.json`.

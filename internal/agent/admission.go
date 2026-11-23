@@ -32,6 +32,7 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Transport         string `json:"transport,omitempty"`
 		ClientIP          string `json:"clientIP"`
 		ConnectionID      string `json:"connectionId"`
 		Password          string `json:"password"`
@@ -46,6 +47,10 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 	password, protocol, clientIP, identityErr := a.billingIdentity(body.Password, body.BillingCapability, body.ClientIP)
 	if identityErr != nil {
 		http.Error(w, "invalid protocol identity", 403)
+		return
+	}
+	if body.Transport != "" && (body.Transport != "vless-direct" || protocol != "vless") {
+		http.Error(w, "invalid forwarding owner", 403)
 		return
 	}
 	body.Password, body.BillingProtocol = password, protocol
@@ -89,9 +94,10 @@ func (a *Agent) admitConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.offlineAllowed() || a.cachedOfflineCredential(body.Password) {
-		a.offlineAdmit(w, r, body.ConnectionID, body.Password, protocol, body.ClientIP)
+		a.offlineAdmit(w, r, body.ConnectionID, body.Password, protocol, body.ClientIP, body.Transport)
 		return
 	}
+	body.Transport = "" // Runtime ownership is local, never part of central identity.
 	a.forwardAdmission(w, r, "/api/v1/agents/admission", body)
 }
 

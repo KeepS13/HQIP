@@ -27,7 +27,7 @@ func (agent *Agent) realityBillingPassword(password, clientIP string) (string, e
 	if err != nil {
 		return "", err
 	}
-	// Bind the original Reality peer before tunnelling through local HY2. A
+	// Bind the original Reality peer to shared local admission. A
 	// client cannot forge this address without the node's signing secret.
 	ticket := realityBillingTicket{ClientIP: ip, Node: agent.cfg.NodeID, Password: password, Nonce: secure.Token(), Expires: agent.now().Add(30 * time.Second).Unix()}
 	raw, err := json.Marshal(ticket)

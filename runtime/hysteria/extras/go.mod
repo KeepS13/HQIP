@@ -3,6 +3,7 @@ module github.com/apernet/hysteria/extras/v2
 go 1.26.10
 
 require (
+	github.com/KeepS13/HQIP/runtime/nodepolicy v0.0.0 // indirect
 	github.com/apernet/hysteria/core/v2 v2.0.0-00010101000000-000000000000
 	github.com/apernet/quic-go v0.63.1-0.20261004180939-a10df75c260c
 	github.com/database64128/tfo-go/v2 v2.3.3
@@ -45,3 +46,5 @@ require (
 )
 
 replace github.com/apernet/hysteria/core/v2 => ../core
+
+replace github.com/KeepS13/HQIP/runtime/nodepolicy => ../../nodepolicy

@@ -1,7 +1,5 @@
-// Package reality provides a TCP VLESS/Reality ingress backed exclusively by
-// the node's existing HY2 service. It cannot dial proxy destinations directly:
-// all TCP and UDP payloads pass through the existing admission, quota, rate,
-// revocation and accounting guards exactly once.
+// Package reality provides VLESS/Reality ingress over independently guarded
+// outbound sessions. TCP and UDP targets do not traverse a local HY2 tunnel.
 package reality
 
 import (
@@ -14,29 +12,26 @@ import (
 	"sync"
 	"time"
 
-	hy "github.com/apernet/hysteria/core/v2/client"
-	hyErrors "github.com/apernet/hysteria/core/v2/errors"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	utls "github.com/metacubex/utls"
 	"github.com/sagernet/sing-vmess/vless"
-	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
-	N "github.com/sagernet/sing/common/network"
 )
 
-// Config is immutable after New. Resolve returns the original HY2 credential
+// Config is immutable after New. Resolve returns the original subscription credential
 // for an authenticated VLESS alias, or an error without disclosing credentials.
-// Connect must establish an admission-checked backend, never a direct outbound.
+// Connect must establish an authorized, metered outbound session before dialing.
 type Config struct {
 	TLS     *utls.RealityConfig
 	Resolve func(context.Context, string) (string, error)
-	Connect func(context.Context, string, string) (hy.Client, error)
+	Connect func(context.Context, string, string) (outbound.Client, error)
 	Idle    time.Duration
 }
 
 type group struct {
 	ready  chan struct{}
-	client hy.Client
+	client outbound.Client
 	err    error
 	refs   int
 	timer  *time.Timer
@@ -117,7 +112,7 @@ func (g *Gateway) serveConn(ctx context.Context, raw net.Conn) {
 		return
 	}
 	// VLESS opens streams, not a QUIC VPN session. Streams sharing a credential
-	// and source IP use one local HY2 connection/lease. Different credentials or
+	// and source IP use one independent outbound session/lease. Different credentials or
 	// source IPs keep separate local meters; central admission deduplicates the
 	// source IP across VLESS credentials/nodes belonging to the same subscription.
 	key := id + "@" + host
@@ -128,8 +123,7 @@ func (g *Gateway) serveConn(ctx context.Context, raw net.Conn) {
 	defer g.release(key, backend)
 	_ = raw.SetDeadline(time.Time{})
 	handler := &forwarder{backend: backend.client, failed: func(err error) {
-		var closed hyErrors.ClosedError
-		if errors.As(err, &closed) {
+		if errors.Is(err, net.ErrClosed) {
 			g.invalidate(key, backend)
 		}
 	}}
@@ -261,7 +255,7 @@ func (g *Gateway) Close() {
 	for c := range g.conns {
 		conns = append(conns, c)
 	}
-	backends := make([]hy.Client, 0, len(g.groups))
+	backends := make([]outbound.Client, 0, len(g.groups))
 	for _, b := range g.groups {
 		if b.timer != nil {
 			b.timer.Stop()
@@ -281,85 +275,5 @@ func (g *Gateway) Close() {
 	}
 	for _, b := range backends {
 		_ = b.Close()
-	}
-}
-
-type forwarder struct {
-	backend hy.Client
-	failed  func(error)
-}
-
-// Both copy directions must finish before the ingress group reference is
-// released. Closing either side interrupts the other direction immediately.
-func (f *forwarder) NewConnectionEx(ctx context.Context, conn net.Conn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
-	defer conn.Close()
-	remote, err := f.backend.TCP(destination.String())
-	if err != nil {
-		f.failed(err)
-	}
-	if err == nil {
-		defer remote.Close()
-		stop := context.AfterFunc(ctx, func() { _ = conn.Close(); _ = remote.Close() })
-		defer stop()
-		done := make(chan struct{})
-		go func() { _, _ = io.Copy(remote, conn); _ = remote.Close(); _ = conn.Close(); close(done) }()
-		_, err = io.Copy(conn, remote)
-		_ = conn.Close()
-		_ = remote.Close()
-		<-done
-	}
-	if onClose != nil {
-		onClose(err)
-	}
-}
-
-func (f *forwarder) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
-	defer conn.Close()
-	remote, err := f.backend.UDP()
-	if err != nil {
-		f.failed(err)
-	}
-	if err == nil {
-		defer remote.Close()
-		stop := context.AfterFunc(ctx, func() { _ = conn.Close(); _ = remote.Close() })
-		defer stop()
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			defer conn.Close()
-			defer remote.Close()
-			buffer := buf.NewSize(65535)
-			defer buffer.Release()
-			for {
-				buffer.Reset()
-				dest, e := conn.ReadPacket(buffer)
-				if e != nil || remote.Send(buffer.Bytes(), dest.String()) != nil {
-					return
-				}
-			}
-		}()
-		for {
-			var data []byte
-			var addr string
-			data, addr, err = remote.Receive()
-			if err != nil {
-				break
-			}
-			// Packet writers consume the buffer, including required VLESS/mux
-			// framing headroom. A slice wrapper would panic in non-mux UDP.
-			headroom := N.CalculateFrontHeadroom(conn)
-			packet := buf.NewSize(headroom + len(data))
-			packet.Advance(headroom)
-			_, _ = packet.Write(data)
-			if err = conn.WritePacket(packet, M.ParseSocksaddr(addr)); err != nil {
-				break
-			}
-		}
-		_ = conn.Close()
-		_ = remote.Close()
-		<-done
-	}
-	if onClose != nil {
-		onClose(err)
 	}
 }

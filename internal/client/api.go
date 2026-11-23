@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -44,6 +43,8 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	if !strings.HasPrefix(path, "/api/v3/client/") || strings.Contains(path, "..") {
 		return nil, "", 0, errors.New("拒绝非客户端接口")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
 	var reader io.Reader
 	if body != nil {
 		b, e := json.Marshal(body)
@@ -63,16 +64,12 @@ func (a *API) request(ctx context.Context, method, path string, body any, token,
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
-	resp, e := a.http.Do(req)
+	resp, e := accountRequest(a.http, req)
 	if e != nil {
 		if ctx.Err() != nil {
 			return nil, "", 0, ctx.Err()
 		}
-		var cert *tls.CertificateVerificationError
-		if errors.As(e, &cert) {
-			return nil, "", 0, errors.New("账户服务 HTTPS 证书校验失败")
-		}
-		return nil, "", 0, temporary(errors.New("无法连接账户服务，请检查网络或稍后重试"))
+		return nil, "", 0, accountTransportError(e)
 	}
 	defer resp.Body.Close()
 	b, e := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

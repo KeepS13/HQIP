@@ -1,7 +1,7 @@
-package server
+package nodepolicy
 
 import (
-	"github.com/apernet/hysteria/core/v2/billing"
+	"github.com/KeepS13/HQIP/runtime/nodepolicy/billing"
 	"testing"
 	"time"
 )

@@ -69,8 +69,13 @@ func (a *Agent) statsJSON(ctx context.Context, method, path string, body any, ou
 func (a *Agent) sample(ctx context.Context) error {
 	a.sampleMu.Lock()
 	defer a.sampleMu.Unlock()
+	defer a.addDirectLive()
 	ctx, cancel := context.WithTimeout(ctx, 900*time.Millisecond)
 	defer cancel()
+	if err := a.sampleDirect(ctx); err != nil {
+		a.sampleFailed()
+		return err
+	}
 	generation, err := a.generation(ctx)
 	if err != nil {
 		a.sampleFailed()

@@ -238,7 +238,15 @@ func (a *Agent) reconcileOfflineChildren(ctx context.Context, s *offlineState, g
 		if child.Closed || child.Ended {
 			continue
 		}
-		ended := generation != "" && child.CoreGeneration != "" && child.CoreGeneration != generation
+		ownerGeneration := generation
+		if strings.HasPrefix(child.CoreGeneration, "vless:") {
+			ownerGeneration, _ = a.forwardingGeneration(ctx, "vless-direct")
+		} else if strings.HasPrefix(ownerGeneration, "vless:") {
+			// A cached pre-upgrade tunnel still belongs to the HY2 process.
+			// An unavailable core gives no evidence that its transport ended.
+			ownerGeneration, _ = a.generation(ctx)
+		}
+		ended := ownerGeneration != "" && child.CoreGeneration != "" && child.CoreGeneration != ownerGeneration
 		issued, ok := a.offlineIssued[id]
 		if !ok {
 			issued = a.offlineBoot

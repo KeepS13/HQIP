@@ -41,7 +41,7 @@ jobs:
       - run: python -m pip install paramiko
       - run: python -m unittest discover -s scripts -p "test_*.py"
       - run: python3 scripts/build.py --skip-web --server-only
-      - run: go test -race ./core/server ./core/internal/integration_tests ./app/cmd
+      - run: go test -race ../nodepolicy/... ./core/server ./core/internal/integration_tests ./app/cmd
         working-directory: runtime/hysteria
       - uses: actions/upload-artifact@v4
         id: upload_linux
@@ -207,7 +207,7 @@ jobs:
       matrix:
         include:
           - group: billing
-            tests: TestTrafficBillingRealDualProtocolHotUpdate|TestNodeQuotaRealWebsiteOutageAndReconciliation
+            tests: TestTrafficBillingRealDualProtocolHotUpdate|TestNodeQuotaRealWebsiteOutageAndReconciliation|TestRealityDirectSurvivesHY2ProcessCrashAndRestart
           - group: slots
             tests: TestOnlineIPRealTwoNodesAndDifferentSource|TestConnectionSlotsRealTwoNodeSwitchAndReconnect
           - group: expiry

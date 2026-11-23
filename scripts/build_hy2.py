@@ -15,7 +15,7 @@ def main():
     args=parser.parse_args()
     env=dict(os.environ,CGO_ENABLED='0')
     if args.test:
-        subprocess.run(['go','test','./core/server','./core/internal/integration_tests','./app/cmd'],cwd=SOURCE,env=env,check=True)
+        subprocess.run(['go','test','../nodepolicy/...','./core/server','./core/internal/integration_tests','./app/cmd'],cwd=SOURCE,env=env,check=True)
     out=ROOT/'dist';out.mkdir(exist_ok=True)
     builds={}
     for platform in args.platform or ['linux-amd64','linux-arm64']:
@@ -24,6 +24,7 @@ def main():
         subprocess.run(['go','build','-trimpath','-buildvcs=false','-ldflags=-s -w','-o',str(target),'./app'],cwd=SOURCE,env=dict(env,GOOS=goos,GOARCH=arch),check=True)
         builds[target.name]=digest(target)
     inputs={str(p.relative_to(SOURCE)).replace('\\','/'):digest(p) for p in SOURCE.rglob('*') if p.is_file() and p.suffix in ('.go','.mod','.sum','.md','.json','.work')}
+    inputs.update({'../nodepolicy/'+str(p.relative_to(ROOT/'runtime/nodepolicy')).replace('\\','/'):digest(p) for p in (ROOT/'runtime/nodepolicy').rglob('*') if p.is_file() and p.suffix in ('.go','.mod','.sum','.md')})
     source_hash=hashlib.sha256(json.dumps(inputs,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     manifest={'upstream':'app/v2.13.0','hqipAdmissionVersion':1,'sourceSHA256':source_hash,'sha256':builds,'license':'runtime/hysteria/LICENSE.md'}
     (out/'hqip-hysteria-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')

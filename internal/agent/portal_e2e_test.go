@@ -339,6 +339,7 @@ type portalE2E struct {
 	db                         *store.Store
 	offline                    atomic.Bool
 	nodes                      []model.Node
+	stopCores                  []func()
 	certPath, keyPath, certPEM string
 	root                       string
 }
@@ -413,7 +414,7 @@ func newPortalE2E(t *testing.T, core string) *portalE2E {
 		yaml := fmt.Sprintf("listen: 127.0.0.1:%d\ntls:\n  cert: %q\n  key: %q\n  sniGuard: strict\nauth:\n  type: http\n  http:\n    url: http://127.0.0.1:%d/auth?secret=%s\nhqipAdmission:\n  url: http://127.0.0.1:%d\n  secret: %s\ntrafficStats:\n  listen: 127.0.0.1:%d\n  secret: %s\n", port, filepath.ToSlash(f.certPath), filepath.ToSlash(f.keyPath), agentPort, secret, agentPort, secret, statsPort, secret)
 		cfg := filepath.Join(nodeDir, "server.yaml")
 		_ = os.WriteFile(cfg, []byte(yaml), 0600)
-		startE2EProcess(t, core, []string{"server", "-c", cfg})
+		f.stopCores = append(f.stopCores, startE2EProcess(t, core, []string{"server", "-c", cfg}))
 		f.wait(8*time.Second, func() bool {
 			var caps struct{ Admission bool }
 			r, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/hqip/capabilities", statsPort), nil)

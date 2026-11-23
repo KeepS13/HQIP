@@ -48,7 +48,10 @@ class AllocationDeploymentTests(unittest.TestCase):
 
     def test_rollback_refuses_old_controller_after_attempt_even_before_switch(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
+            # Production stores canonical paths. Windows temporary paths may
+            # contain an 8.3 alias; normalize the fixture before comparing it
+            # with rollback's resolved active release so this tests migration.
+            root = Path(folder).resolve()
             state, previous = root/'backup', root/'previous'
             state.mkdir()
             previous.mkdir()

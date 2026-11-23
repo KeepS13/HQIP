@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"time"
 )
 
@@ -43,16 +44,28 @@ func (a *Agent) controlJSON(ctx context.Context, method, path string, body any, 
 	return nil
 }
 
-func (a *Agent) sync(ctx context.Context) error {
+func (a *Agent) sync(ctx context.Context) (syncErr error) {
+	// A successful report already returns the current desired configuration.
+	// Keep GET as a fallback for report/backlog/disk failures and backoff ticks:
+	// revocation must remain available even while usage cannot be acknowledged.
+	// syncLoop serializes this work; no new cross-request cache is introduced.
+	reportApplied := false
+	defer func() {
+		if !reportApplied && ctx.Err() == nil {
+			var fallback model.AgentDesired
+			err := a.controlJSON(ctx, http.MethodGet, "/api/v1/agents/config", nil, &fallback)
+			if err == nil {
+				err = a.applyDesired(fallback)
+			}
+			syncErr = errors.Join(syncErr, err)
+		}
+	}()
 	queueErr := a.replayLeaseFinals(ctx)
 	if err := a.syncOfflineGrants(ctx); err != nil {
 		queueErr = err
 	}
 	var desired model.AgentDesired
-	configErr := a.controlJSON(ctx, http.MethodGet, "/api/v1/agents/config", nil, &desired)
-	if configErr == nil {
-		configErr = a.applyDesired(desired)
-	}
+	var configErr error
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -94,14 +107,21 @@ func (a *Agent) sync(ctx context.Context) error {
 			report.Capabilities = append(report.Capabilities, "traffic-billing-v1")
 			report.Capabilities = append(report.Capabilities, model.NodeQuotaCapability, "connection-slots-v3")
 		}
-		if endpoint := a.realityReport(); endpoint != nil {
-			report.Reality = endpoint
-			report.Capabilities = append(report.Capabilities, model.RealityCapability)
-			if reality.VisionEnabled {
-				report.Capabilities = append(report.Capabilities, model.RealityVisionCapability)
+	}
+	// Direct Reality owns a working guard even when HY2 or its stats API is down.
+	// Keep CoreHealthy specific to HY2; do not hide the independent VLESS endpoint.
+	if endpoint := a.realityReport(); endpoint != nil {
+		report.Reality = endpoint
+		for _, capability := range []string{"admission-v1", "traffic-billing-v1", model.NodeQuotaCapability, "connection-slots-v3", model.RealityCapability} {
+			if !slices.Contains(report.Capabilities, capability) {
+				report.Capabilities = append(report.Capabilities, capability)
 			}
 		}
+		if reality.VisionEnabled {
+			report.Capabilities = append(report.Capabilities, model.RealityVisionCapability)
+		}
 	}
+
 	a.cacheMu.RLock()
 	report.Revision = a.cache.AppliedRevision
 	report.Removals = removalStatuses(a.cache)
@@ -129,6 +149,12 @@ func (a *Agent) sync(ctx context.Context) error {
 		}
 	}
 	a.liveMu.RUnlock()
+	for id, count := range a.directOnline() {
+		if report.Online == nil {
+			report.Online = make(map[string]int)
+		}
+		report.Online[id] += count
+	}
 	if err := a.controlJSON(ctx, http.MethodPost, "/api/v1/agents/report", report, &desired); err != nil {
 		a.deferReportRetry()
 		return err
@@ -141,6 +167,7 @@ func (a *Agent) sync(ctx context.Context) error {
 	if err := a.applyDesired(desired); err != nil {
 		return err
 	}
+	reportApplied = true
 	if err := a.acknowledgeRetirement(ctx, report.Retirement); err != nil {
 		return err
 	}

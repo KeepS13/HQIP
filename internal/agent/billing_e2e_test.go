@@ -23,10 +23,13 @@ import (
 
 	"github.com/KeepS13/HQIP/internal/agent"
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	"github.com/KeepS13/HQIP/internal/reality"
+	"github.com/KeepS13/HQIP/internal/testoutbound"
+	"github.com/KeepS13/HQIP/runtime/nodepolicy"
 	"github.com/apernet/hysteria/core/v2/billing"
-	hy "github.com/apernet/hysteria/core/v2/client"
 	utls "github.com/metacubex/utls"
+	"gopkg.in/yaml.v3"
 )
 
 func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
@@ -97,8 +100,20 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM([]byte(f.certPEM))
+	// Read only this isolated fixture's local business endpoint. The VLESS data
+	// path must never dial its HY2 server, even while the HY2 client is active.
+	var config struct {
+		Admission nodepolicy.AdmissionConfig `yaml:"hqipAdmission"`
+	}
+	rawConfig, err := os.ReadFile(filepath.Join(f.root, f.nodes[0].ID, "server.yaml"))
+	if err != nil || yaml.Unmarshal(rawConfig, &config) != nil {
+		t.Fatal("fixture admission configuration", err)
+	}
+	config.Admission.Transport = "vless-direct"
+	admission, err := nodepolicy.NewAdmission(config.Admission)
+	if err != nil {
+		t.Fatal(err)
+	}
 	gateway, err := reality.New(reality.Config{
 		TLS: &utls.RealityConfig{Config: utls.Config{ServerName: "example.com", SessionTicketsDisabled: true}, Type: "tcp", Dest: target.Listener.Addr().String(), DialContext: (&net.Dialer{Timeout: time.Second}).DialContext, ServerNames: map[string]bool{"example.com": true}, PrivateKey: private.Bytes(), ShortIds: map[[8]byte]bool{short: true}, MaxTimeDiff: 2 * time.Minute},
 		Resolve: func(_ context.Context, id string) (string, error) {
@@ -107,13 +122,12 @@ func TestTrafficBillingRealDualProtocolHotUpdate(t *testing.T) {
 			}
 			return passwords[0], nil
 		},
-		Connect: func(_ context.Context, password, clientIP string) (hy.Client, error) {
+		Connect: func(ctx context.Context, password, clientIP string) (outbound.Client, error) {
 			ticket, err := agent.RealityBillingPasswordForTest(f.nodes[0].ID, token, password, clientIP)
 			if err != nil {
 				return nil, err
 			}
-			client, _, err := hy.NewClient(&hy.Config{ServerAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: f.nodes[0].Port}, Auth: ticket, TLSConfig: hy.TLSConfig{ServerName: "full-chain.invalid", RootCAs: pool}, QUICConfig: hy.QUICConfig{DisableChromeParrot: true}})
-			return client, err
+			return outbound.NewSession(ctx, admission, ticket, clientIP, testoutbound.Loopback{})
 		},
 	})
 	if err != nil {

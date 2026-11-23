@@ -28,18 +28,15 @@ import (
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	"github.com/KeepS13/HQIP/internal/reality"
-	hy "github.com/apernet/hysteria/core/v2/client"
-	hs "github.com/apernet/hysteria/core/v2/server"
+	"github.com/KeepS13/HQIP/internal/testoutbound"
+	"github.com/KeepS13/HQIP/runtime/nodepolicy"
 	utls "github.com/metacubex/utls"
 )
 
-type rejectLegacy struct{}
-
-func (rejectLegacy) Authenticate(net.Addr, string, uint64) (bool, string) { return false, "" }
-
 // This opt-in wire test uses the released desktop core, not a second copy of our
-// encoder. Everything else is loopback: Reality target, guarded HY2 backend,
+// encoder. Everything else is loopback: Reality target, guarded direct outbound (no HY2 server),
 // admission and TCP/UDP destinations. No production credentials are required.
 func TestSingBoxRealityGuardedWire(t *testing.T) {
 	binary := os.Getenv("HQIP_SINGBOX_EXE")
@@ -99,10 +96,10 @@ func testRealityGuardedWire(t *testing.T, binary string, xray bool) {
 					reported = max(reported, usage.UploadBytes+usage.DownloadBytes)
 					mu.Unlock()
 				}
-				_ = json.NewEncoder(w).Encode(hs.LeaseGrant{LeaseID: "wire-lease", UserID: "wire-user", AccountingID: "wire-scope", ExpiresAt: time.Now().Add(120 * time.Second), BudgetBytes: 16 << 20, Revision: 1, RateVersion: 1})
+				_ = json.NewEncoder(w).Encode(nodepolicy.LeaseGrant{LeaseID: "wire-lease", UserID: "wire-user", AccountingID: "wire-scope", ExpiresAt: time.Now().Add(120 * time.Second), BudgetBytes: 16 << 20, Revision: 1, RateVersion: 1})
 			}))
 			defer admissionServer.Close()
-			admission, err := hs.NewAdmission(hs.AdmissionConfig{URL: admissionServer.URL, Secret: strings.Repeat("s", 32)})
+			admission, err := nodepolicy.NewAdmission(nodepolicy.AdmissionConfig{URL: admissionServer.URL, Secret: strings.Repeat("s", 32)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,18 +108,6 @@ func testRealityGuardedWire(t *testing.T, binary string, xray bool) {
 			targetTLS.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 			targetTLS.StartTLS()
 			defer targetTLS.Close()
-			pool := x509.NewCertPool()
-			pool.AddCert(targetTLS.Certificate())
-			packet, err := net.ListenPacket("udp4", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			backend, err := hs.NewServer(&hs.Config{Conn: packet, TLSConfig: hs.TLSConfig{Certificates: targetTLS.TLS.Certificates}, Authenticator: rejectLegacy{}, HQIPAdmission: admission})
-			if err != nil {
-				t.Fatal(err)
-			}
-			go backend.Serve()
-			defer backend.Close()
 			private, _ := ecdh.X25519().GenerateKey(rand.Reader)
 			short := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
 			listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -139,9 +124,8 @@ func testRealityGuardedWire(t *testing.T, binary string, xray bool) {
 					}
 					return password, nil
 				},
-				Connect: func(_ context.Context, credential, clientIP string) (hy.Client, error) {
-					c, _, e := hy.NewClient(&hy.Config{ServerAddr: packet.LocalAddr(), Auth: credential, TLSConfig: hy.TLSConfig{ServerName: "example.com", RootCAs: pool}, QUICConfig: hy.QUICConfig{DisableChromeParrot: true}})
-					return c, e
+				Connect: func(ctx context.Context, credential, clientIP string) (outbound.Client, error) {
+					return outbound.NewSession(ctx, admission, credential, clientIP, testoutbound.Loopback{})
 				},
 				Idle: 200 * time.Millisecond,
 			})

@@ -1,5 +1,6 @@
 import { API_URL } from "./config";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPoller } from "../../web-shared/polling";
 let csrfToken = "";
 export function setCSRF(value: string) {
   csrfToken = value;
@@ -31,6 +32,8 @@ export async function api<T>(
   const data = await response
     .json()
     .catch(() => ({ error: "服务器响应异常，请稍后重试" }));
+  // Aborted reads have no authority to log out a newer route/session.
+  signal?.throwIfAborted();
   if (!response.ok) {
     if (response.status === 401 && path !== "/login")
       window.dispatchEvent(new Event("hqip:unauthorized"));
@@ -42,42 +45,23 @@ export function usePolling<T>(path: string, interval = 5000) {
   const [data, setData] = useState<T | null>(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
-  const alive = useRef(true),
-    generation = useRef(0);
-  const refresh = useCallback(async () => {
-    const current = generation.current;
-    try {
-      const result = await api<T>(path);
-      if (alive.current && current === generation.current) {
-        setData(result);
-        setError("");
-      }
-    } catch (e) {
-      if (alive.current && current === generation.current)
-        setError((e as Error).message);
-    } finally {
-      if (alive.current && current === generation.current) setLoading(false);
-    }
-  }, [path]);
+  const owner = useRef<{ path: string; poller: ReturnType<typeof createPoller<T>> } | null>(null);
+  const refresh = useCallback(() => owner.current?.path === path
+    ? owner.current.poller.refresh() : Promise.resolve(), [path]);
   useEffect(() => {
-    alive.current = true;
-    generation.current++;
     setData(null);
     setLoading(true);
-    void refresh();
-    const id = setInterval(() => {
-      if (!document.hidden) void refresh();
-    }, interval);
-    const visible = () => {
-      if (!document.hidden) void refresh();
-    };
-    document.addEventListener("visibilitychange", visible);
+    setError("");
+    const poller = createPoller<T>({
+      interval, read: signal => api<T>(path, "GET", undefined, signal),
+      success: result => { setData(result); setError(""); },
+      failure: e => setError(e.message), settled: () => setLoading(false),
+    });
+    owner.current = { path, poller };
     return () => {
-      alive.current = false;
-      generation.current++;
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", visible);
+      poller.stop();
+      owner.current = null;
     };
-  }, [refresh, interval]);
+  }, [path, interval]);
   return { data, error, loading, refresh, setData };
 }

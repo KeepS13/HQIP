@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	"log/slog"
 	"net"
 	"net/http"
@@ -50,6 +51,10 @@ type liveState struct {
 }
 
 type Agent struct {
+	directMu        sync.Mutex
+	directSessions  map[outbound.Client]struct{}
+	directPending   counter
+	directSampleAt  time.Time
 	realityMu       sync.RWMutex
 	realityEndpoint *model.RealityEndpoint
 	cfg             model.AgentConfig
@@ -57,11 +62,13 @@ type Agent struct {
 	ledger          *ledger
 	controlClient   *http.Client
 	// Owned by syncLoop; configuration/revocation work continues during backoff.
-	reportRetryAt     time.Time
-	reportBackoff     time.Duration
-	offlineMu         sync.Mutex
-	offlineBoot       time.Time
-	offlineIssued     map[string]time.Time
+	reportRetryAt time.Time
+	reportBackoff time.Duration
+	offlineMu     sync.Mutex
+	offlineBoot   time.Time
+	offlineIssued map[string]time.Time
+	// Owned by offlineMu, independent of the external HY2 process.
+	realityGeneration string
 	admissionMu       sync.Mutex
 	leaseReportMu     sync.RWMutex
 	statsClient       *http.Client
@@ -99,6 +106,12 @@ func New(cfg model.AgentConfig, logger *slog.Logger) (*Agent, error) {
 	}
 	l, err := openLedger(cfg.StatePath)
 	if err != nil {
+		return nil, err
+	}
+	// Direct sessions cannot survive this Agent process. Their already-recorded
+	// raw usage remains intact; orphan telemetry baselines are no longer needed.
+	if _, err = l.db.Exec("DELETE FROM baseline WHERE generation='direct'"); err != nil {
+		_ = l.close()
 		return nil, err
 	}
 	cached, err := l.loadCache()
@@ -163,10 +176,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 	cancel()
+	// Direct sessions must deliver finals while the local admission listener is
+	// still available. Each session's final has its own bounded background context.
+	wg.Wait()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)
-	wg.Wait()
 	return runErr
 }
 

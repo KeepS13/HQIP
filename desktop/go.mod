@@ -3,6 +3,7 @@ module github.com/KeepS13/HQIP/desktop
 go 1.26.10
 
 require (
+	github.com/KeepS13/HQIP/runtime/nodepolicy v0.0.0 // indirect
 	github.com/KeepS13/HQIP v0.0.0
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/sys v0.49.0
@@ -36,3 +37,5 @@ require (
 replace github.com/KeepS13/HQIP => ..
 
 replace github.com/apernet/hysteria/core/v2 => ../runtime/hysteria/core
+
+replace github.com/KeepS13/HQIP/runtime/nodepolicy => ../runtime/nodepolicy

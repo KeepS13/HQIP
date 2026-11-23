@@ -83,7 +83,7 @@ func (s *Store) expandProtocolNodes(nodes []model.ClientNode) ([]model.ClientNod
 		if vless.Password != "" {
 			vless.Password = model.RealityUUID(vless.Password)
 		}
-		// Existing tunnels retain their local HY2 offline leases. A new VLESS
+		// Existing sessions retain their local protocol-independent leases. A new VLESS
 		// tunnel needs alias resolution; do not promise cold offline reconnect.
 		vless.OfflineAdmissionVersion, vless.OfflineUntil = 0, time.Time{}
 		result = append(result, node, vless)
@@ -93,7 +93,7 @@ func (s *Store) expandProtocolNodes(nodes []model.ClientNode) ([]model.ClientNod
 
 // ResolveRealityCredential is only called for the authenticated Agent's own
 // node. The UUID aliases an existing credential; it grants no independent access.
-// The local HY2 handshake performs the authoritative transactional admission,
+// The shared local Agent performs the authoritative transactional admission,
 // including recovery holds, revocation, quota, concurrent slots and offline policy.
 func (s *Store) ResolveRealityCredential(ctx context.Context, node, uuid string) (string, error) {
 	prefix, err := model.RealityUUIDHashPrefix(uuid)

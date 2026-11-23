@@ -90,10 +90,6 @@ func (c *Core) Sample(ctx context.Context) (CoreSample, error) {
 	if err != nil {
 		return CoreSample{}, err
 	}
-	var traffic struct {
-		Up   int64 `json:"up"`
-		Down int64 `json:"down"`
-	}
 	var snapshot struct {
 		Upload      int64             `json:"uploadTotal"`
 		Download    int64             `json:"downloadTotal"`
@@ -102,16 +98,10 @@ func (c *Core) Sample(ctx context.Context) (CoreSample, error) {
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	result := make(chan error, 1)
-	go func() { result <- readCoreJSON(requestCtx, port, secret, "/traffic", &traffic) }()
+	// Rates come from cumulative proxy-only counters below. /traffic includes
+	// direct routes and is never consumed; opening its stream each second adds
+	// work and can make valid proxy statistics fail when that stream stalls.
 	err = readCoreJSON(requestCtx, port, secret, "/connections", &snapshot)
-	if err != nil {
-		cancel()
-	}
-	trafficErr := <-result
-	if err == nil {
-		err = trafficErr
-	}
 	if err != nil {
 		return CoreSample{}, err
 	}
@@ -119,7 +109,7 @@ func (c *Core) Sample(ctx context.Context) (CoreSample, error) {
 	if err != nil || newPort != port || newSecret != secret {
 		return CoreSample{}, errors.New("内核已切换")
 	}
-	if snapshot.Upload < 0 || snapshot.Download < 0 || traffic.Up < 0 || traffic.Down < 0 {
+	if snapshot.Upload < 0 || snapshot.Download < 0 {
 		return CoreSample{}, errors.New("内核指标响应无效")
 	}
 	c.mu.Lock()

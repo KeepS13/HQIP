@@ -1,4 +1,4 @@
-package server
+package nodepolicy
 
 func (lease *connectionLease) billingAllows(raw int64) bool {
 	grant := lease.grant.Billing

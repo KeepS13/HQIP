@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/outbound"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,7 +48,10 @@ func instanceConfig(n model.Node, acmeViaCaddy bool, statsSecret string) ([]byte
 	if authPort < 1024 || statsPort < 1024 || authPort > 65535 || statsPort > 65535 || authPort == statsPort {
 		return nil, fmt.Errorf("节点本地鉴权和统计端口无效")
 	}
-	rules := []string{"reject(0.0.0.0/8)", "reject(10.0.0.0/8)", "reject(100.64.0.0/10)", "reject(127.0.0.0/8)", "reject(169.254.0.0/16)", "reject(172.16.0.0/12)", "reject(192.168.0.0/16)", "reject(224.0.0.0/4)", "reject(240.0.0.0/4)", "reject(::/128)", "reject(::1/128)", "reject(fc00::/7)", "reject(fe80::/10)", "reject(ff00::/8)"}
+	rules := make([]string, 0, len(outbound.BlockedCIDRs()))
+	for _, cidr := range outbound.BlockedCIDRs() {
+		rules = append(rules, "reject("+cidr+")")
+	}
 	config := map[string]any{
 		"hqipAdmission": map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d", authPort), "secret": statsSecret},
 		"listen":        net.JoinHostPort(n.PublicIP, strconv.Itoa(n.Port)),

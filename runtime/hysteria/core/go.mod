@@ -3,6 +3,7 @@ module github.com/apernet/hysteria/core/v2
 go 1.26.10
 
 require (
+	github.com/KeepS13/HQIP/runtime/nodepolicy v0.0.0
 	github.com/apernet/quic-go v0.63.1-0.20261004180939-a10df75c260c
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/goleak v1.3.0
@@ -22,3 +23,5 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
+
+replace github.com/KeepS13/HQIP/runtime/nodepolicy => ../../nodepolicy

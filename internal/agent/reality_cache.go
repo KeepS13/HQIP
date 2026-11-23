@@ -12,7 +12,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/secure"
 )
 
-// Reality must recover its HY2 backend credential locally during a website
+// Reality must recover its subscription credential locally during a website
 // outage. Cache only ciphertext bound to the node's existing secret and UUID;
 // the independent persisted quota grant still decides whether it may be used.
 func (a *Agent) realityCacheCipher() (cipher.AEAD, error) {
