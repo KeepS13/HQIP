@@ -6,7 +6,7 @@ from build_billing_core import build as build_billing_core, CORE_HASH, TAGS, TOO
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 OUT=ROOT/'dist/desktop'
 VERSION='1.14.4'
-DESKTOP_VERSION='4.8.0'
+DESKTOP_VERSION='4.8.1'
 ZIP_HASH='99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df'
 RESOURCE_TOOL=ROOT/'desktop/build/windows'
 PACKAGE_FILES=(

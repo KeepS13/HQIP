@@ -47,7 +47,7 @@ type Bundle struct {
 }
 
 func Default() Bundle {
-	b := Bundle{SchemaVersion: SchemaVersion, Source: Source{Kind: "builtin", Name: "HQIP local networks"}, Rules: []Rule{}, GeoIPCN: GeoIPCN{CIDRs: []string{}}}
+	b := Bundle{SchemaVersion: SchemaVersion, Source: Source{Kind: "builtin", Name: "HQIP mainland bypass"}, Rules: []Rule{}, GeoIPCN: GeoIPCN{CIDRs: []string{}}}
 	for _, domain := range []string{"localhost", "local", "lan"} {
 		b.Rules = append(b.Rules, Rule{Type: "DOMAIN-SUFFIX", Value: domain, Outbound: "direct"})
 	}
@@ -59,6 +59,9 @@ func Default() Bundle {
 		b.Rules = append(b.Rules, Rule{Type: typ, Value: cidr, Outbound: "direct", NoResolve: true})
 	}
 	b.Rules = append(b.Rules, Rule{Type: "MATCH", Outbound: "proxy"})
+	// The local-only seed is valid by construction; the embedded mainland data
+	// is checked by regression tests and has no runtime network dependency.
+	b, _ = WithMainlandBypass(b)
 	return b
 }
 
@@ -67,8 +70,8 @@ func Normalize(b Bundle) (Bundle, error) {
 	if b.SchemaVersion != SchemaVersion {
 		return Bundle{}, fmt.Errorf("unsupported routing schema version: %d", b.SchemaVersion)
 	}
-	if len(b.Rules) == 0 || len(b.Rules) > 20000 {
-		return Bundle{}, fmt.Errorf("routing bundle must contain 1 to 20000 rules")
+	if len(b.Rules) == 0 || len(b.Rules) > 40000 {
+		return Bundle{}, fmt.Errorf("routing bundle must contain 1 to 40000 rules")
 	}
 	b.Rules = append([]Rule(nil), b.Rules...)
 	for _, s := range []string{b.Source.Kind, b.Source.Name, b.Source.ImportedAt} {
@@ -242,35 +245,6 @@ func (b Bundle) GeoIPSource() ([]byte, error) {
 		return nil, fmt.Errorf("GeoIP CN prefixes are unavailable")
 	}
 	return json.Marshal(map[string]any{"version": 3, "rules": []map[string]any{{"ip_cidr": b.GeoIPCN.CIDRs}}})
-}
-
-func (b Bundle) ClashRules(proxyTag, directTag string) ([]string, error) {
-	b, err := Normalize(b)
-	if err != nil {
-		return nil, err
-	}
-	if strings.ContainsAny(proxyTag+directTag, ",\r\n") || proxyTag == "" || directTag == "" {
-		return nil, fmt.Errorf("invalid Clash policy tags")
-	}
-	out := make([]string, 0, len(b.Rules))
-	for _, r := range b.Rules {
-		policy := proxyTag
-		if r.Outbound == "direct" {
-			policy = directTag
-		} else if r.Outbound == "reject" {
-			policy = "REJECT"
-		}
-		parts := []string{r.Type}
-		if r.Type != "MATCH" {
-			parts = append(parts, r.Value)
-		}
-		parts = append(parts, policy)
-		if r.NoResolve {
-			parts = append(parts, "no-resolve")
-		}
-		out = append(out, strings.Join(parts, ","))
-	}
-	return out, nil
 }
 
 func hasControl(value string) bool { return strings.IndexFunc(value, unicode.IsControl) >= 0 }

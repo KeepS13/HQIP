@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"path/filepath"
 	"strings"
 )
 
@@ -201,147 +200,11 @@ func validateTUN(config []byte, geoPath string) ([]byte, error) {
 	if !strings.HasPrefix(text(selector["default"]), "node-") || !tags[text(selector["default"])] {
 		return nil, errors.New("默认节点无效")
 	}
-	route, e := object(c["route"])
-	if e != nil {
+	if e = validateRoutingConfig(c, seen, geoPath); e != nil {
 		return nil, e
 	}
-	if e = keys(route, "auto_detect_interface", "default_domain_resolver", "rules", "final", "rule_set"); e != nil {
+	if e = validateDNSConfig(c); e != nil {
 		return nil, e
-	}
-	if route["auto_detect_interface"] != true || route["default_domain_resolver"] != "local" || route["final"] != "proxy" {
-		return nil, errors.New("路由参数无效")
-	}
-	rules, e := array(route["rules"])
-	if e != nil || len(rules) > 21000 {
-		return nil, errors.New("路由数量无效")
-	}
-	for _, raw := range rules {
-		m, e := object(raw)
-		if e != nil {
-			return nil, e
-		}
-		if e = keys(m, "action", "protocol", "process_name", "domain", "domain_suffix", "domain_keyword", "ip_is_private", "ip_cidr", "rule_set", "outbound", "inbound", "clash_mode"); e != nil {
-			return nil, e
-		}
-		if mode, exists := m["clash_mode"]; exists {
-			tags, _ := json.Marshal(m["inbound"])
-			if len(m) != 3 || mode != "hqip-paused" || m["action"] != "reject" || string(tags) != `["mixed-in","tun-in"]` {
-				return nil, errors.New("转发暂停规则无效")
-			}
-		}
-		switch text(m["action"]) {
-		case "sniff", "hijack-dns", "resolve", "reject", "route":
-		default:
-			return nil, errors.New("路由动作无效")
-		}
-		if o, ok := m["outbound"]; ok && o != "proxy" && o != "direct" {
-			return nil, errors.New("路由出口无效")
-		}
-		if inbound, exists := m["inbound"]; exists {
-			if !texts(inbound) {
-				return nil, errors.New("入口匹配无效")
-			}
-			for _, tag := range inbound.([]any) {
-				if !seen[text(tag)] {
-					return nil, errors.New("路由引用未知入口")
-				}
-			}
-		}
-		if _, exists := m["process_name"]; exists {
-			b, _ := json.Marshal(m["inbound"])
-			if string(b) != `["tun-in"]` {
-				return nil, errors.New("进程直连规则仅可用于 TUN 入口")
-			}
-		}
-		for k, v := range m {
-			switch k {
-			case "action", "outbound", "protocol", "clash_mode":
-				if _, ok := v.(string); !ok {
-					return nil, errors.New("路由字符串无效")
-				}
-			case "ip_is_private":
-				if _, ok := v.(bool); !ok {
-					return nil, errors.New("私网规则无效")
-				}
-			default:
-				if !texts(v) {
-					return nil, errors.New("路由匹配字段无效")
-				}
-			}
-		}
-	}
-	if seen["probe-in"] {
-		if len(rules) == 0 {
-			return nil, errors.New("缺少探测入口规则")
-		}
-		first, _ := object(rules[0])
-		b, _ := json.Marshal(first["inbound"])
-		if string(b) != `["probe-in"]` || first["action"] != "route" || first["outbound"] != "proxy" {
-			return nil, errors.New("探测入口必须直接验证所选代理")
-		}
-	}
-	sets, e := array(route["rule_set"])
-	if e != nil || len(sets) > 1 {
-		return nil, errors.New("规则集合无效")
-	}
-	if len(sets) == 1 {
-		rs, e := object(sets[0])
-		if e != nil {
-			return nil, e
-		}
-		if e = keys(rs, "type", "tag", "format", "path"); e != nil {
-			return nil, e
-		}
-		if rs["type"] != "local" || rs["tag"] != "geoip-cn" || rs["format"] != "binary" {
-			return nil, errors.New("仅支持本地 GeoIP 规则")
-		}
-		rs["path"] = filepath.ToSlash(geoPath)
-	}
-	dns, e := object(c["dns"])
-	if e != nil {
-		return nil, e
-	}
-	if e = keys(dns, "servers", "rules", "final", "strategy"); e != nil {
-		return nil, e
-	}
-	if dns["final"] != "remote" || dns["strategy"] != "prefer_ipv4" {
-		return nil, errors.New("DNS 参数无效")
-	}
-	servers, e := array(dns["servers"])
-	if e != nil || len(servers) != 2 {
-		return nil, errors.New("DNS 服务器无效")
-	}
-	for _, raw := range servers {
-		m, e := object(raw)
-		if e != nil {
-			return nil, e
-		}
-		if e = keys(m, "type", "tag", "server", "server_port", "path", "detour"); e != nil {
-			return nil, e
-		}
-		if m["type"] == "local" {
-			if m["tag"] != "local" || len(m) != 2 {
-				return nil, errors.New("本地 DNS 无效")
-			}
-		} else if m["type"] != "https" || m["tag"] != "remote" || m["server"] != "1.1.1.1" || m["server_port"] != float64(443) || m["path"] != "/dns-query" || m["detour"] != "proxy" {
-			return nil, errors.New("远程 DNS 无效")
-		}
-	}
-	dnsRules, e := array(dns["rules"])
-	if e != nil {
-		return nil, e
-	}
-	for _, raw := range dnsRules {
-		m, e := object(raw)
-		if e != nil {
-			return nil, e
-		}
-		if e = keys(m, "domain", "server"); e != nil {
-			return nil, e
-		}
-		if !texts(m["domain"]) || m["server"] != "local" {
-			return nil, errors.New("DNS 匹配字段无效")
-		}
 	}
 	exp, e := object(c["experimental"])
 	if e != nil {

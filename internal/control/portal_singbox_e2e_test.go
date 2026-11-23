@@ -104,14 +104,17 @@ func TestPortalSingBoxExportRealHY2Routing(t *testing.T) {
 		if outbound["type"] != "hysteria2" {
 			continue
 		}
-		if password != "" || outbound["server"] != "127.0.0.10" || outbound["server_port"] != float64(serverPort) {
+		if password != "" || outbound["server"] != "portal-export.invalid" || outbound["server_port"] != float64(serverPort) {
 			t.Fatal("export did not retain the isolated subscription node")
 		}
 		password, _ = outbound["password"].(string)
-		// The fixture supplies the node's real address/SNI before export. Trust is
-		// the only outbound adaptation: it still verifies the local CA and SNI.
+		// Supply local endpoint resolution and trust without altering the exported
+		// credential, SNI, selector or business routing rules.
+		outbound["domain_resolver"] = "fixture"
 		outbound["tls"].(map[string]any)["certificate_path"] = certPath
 	}
+	dns := config["dns"].(map[string]any)
+	dns["servers"] = append(dns["servers"].([]any), map[string]any{"type": "hosts", "tag": "fixture", "predefined": map[string]any{"portal-export.invalid": []string{"127.0.0.10"}}})
 	if password == "" {
 		t.Fatal("export has no subscription credential")
 	}

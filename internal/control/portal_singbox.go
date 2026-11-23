@@ -17,7 +17,7 @@ var errPortalDefaultNodeUnavailable = errors.New("暂无可用节点，请稍后
 // desktop-specific file paths, process bypasses or a listening control API.
 func portalSingBoxSubscription(profile model.ClientProfile, bundle rules.Bundle, serviceURLs ...string) ([]byte, error) {
 	var err error
-	bundle, err = rules.Normalize(bundle)
+	bundle, err = rules.WithMainlandBypass(bundle)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +87,12 @@ func portalSingBoxSubscription(profile model.ClientProfile, bundle rules.Bundle,
 	if err != nil {
 		return nil, err
 	}
+	for _, rule := range translated {
+		if rule["action"] == "resolve" {
+			rule["server"] = "local"
+		}
+	}
+	dnsRules = append(dnsRules, bundle.DomainDNSRules("local", "remote")...)
 	routeRules = append(routeRules, translated...)
 	ruleSets := []map[string]any{}
 	if len(bundle.GeoIPCN.CIDRs) > 0 {

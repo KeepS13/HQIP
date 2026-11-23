@@ -156,13 +156,17 @@ func TestClashTranslationAndCNSource(t *testing.T) {
 	if err = Validate(Default()); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := Default().RouteRules("proxy", "direct", "")
+	routes, err := Default().RouteRules("proxy", "direct", "cn")
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolves := 0
 	for _, r := range routes {
 		if r["action"] == "resolve" {
-			t.Fatal("default no-resolve rules should not force DNS")
+			resolves++
 		}
+	}
+	if resolves != 1 {
+		t.Fatal("mainland IP fallback must resolve unlisted domain names once")
 	}
 }

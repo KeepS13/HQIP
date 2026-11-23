@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/rules"
 	"github.com/KeepS13/HQIP/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -129,14 +130,19 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 			portalResult(w, nil, rulesErr)
 			return
 		}
-		rules, rulesErr := v.Bundle.ClashRules("节点选择", "DIRECT")
+		bundle, rulesErr := rules.WithMainlandBypass(v.Bundle)
+		if rulesErr != nil {
+			portalResult(w, nil, rulesErr)
+			return
+		}
+		routeRules, rulesErr := bundle.ClashRules("节点选择", "DIRECT")
 		if rulesErr != nil {
 			portalResult(w, nil, rulesErr)
 			return
 		}
 		groups := []map[string]any{}
 		groups = append([]map[string]any{{"name": "节点选择", "type": "select", "proxies": names}}, groups...)
-		body, err = yaml.Marshal(map[string]any{"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": groups, "rules": rules})
+		body, err = yaml.Marshal(map[string]any{"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": true, "dns": clashDNS(bundle), "sniffer": clashSniffer(), "proxies": proxies, "proxy-groups": groups, "rules": routeRules})
 	}
 	if err != nil {
 		portalResult(w, nil, err)

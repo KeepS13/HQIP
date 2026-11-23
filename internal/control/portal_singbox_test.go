@@ -107,6 +107,10 @@ func TestPortalSingBoxConfiguration(t *testing.T) {
 	if !bytes.Contains(config.Route.Rules[3], []byte("2001:db8::8/128")) {
 		t.Fatal("node IPv6 bypass missing")
 	}
+	bundle, err = rules.WithMainlandBypass(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantRules, err := bundle.RouteRules("proxy", "direct", "geoip-cn")
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +119,9 @@ func TestPortalSingBoxConfiguration(t *testing.T) {
 		t.Fatal("routing rules were dropped or added")
 	}
 	for i, want := range wantRules {
+		if want["action"] == "resolve" {
+			want["server"] = "local"
+		}
 		var actual map[string]any
 		if err = json.Unmarshal(config.Route.Rules[i+4], &actual); err != nil {
 			t.Fatal(err)

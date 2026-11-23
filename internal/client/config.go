@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"slices"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/rules"
@@ -34,6 +35,16 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 	}
 	if o.MixedPort < 1 || o.MixedPort > 65535 {
 		return nil, errors.New("代理端口无效")
+	}
+	cachedGeo := o.Bundle.GeoIPCN.CIDRs
+	// Apply the shipped policy even when the server still serves the historical
+	// LAN-only bundle. This changes generated configuration, never server hashes.
+	if o.Mode == "rule" {
+		var err error
+		o.Bundle, err = rules.WithMainlandBypass(o.Bundle)
+		if err != nil {
+			return nil, err
+		}
 	}
 	out := []map[string]any{{"type": "direct", "tag": "direct"}}
 	tags := []string{}
@@ -106,6 +117,9 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 			return nil, e
 		}
 		for _, rule := range rr {
+			if rule["action"] == "resolve" {
+				rule["server"] = "local"
+			}
 			if _, processRule := rule["process_name"]; processRule {
 				if !o.TUN {
 					continue
@@ -123,12 +137,20 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 		inbounds = append(inbounds, map[string]any{"type": "tun", "tag": "tun-in", "interface_name": "HQIP", "address": []string{"172.28.91.1/30", "fdfe:dcba:9876::1/126"}, "auto_route": true, "strict_route": true, "stack": "mixed"})
 	}
 	ruleSets := []map[string]any{}
-	if o.GeoPath != "" {
-		ruleSets = append(ruleSets, map[string]any{"type": "local", "tag": "geoip-cn", "format": "binary", "path": filepath.ToSlash(o.GeoPath)})
+	dnsRules := []map[string]any{{"domain": domains, "server": "local"}}
+	if o.Mode == "rule" {
+		// Reuse the compiled cache only when it represents the effective CIDRs.
+		// An older server/cache must not undo the shipped mainland IP policy.
+		if o.GeoPath != "" && slices.Equal(cachedGeo, o.Bundle.GeoIPCN.CIDRs) {
+			ruleSets = append(ruleSets, map[string]any{"type": "local", "tag": "geoip-cn", "format": "binary", "path": filepath.ToSlash(o.GeoPath)})
+		} else {
+			ruleSets = append(ruleSets, map[string]any{"type": "inline", "tag": "geoip-cn", "rules": []map[string]any{{"ip_cidr": o.Bundle.GeoIPCN.CIDRs}}})
+		}
+		dnsRules = append(dnsRules, o.Bundle.DomainDNSRules("local", "remote")...)
 	}
 	config := map[string]any{
 		"log":      map[string]any{"level": "error", "timestamp": true},
-		"dns":      map[string]any{"servers": []map[string]any{{"type": "local", "tag": "local"}, {"type": "https", "tag": "remote", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "detour": "proxy"}}, "rules": []map[string]any{{"domain": domains, "server": "local"}}, "final": "remote", "strategy": "prefer_ipv4"},
+		"dns":      map[string]any{"servers": []map[string]any{{"type": "local", "tag": "local"}, {"type": "https", "tag": "remote", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "detour": "proxy"}}, "rules": dnsRules, "final": "remote", "strategy": "prefer_ipv4"},
 		"inbounds": inbounds, "outbounds": out,
 		"route":        map[string]any{"auto_detect_interface": true, "default_domain_resolver": "local", "rules": routeRules, "final": "proxy", "rule_set": ruleSets},
 		"experimental": map[string]any{"clash_api": map[string]any{"external_controller": net.JoinHostPort("127.0.0.1", portString(o.APIPort)), "secret": o.APISecret}},

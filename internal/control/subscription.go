@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/KeepS13/HQIP/internal/model"
+	"github.com/KeepS13/HQIP/internal/rules"
 	"gopkg.in/yaml.v3"
 )
 
@@ -99,21 +100,25 @@ func (s *Server) clashConfig(device model.Device, nodes []model.Node) ([]byte, e
 	}
 	selectNames := append(append([]string{}, names...), "自动测速")
 	config := map[string]any{
-		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": false,
+		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": true,
 		"profile":      map[string]bool{"store-selected": true},
-		"dns":          map[string]any{"enable": true, "listen": "127.0.0.1:1053", "ipv6": false, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16", "fake-ip-filter": []string{"*.lan", "localhost.ptlogin2.qq.com"}, "default-nameserver": []string{"223.5.5.5", "1.1.1.1"}, "nameserver": []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}, "proxy-server-nameserver": []string{"223.5.5.5", "1.1.1.1"}},
 		"proxies":      proxies,
 		"proxy-groups": []map[string]any{{"name": "节点选择", "type": "select", "proxies": selectNames}, {"name": "自动测速", "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50}},
-		"rules":        []string{"DOMAIN-SUFFIX,local,DIRECT", "DOMAIN-SUFFIX,lan,DIRECT", "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve", "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve", "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve", "IP-CIDR6,::1/128,DIRECT,no-resolve", "IP-CIDR6,fc00::/7,DIRECT,no-resolve", "IP-CIDR6,fe80::/10,DIRECT,no-resolve", "MATCH,节点选择"},
 	}
 	version, err := s.Store.Rules()
 	if err != nil {
 		return nil, err
 	}
-	routeRules, err := version.Bundle.ClashRules("节点选择", "DIRECT")
+	bundle, err := rules.WithMainlandBypass(version.Bundle)
+	if err != nil {
+		return nil, err
+	}
+	routeRules, err := bundle.ClashRules("节点选择", "DIRECT")
 	if err != nil {
 		return nil, err
 	}
 	config["rules"] = routeRules
+	config["dns"] = clashDNS(bundle)
+	config["sniffer"] = clashSniffer()
 	return yaml.Marshal(config)
 }
