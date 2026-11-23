@@ -30,7 +30,7 @@ func TestHQIPRealQUICConnectionsIndependentExpiryTCPAndUDP(t *testing.T) {
 			w.WriteHeader(403)
 			return
 		}
-		if r.URL.Path != "/admission" {
+		if r.URL.Path != "/admission" && r.URL.Path != "/admission/check" {
 			w.WriteHeader(403)
 			return
 		}
@@ -41,6 +41,10 @@ func TestHQIPRealQUICConnectionsIndependentExpiryTCPAndUDP(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Password != "same-password-for-both-connections" {
 			w.WriteHeader(403)
+			return
+		}
+		if r.URL.Path == "/admission/check" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "accountingId": "same-device"})
 			return
 		}
 		mu.Lock()
@@ -83,6 +87,12 @@ func TestHQIPRealQUICConnectionsIndependentExpiryTCPAndUDP(t *testing.T) {
 	defer first.Close()
 	second := makeClient()
 	defer second.Close()
+	mu.Lock()
+	allocatedDuringHandshake := len(ids)
+	mu.Unlock()
+	if allocatedDuringHandshake != 0 {
+		t.Fatal("idle transport authentication allocated forwarding leases")
+	}
 	echo, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +107,13 @@ func TestHQIPRealQUICConnectionsIndependentExpiryTCPAndUDP(t *testing.T) {
 			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
 		}
 	}()
+	// Expiry starts at the first actual target, so keep the first target live
+	// while the independently admitted second transport exercises TCP and UDP.
+	firstStream, err := first.TCP(echo.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstStream.Close()
 	stream, err := second.TCP(echo.Addr().String())
 	if err != nil {
 		t.Fatal(err)

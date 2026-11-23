@@ -21,6 +21,12 @@ func TestHQIPRealConnectionsWaitForRateDecreaseAcknowledgment(t *testing.T) {
 	released := false
 	acked := make(chan struct{})
 	central := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Transport authentication is read-only; only target activity below
+		// joins the rate allocation and participates in the decrease ACK.
+		if r.URL.Path == "/admission/check" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "accountingId": "same-device"})
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		id := ""

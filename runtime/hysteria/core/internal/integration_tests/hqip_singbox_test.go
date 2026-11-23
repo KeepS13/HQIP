@@ -63,10 +63,19 @@ func testHQIPWireClient(t *testing.T, kind, binary string) {
 			w.WriteHeader(403)
 			return
 		}
-		if r.URL.Path == "/admission" {
+		if r.URL.Path == "/admission" || r.URL.Path == "/admission/check" {
 			var b map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&b)
-			if revoked.Load() || b["password"] != "sing-box-wire-protocol-test" || !accepted.CompareAndSwap(0, 1) {
+			if revoked.Load() || b["password"] != "sing-box-wire-protocol-test" {
+				denied.Add(1)
+				w.WriteHeader(403)
+				return
+			}
+			if r.URL.Path == "/admission/check" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "accountingId": "test-device"})
+				return
+			}
+			if !accepted.CompareAndSwap(0, 1) {
 				denied.Add(1)
 				w.WriteHeader(403)
 				return
@@ -106,7 +115,9 @@ func testHQIPWireClient(t *testing.T, kind, binary string) {
 	roots.AddCert(target.Certificate())
 	makeHTTPClient := func(port int) *http.Client {
 		proxyURL, _ := url.Parse("http://" + net.JoinHostPort("127.0.0.1", itoa(port)))
-		transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: roots}, DisableKeepAlives: true}
+		// Slot denial and revocation require a live target. Reuse the actual
+		// HTTPS socket; an idle QUIC transport alone must not retain this lease.
+		transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: roots}}
 		t.Cleanup(transport.CloseIdleConnections)
 		return &http.Client{Transport: transport, Timeout: 3 * time.Second}
 	}
@@ -132,6 +143,7 @@ func testHQIPWireClient(t *testing.T, kind, binary string) {
 	if err != nil {
 		t.Fatal("denying second slot interrupted original slot", err)
 	}
+	_, _ = io.Copy(io.Discard, response.Body)
 	response.Body.Close()
 	revoked.Store(true)
 	time.Sleep(6200 * time.Millisecond)
