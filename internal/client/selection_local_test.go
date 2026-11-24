@@ -244,12 +244,20 @@ func TestDisconnectedNewChoiceWinsLateRemoteSwitch(t *testing.T) {
 
 func TestConnectedSamePackageNodeChangeAvoidsSubscriptionWork(t *testing.T) {
 	c, engine, _ := setupClient(t)
+	// Client configuration is immutable once Connect launches account requests.
+	transport := &selectionTransport{base: c.api.http.Transport}
+	c.api.http.Transport = transport
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, c, "connected")
-	transport := &selectionTransport{base: c.api.http.Transport}
-	c.api.http.Transport = transport
+	// The view is published before the initial status report completes. Join
+	// that route operation before starting the selection-only accounting window.
+	c.routeMu.Lock()
+	transport.calls.Store(0)
+	transport.rules.Store(0)
+	transport.selections.Store(0)
+	c.routeMu.Unlock()
 	if err := c.SelectSubscriptionNode("sub-a", "B"); err != nil {
 		t.Fatal(err)
 	}
