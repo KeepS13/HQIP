@@ -30,6 +30,10 @@ def receipt(platform):
     output.mkdir(exist_ok=False)
     name = CLIENT_PLATFORMS[platform][1]
     source = dist / name
+    built = [item for item in summary['artifacts'] if item.get('file') == name]
+    if (len(built) != 1 or built[0]['sha256'] != client_digest(source)
+            or built[0]['size'] != source.stat().st_size):
+        raise ValueError('Installer changed after the recorded source build')
     delivery = dict(platform=platform, filename=name, version=summary['version'], sequence=summary['sequence'],
                     size=source.stat().st_size, sha256=client_digest(source), name=CLIENT_PLATFORMS[platform][2])
     for item, file in [(update, dist / 'godot-channel/godot' / update['sha256'] / update['filename']), (delivery, source)]:

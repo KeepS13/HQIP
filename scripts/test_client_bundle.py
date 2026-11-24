@@ -88,6 +88,24 @@ class ClientBundleTests(unittest.TestCase):
         receipt = dict(run='12', sourceSHA=self.sha, kind='client-android-arm64', size=archive.stat().st_size, sha256=digest(archive))
         unpack('client-android-arm64', archive, receipt, self.root / 'received', '12', self.sha)
 
+    def test_receipt_rejects_installer_replaced_after_build(self):
+        import shutil
+        import client_ci
+        workspace = self.root / 'receipt-workspace'
+        dist = workspace / 'dist'
+        deliveries = client_fixture(dist / 'godot-channel', self.sha, ['windows-amd64'], self.key)
+        item = deliveries[0]
+        source = dist / 'godot-channel/godot' / item['sha256'] / item['filename']
+        shutil.copyfile(source, dist / item['filename'])
+        summary = dict(sourceSHA=self.sha, dirty=False, sequence=item['sequence'], version=item['version'],
+                       artifacts=[dict(file=item['filename'], sha256=item['sha256'], size=item['size'])])
+        (dist / 'godot-build.json').write_text(json.dumps(summary))
+        (dist / item['filename']).write_bytes(b'x' * item['size'])
+        with patch.object(client_ci, 'ROOT', workspace), patch.object(client_ci.subprocess, 'check_output', side_effect=[self.sha, '']):
+            with self.assertRaisesRegex(ValueError, 'changed after'):
+                client_ci.receipt('windows-amd64')
+        self.assertFalse((dist / 'client-windows-amd64/godot-downloads.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -38,6 +38,8 @@ class RetentionTests(unittest.TestCase):
         fixture.inner['sourceSHA'] = sha
         (fixture.root / 'dist/manifest.json').write_text(json.dumps(fixture.nodes))
         fixture.write_desktop()
+        from test_client_bundle import client_fixture
+        client_fixture(fixture.root / 'dist/client-release', sha)
         package_release(fixture.root, sha, previous)
         target = self.base / 'releases' / sha
         shutil.copytree(fixture.root / 'dist' / ('full-' + sha), target)
@@ -47,6 +49,15 @@ class RetentionTests(unittest.TestCase):
 
     def current(self, release):
         (self.base / 'current').symlink_to(release, target_is_directory=True)
+
+    def test_fixture_rebinds_every_artifact_to_requested_source(self):
+        # Also runs on Windows without symlink privileges: source drift must be
+        # rejected before the retention tests ever switch an active pointer.
+        sha = '1' * 40
+        release = self.release(sha)
+        self.assertEqual(verify_full_release(release)['sourceSHA'], sha)
+        clients = json.loads((release / 'artifacts/godot-downloads.json').read_text())
+        self.assertEqual(clients['sourceSHA'], sha)
 
     def test_only_verified_older_full_release_is_removed_and_backup_data_are_untouched(self):
         old = self.release('1' * 40)

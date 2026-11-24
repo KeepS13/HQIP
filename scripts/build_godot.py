@@ -152,7 +152,8 @@ def main():
     summary_path = DIST / 'godot-build.json'
     previous = json.loads(summary_path.read_text(encoding='utf-8')) if summary_path.exists() else {}
     artifacts = []
-    if previous.get('version') == args.version and previous.get('sequence') == args.sequence:
+    if (not dirty and previous.get('dirty') is False and previous.get('sourceSHA') == source_sha
+            and previous.get('version') == args.version and previous.get('sequence') == args.sequence):
         for artifact in previous.get('artifacts', []):
             if artifact['file'].endswith('-Portable.zip'):
                 continue
