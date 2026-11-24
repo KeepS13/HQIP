@@ -46,7 +46,8 @@ def windows(args, flags, public):
          'Windows', payload / 'HQIP-UI.exe'])
     go_build('./cmd/hqip-runtime', payload / 'hqip-runtime.exe', flags)
     go_build('./cmd/hqip-launcher', install / 'HQIP.exe',
-             '-s -w -H windowsgui -X main.updateKey=' + public)
+             '-s -w -H windowsgui -X main.updateKey=' + public
+             + ' -X main.bundledSequence=' + str(args.sequence))
     go_build('./cmd/hqip-helper', payload / 'hqip-helper.exe', '-s -w -H windowsgui')
     core = payload / 'sing-box.exe'
     if not core.exists() or digest(core) != CORE_HASH:

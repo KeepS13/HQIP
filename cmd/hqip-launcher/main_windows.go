@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/KeepS13/HQIP/internal/clientrelease"
@@ -18,6 +19,10 @@ import (
 )
 
 var updateKey string
+
+// Embedded by the installer build. Older update pointers must not mask a newer
+// bundled version after a repair/upgrade; zero is only for development builds.
+var bundledSequence = "0"
 var startupTimeout = 30 * time.Second
 
 func main() {
@@ -93,6 +98,10 @@ func verifiedVersion(raw []byte) (string, error) {
 	}
 	if release.Platform != "windows-amd64" {
 		return "", fmt.Errorf("wrong update platform")
+	}
+	minimum, err := strconv.ParseInt(bundledSequence, 10, 64)
+	if err != nil || minimum < 0 || release.Sequence < minimum {
+		return "", fmt.Errorf("update predates bundled release")
 	}
 	return release.SHA256, nil
 }
