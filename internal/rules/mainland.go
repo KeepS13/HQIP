@@ -69,8 +69,8 @@ func WithMainlandBypass(b Bundle) (Bundle, error) {
 }
 
 // DomainDNSRules routes DNS consistently with the effective domain rules. IP
-// classification uses the direct resolver at the call site; otherwise a remote
-// resolver could choose a foreign CDN before the mainland IP test even runs.
+// classification must use this DNS policy too: known direct domains resolve
+// locally, while unmatched domains use the remote resolver to resist poisoning.
 func (b Bundle) DomainDNSRules(direct, remote string) []map[string]any {
 	rows := []map[string]any{}
 	for _, r := range b.Rules {

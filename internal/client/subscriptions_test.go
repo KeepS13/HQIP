@@ -151,8 +151,8 @@ func TestOffSubscriptionSwitchDoesNotStartProxy(t *testing.T) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.drains) != 1 || s.drains[0] != "a" {
-		t.Fatal("did not drain previous instance")
+	if len(s.drains) != 0 || s.selected != "a" {
+		t.Fatal("idle choice changed server authorization or drained the previous instance")
 	}
 }
 
@@ -192,13 +192,13 @@ func TestRapidSubscriptionSelectionIgnoresLateCommittedResponse(t *testing.T) {
 	if err := c.SelectSubscription("b"); err != nil {
 		t.Fatal(err)
 	}
-	<-arrived
+	awaitClosedSignal(t, arrived, "automatic switch did not start")
 	if err := c.SelectSubscription("c"); err != nil {
 		t.Fatal(err)
 	}
+	close(release)
 	waitSubscription(t, c, "c")
 	waitState(t, c, "connected")
-	close(release)
 	time.Sleep(30 * time.Millisecond)
 	if c.View().ActualSubscriptionID != "c" || c.View().DesiredSubscriptionID != "c" {
 		t.Fatal("late B replaced C")
@@ -207,7 +207,7 @@ func TestRapidSubscriptionSelectionIgnoresLateCommittedResponse(t *testing.T) {
 	defer e.mu.Unlock()
 	for _, id := range e.subscriptions {
 		if id == "b" {
-			t.Fatal("intermediate instance was connected")
+			t.Fatal("superseded authorization started an intermediate connection")
 		}
 	}
 }
@@ -259,8 +259,12 @@ func TestFailedSubscriptionSelectionNeverFallsBack(t *testing.T) {
 	if c.View().LastError == "" {
 		t.Fatal("failure hidden")
 	}
-	if err := c.Connect(); err == nil {
-		t.Fatal("failed target silently connected cached previous subscription")
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, c, "failed")
+	if c.View().ActualSubscriptionID != "" || e.Alive() {
+		t.Fatal("failed target fell back to cached subscription")
 	}
 	if err := c.SelectSubscription("a"); err != nil {
 		t.Fatal(err)

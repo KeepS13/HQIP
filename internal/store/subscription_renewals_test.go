@@ -237,7 +237,7 @@ func TestRenewalEligibilityAndIdempotency(t *testing.T) {
 			inner := client.Transport
 			client.Transport = paymentTestTransport(func(r *http.Request) (*http.Response, error) { calls.Add(1); return inner.RoundTrip(r) })
 			o, err := s.CreatePaymentOrder(context.Background(), user.ID, in, client)
-			if mode == "exhausted" {
+			if mode == "exhausted" || mode == "unlisted" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -245,8 +245,17 @@ func TestRenewalEligibilityAndIdempotency(t *testing.T) {
 					t.Fatal(err)
 				}
 				after, _ := s.UserSubscription(user.ID, sub.ID)
-				if after.Status != "exhausted" {
+				if mode == "exhausted" && after.Status != "exhausted" {
 					t.Fatal("borrowed next period quota", after)
+				}
+				if mode == "unlisted" {
+					if !after.Renewable || len(after.Periods) != 2 {
+						t.Fatal("hidden template must remain renewable", after)
+					}
+					purchase := model.PaymentOrderInput{RequestID: "hidden-new-purchase", TemplateID: template.ID, TemplateRevision: template.Revision}
+					if _, err = s.CreatePaymentOrder(context.Background(), user.ID, purchase, client); err == nil || calls.Load() != 1 {
+						t.Fatal("hidden template allowed a new purchase", err, calls.Load())
+					}
 				}
 				return
 			}

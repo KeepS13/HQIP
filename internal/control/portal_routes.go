@@ -28,7 +28,11 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/user/login", s.portalLogin)
 	m.HandleFunc("GET /api/v1/user/session", s.portalSession)
 	m.HandleFunc("GET /api/v1/user/releases", s.portalReleases)
+	m.HandleFunc("GET /api/v1/user/installers", s.clientInstallers)
+	m.HandleFunc("GET /downloads/client/{sha256}/{filename}", s.clientInstallerDownload)
 	m.HandleFunc("GET /api/v1/user/download", s.portalDownloadInfo)
+	m.HandleFunc("GET /api/v3/client/releases", s.godotReleases)
+	m.HandleFunc("GET /downloads/godot/{sha256}/{filename}", s.godotDownload)
 	m.HandleFunc("GET /downloads/HQIP-Windows-x64.zip", s.portalDownload)
 	m.HandleFunc("GET /downloads/{sha256}/HQIP-Windows-x64.zip", s.portalDownload)
 	for pattern, handler := range map[string]portalHandler{
@@ -54,6 +58,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 		"POST /api/v3/client/logout": s.portalLogout, "GET /api/v3/client/profile": s.nativeProfile, "POST /api/v3/client/subscription": s.nativeSelectSubscription, "POST /api/v3/client/status": s.nativeStatus, "GET /api/v3/client/rules/{hash}": s.nativeRules,
 		"GET /api/v3/client/connections": s.portalConnections, "POST /api/v3/client/connections/drain": s.nativeDrain,
 		"GET /api/v3/client/billing": s.nativeBilling,
+		"GET /api/v3/client/changes": s.nativeChanges,
 	} {
 		m.Handle(pattern, s.portalAuth("native", handler))
 	}

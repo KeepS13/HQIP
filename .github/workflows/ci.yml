@@ -9,6 +9,35 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install paramiko
+      - run: python -m unittest discover -s scripts -p "test_*.py"
+      - run: go vet -tags=with_utls ./...
+      - run: go test -tags=with_utls -race ./...
+  runtime-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            runtime/hysteria/**/go.sum
+      - run: go test -race ../nodepolicy/... ./core/server ./core/internal/integration_tests ./app/cmd
+        working-directory: runtime/hysteria
+  linux-release:
+    runs-on: ubuntu-latest
     permissions:
       contents: write # Unpublished same-repository fallback; helper rejects PRs.
     steps:
@@ -33,16 +62,10 @@ jobs:
       - run: node --test admin-web/tests/*.test.mjs
       - run: npm --prefix admin-web run build
       - run: npm --prefix user-web run build
-      - run: go vet -tags=with_utls ./...
-      - run: go test -tags=with_utls -race ./...
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install paramiko
-      - run: python -m unittest discover -s scripts -p "test_*.py"
       - run: python3 scripts/build.py --skip-web --server-only
-      - run: go test -race ../nodepolicy/... ./core/server ./core/internal/integration_tests ./app/cmd
-        working-directory: runtime/hysteria
       - uses: actions/upload-artifact@v4
         id: upload_linux
         continue-on-error: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
@@ -61,7 +84,7 @@ jobs:
             user-web/dist
           if-no-files-found: error
           retention-days: 3
-      - name: Transfer Linux artifacts through a private draft if Actions storage is unavailable
+      - name: Transfer Linux artifacts through an unpublished draft if Actions storage is unavailable
         if: steps.upload_linux.outcome == 'failure' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -135,18 +158,6 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             go.sum
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: |
-            admin-web/package-lock.json
-            user-web/package-lock.json
-      - run: npm --prefix admin-web ci
-      - run: npm --prefix user-web ci
-      - run: npm --prefix user-web test
-      - run: npm --prefix admin-web run build
-      - run: npm --prefix user-web run build
       - run: go vet -tags=with_utls ./...
       - run: go test -tags=with_utls ./...
       - run: New-Item -ItemType Directory -Force dist | Out-Null
@@ -191,7 +202,7 @@ jobs:
             dist/desktop-manifest.json
           if-no-files-found: error
           retention-days: 3
-      - name: Transfer Windows artifacts through a private draft if Actions storage is unavailable
+      - name: Transfer Windows artifacts through an unpublished draft if Actions storage is unavailable
         if: steps.upload_windows.outcome == 'failure' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -277,9 +288,114 @@ jobs:
           $env:HQIP_E2E_CORE = (Resolve-Path dist/hysteria-billing-test.exe).Path
           $env:HQIP_SINGBOX_EXE = (Resolve-Path dist/test-core/sing-box.exe).Path
           go test -tags=with_utls -race '-gcflags=github.com/sagernet/sing-vmess/vless=-d=checkptr=0' ./internal/agent -run "^($env:E2E_TESTS)$" -count=1 -v
+  # Native platforms build concurrently. Tool caches contain no signing keys;
+  # PRs use disposable identities and cannot publish deployable receipts.
+  client:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-amd64, android-arm64, android-amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            native/mobile/go.sum
+            scripts/build_billing_core.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cryptography
+      - uses: actions/setup-java@v4
+        if: matrix.platform != 'windows-amd64'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        if: matrix.platform != 'windows-amd64'
+      - name: Install pinned Android SDK and NDK
+        if: matrix.platform != 'windows-amd64'
+        run: sdkmanager 'platforms;android-36' 'build-tools;37.0.0' 'ndk;30.0.16248370'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .local/godot-tools/*.zip
+            .local/godot-tools/*.tpz
+            .local/godot-tools/innosetup-6.7.3.exe
+          key: client-tools-windows-4.7.2-6.7.3-8.11.1-${{ matrix.platform }}
+      - uses: actions/cache@v4
+        if: matrix.platform != 'windows-amd64'
+        with:
+          path: ~/.gradle/caches
+          key: client-gradle-${{ runner.os }}-${{ hashFiles('native/android/build.gradle') }}
+      - name: Prepare verified build tools
+        run: python scripts/prepare_client_ci.py tools ${{ matrix.platform }}
+      - name: Prepare isolated signing identity
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          HQIP_CLIENT_UPDATE_SEED: ${{ secrets.HQIP_CLIENT_UPDATE_SEED }}
+          HQIP_ANDROID_KEYSTORE: ${{ secrets.HQIP_ANDROID_KEYSTORE }}
+          HQIP_ANDROID_SIGNING_JSON: ${{ secrets.HQIP_ANDROID_SIGNING_JSON }}
+        run: python scripts/prepare_client_ci.py signing ${{ matrix.platform }}
+      - name: Prepare disposable PR signing identity
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        run: python scripts/prepare_client_ci.py signing ${{ matrix.platform }}
+      - name: Build current client
+        shell: pwsh
+        run: |
+          $release = Get-Content packaging/client-version.json -Raw | ConvertFrom-Json
+          $target = '${{ matrix.platform }}'.Split('-')
+          $buildArgs = @('--platform', $target[0], '--version', $release.version, '--sequence', $release.sequence,
+            '--godot', '.local/godot-tools/Godot_v4.7.2-stable_win64_console.exe',
+            '--key', '.local/ci-signing/ed25519.seed', '--android-signing', '.local/ci-signing/android.json')
+          if ($target[0] -eq 'android') {
+            $env:ANDROID_NDK_HOME = Join-Path $env:ANDROID_HOME 'ndk/30.0.16248370'
+            $buildArgs += @('--android-arch', $target[1])
+          }
+          python scripts/build_godot.py @buildArgs
+      - name: Verify Godot interactions and actual runtime pipe
+        if: matrix.platform == 'windows-amd64'
+        shell: python
+        run: |
+          import pathlib, subprocess
+          for test in sorted(pathlib.Path('godot-client/tests').glob('*.gd')):
+              subprocess.run(['.local/godot-tools/Godot_v4.7.2-stable_win64_console.exe',
+                  '--headless', '--path', 'godot-client', '--script', 'res://tests/' + test.name], check=True, timeout=90)
+      - name: Create verified same-commit receipt
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: python scripts/client_ci.py receipt --platform ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        id: upload_client
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        with:
+          name: client-${{ matrix.platform }}
+          path: dist/client-${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 3
+      - name: Transfer verified client through same-run draft if needed
+        if: steps.upload_client.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci_artifacts.py upload client-${{ matrix.platform }}
+      - name: Remove job-owned signing material
+        if: always()
+        shell: python
+        run: |
+          from pathlib import Path
+          import shutil
+          root = Path('.local/ci-signing').resolve()
+          if root.parent == (Path.cwd() / '.local').resolve() and root.is_dir() and not root.is_symlink():
+              shutil.rmtree(root)
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.HQIP_DEPLOY_PAUSED != 'true'
-    needs: [check, windows, windows-test, windows-e2e, postgres]
+    needs: [check, runtime-test, linux-release, windows, windows-test, windows-e2e, postgres, client]
     runs-on: ubuntu-latest
     permissions:
       contents: write # Read and clean only this run's unpublished fallback drafts.
@@ -317,6 +433,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_artifacts.py download windows-release --root dist
+      - run: python3 -m pip install cryptography
+      - uses: actions/download-artifact@v4
+        id: download_clients
+        continue-on-error: true
+        with:
+          pattern: client-*
+          path: dist
+      - name: Recover missing same-run client artifacts and verify signatures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import os, pathlib, subprocess, sys
+          sys.path.insert(0, 'scripts')
+          from client_bundle import CLIENT_PLATFORMS, verify_client_bundle
+          for platform in CLIENT_PLATFORMS:
+              root = pathlib.Path('dist/client-' + platform)
+              if not (root / 'godot-downloads.json').is_file():
+                  subprocess.run([sys.executable, 'scripts/ci_artifacts.py', 'download',
+                      'client-' + platform, '--root', str(root)], check=True)
+              verify_client_bundle(root, os.environ['GITHUB_SHA'], [platform], signatures=True)
+      - run: python3 scripts/client_ci.py assemble
       - name: Deploy tested commit with backup and health checks
         env:
           GH_TOKEN: ${{ github.token }}
@@ -333,3 +471,6 @@ jobs:
         run: |
           python3 scripts/ci_artifacts.py cleanup linux-release
           python3 scripts/ci_artifacts.py cleanup windows-release
+          python3 scripts/ci_artifacts.py cleanup client-windows-amd64
+          python3 scripts/ci_artifacts.py cleanup client-android-arm64
+          python3 scripts/ci_artifacts.py cleanup client-android-amd64

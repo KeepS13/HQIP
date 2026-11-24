@@ -7,13 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Link } from "react-router-dom";
 import {
-  ArrowDown,
-  ArrowUp,
   Check,
-  CheckCircle2,
-  ChevronRight,
   Copy,
   Inbox,
   Info,
@@ -23,7 +18,6 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { Node } from "./types";
 
 export const ToastContext = createContext<(message: string) => void>(() => {});
 export const useToast = () => useContext(ToastContext);
@@ -49,38 +43,6 @@ export function date(value: string | number | null | undefined, short = false) {
     minute: "2-digit",
     hour12: false,
   });
-}
-export function fresh(node: Node) {
-  return Boolean(
-    node.lastSeen && Date.now() - new Date(node.lastSeen).getTime() < 30000,
-  );
-}
-export function onlineKnown(node: Node) {
-  return fresh(node) && node.coreHealthy;
-}
-export function nodeState(node: Node): { text: string; tone: string } {
-  if (node.lifecycle === "retiring") return { text: "待停止 / 清理中", tone: "warning" };
-  if (node.lifecycle === "deleted") return { text: "已删除", tone: "muted" };
-  if (node.status === "ready" && !fresh(node))
-    return { text: "心跳失联", tone: "warning" };
-  if (node.status === "ready" && !node.coreHealthy)
-    return { text: "核心异常", tone: "danger" };
-  return (
-    (
-      {
-        pending: { text: "等待部署", tone: "muted" },
-        installing: { text: "部署中", tone: "info" },
-        verifying: { text: "验证中", tone: "info" },
-        awaiting_external: { text: "待外部验证", tone: "warning" },
-        ready: { text: "运行正常", tone: "success" },
-        error: { text: "部署失败", tone: "danger" },
-      } as Record<string, { text: string; tone: string }>
-    )[node.status] || { text: "状态未知", tone: "muted" }
-  );
-}
-export function NodeBadge({ node }: { node: Node }) {
-  const state = nodeState(node);
-  return <Badge tone={state.tone}>{state.text}</Badge>;
 }
 export function Badge({
   children,
@@ -209,37 +171,6 @@ export function PageHeader({
     </div>
   );
 }
-export function StatCard({
-  label,
-  value,
-  unit,
-  hint,
-  icon: Icon,
-  color = "purple",
-}: {
-  label: string;
-  value: ReactNode;
-  unit?: string;
-  hint: ReactNode;
-  icon: LucideIcon;
-  color?: string;
-}) {
-  return (
-    <div className="stat-card">
-      <div className="stat-top">
-        <span>{label}</span>
-        <div className={`stat-icon icon-${color}`}>
-          <Icon size={18} />
-        </div>
-      </div>
-      <div className="stat-value">
-        {value}
-        <small>{unit}</small>
-      </div>
-      <div className="stat-hint">{hint}</div>
-    </div>
-  );
-}
 export function Panel({
   title,
   subtitle,
@@ -266,26 +197,6 @@ export function Panel({
     </section>
   );
 }
-export function Rate({
-  upload,
-  download,
-}: {
-  upload: number;
-  download: number;
-}) {
-  return (
-    <div className="rates">
-      <span>
-        <ArrowUp size={13} />
-        {bytes(upload)}/s
-      </span>
-      <span>
-        <ArrowDown size={13} />
-        {bytes(download)}/s
-      </span>
-    </div>
-  );
-}
 export function Meter({
   value,
   max,
@@ -308,29 +219,6 @@ export function Meter({
         className={`meter ${progress >= 100 ? "over" : progress >= 80 ? "warn" : ""} ${max === null ? "unlimited" : ""}`}
       >
         <i style={{ width: max === null ? "0%" : `${progress}%` }} />
-      </div>
-    </div>
-  );
-}
-export function Resource({
-  label,
-  value,
-  text,
-  color = "purple",
-}: {
-  label: string;
-  value: number;
-  text: string;
-  color?: string;
-}) {
-  return (
-    <div className="resource">
-      <div>
-        <span>{label}</span>
-        <strong>{text}</strong>
-      </div>
-      <div className={`resource-bar bar-${color}`}>
-        <i style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
       </div>
     </div>
   );
@@ -451,58 +339,6 @@ export function Modal({
     </div>
   );
 }
-export function Confirm({
-  title,
-  description,
-  confirm = "确认",
-  danger = false,
-  onConfirm,
-  onClose,
-}: {
-  title: string;
-  description: string;
-  confirm?: string;
-  danger?: boolean;
-  onConfirm: () => Promise<void>;
-  onClose: () => void;
-}) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  return (
-    <Modal
-      title={title}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <p className="confirm-copy">{description}</p>
-      <ErrorNotice message={error} />
-      <div className="modal-actions">
-        <Button variant="secondary" onClick={onClose} disabled={busy}>
-          取消
-        </Button>
-        <Button
-          variant={danger ? "danger" : "primary"}
-          busy={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError("");
-            try {
-              await onConfirm();
-              onClose();
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {confirm}
-        </Button>
-      </div>
-    </Modal>
-  );
-}
 export function Field({
   label,
   hint,
@@ -518,47 +354,6 @@ export function Field({
       {children}
       {hint && <small>{hint}</small>}
     </label>
-  );
-}
-export function Toggle({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className={`toggle-label ${checked ? "checked" : ""}`}
-      onClick={() => onChange(!checked)}
-    >
-      <span className="toggle">
-        <i />
-      </span>
-      {label}
-    </button>
-  );
-}
-export function Breadcrumb({
-  to,
-  label,
-  current,
-}: {
-  to: string;
-  label: string;
-  current: string;
-}) {
-  return (
-    <div className="breadcrumb">
-      <Link to={to}>{label}</Link>
-      <ChevronRight size={14} />
-      <span>{current}</span>
-    </div>
   );
 }
 export function RefreshButton({ refresh }: { refresh: () => Promise<void> }) {
@@ -577,7 +372,4 @@ export function RefreshButton({ refresh }: { refresh: () => Promise<void> }) {
       刷新
     </Button>
   );
-}
-export function SuccessIcon() {
-  return <CheckCircle2 size={16} className="text-green" />;
 }

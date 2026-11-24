@@ -8,8 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 type NodeDelayResult struct {
@@ -18,15 +16,19 @@ type NodeDelayResult struct {
 	DelayMS int64  `json:"delayMs"`
 }
 type NodeTestView struct {
-	SubscriptionID string            `json:"subscriptionId"`
-	Pending        bool              `json:"pending"`
-	Results        []NodeDelayResult `json:"results"`
+	SubscriptionID string `json:"subscriptionId"`
+	// NodeID identifies a single-target job; empty retains the catalog/legacy scope.
+	NodeID  string            `json:"nodeId,omitempty"`
+	Pending bool              `json:"pending"`
+	Results []NodeDelayResult `json:"results"`
 }
 type nodeTestRun struct {
 	api                   *API
 	generation, selection uint64
 	subscriptionID        string
+	targetNodeID          string
 	nodes                 []Node
+	resultSlots           []int
 	all                   bool
 	mode                  string
 	tun                   bool
@@ -37,6 +39,11 @@ type nodeTestRun struct {
 
 func (c *Controller) nodeTestValidLocked(run *nodeTestRun) bool {
 	p := c.saved.Profile
+	if run.targetNodeID != "" {
+		node, ok := c.catalogTestNodeLocked(run.subscriptionID, run.targetNodeID)
+		return !c.closed && c.api == run.api && c.view.LoggedIn && p.Enabled &&
+			c.saved.Mode == run.mode && c.saved.TUN == run.tun && ok && node == run.nodes[0]
+	}
 	if run.all {
 		_, nodes := nodeChoices(p)
 		return !c.closed && c.api == run.api && c.view.LoggedIn && p.Enabled &&
@@ -63,19 +70,8 @@ func (c *Controller) TestNodeDelays() error {
 	return c.startNodeTestsLocked()
 }
 
-// Each authenticated account is tested once per application lifetime after its
-// first successful sync. Refreshes and reopening the picker do not retrigger it.
-func (c *Controller) startAutomaticNodeTests() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.api == nil || c.autoNodeTestAPI == c.api || c.view.LastSync == nil || c.view.SelectionPending {
-		return
-	}
-	if c.startNodeTestsLocked() == nil {
-		c.autoNodeTestAPI = c.api
-	}
-}
-
+// Reached only by an explicit manual test command. Login, Sync, selection and
+// connection lifecycle never start a handshake scan or consume probe traffic.
 func (c *Controller) startNodeTestsLocked() error {
 	c.invalidateNodeTestLocked()
 	p := c.saved.Profile
@@ -93,42 +89,10 @@ func (c *Controller) startNodeTestsLocked() error {
 	if len(nodes) == 0 {
 		return errors.New("有效订阅暂无可测试节点")
 	}
-	if c.view.NodeTests.Pending {
+	if c.view.NodeTests.Pending && c.nodeTest.targetNodeID == "" {
 		return nil
 	}
-	if c.nodeTest != nil {
-		c.nodeTest.cancel()
-	}
-	ctx, cancel := context.WithTimeout(c.workCtx, 90*time.Second)
-	run := &nodeTestRun{api: c.api, generation: c.generation, selection: c.selectionGeneration, subscriptionID: p.SubscriptionID, nodes: nodes, all: all, mode: c.saved.Mode, tun: c.saved.TUN, groups: map[int][]int{}, cancel: cancel}
-	c.nodeTest = run
-	c.view.NodeTests = NodeTestView{SubscriptionID: p.SubscriptionID, Pending: true}
-	if all {
-		c.view.NodeTests.SubscriptionID = ""
-	}
-	endpoints := map[string]int{}
-	for index, node := range run.nodes {
-		status := "waiting"
-		if !node.Ready {
-			status = "unavailable"
-		} else {
-			key := nodeProbeKey(node)
-			leader, exists := endpoints[key]
-			if !exists {
-				leader = index
-				endpoints[key] = leader
-				run.leaders = append(run.leaders, leader)
-			}
-			run.groups[leader] = append(run.groups[leader], index)
-		}
-		c.view.NodeTests.Results = append(c.view.NodeTests.Results, NodeDelayResult{NodeID: node.ID, Status: status})
-	}
-	probe := c.nodeProbe
-	if probe == nil {
-		probe = probeNodeHandshake
-	}
-	c.workers.Add(1) // Protected by the same closed gate as Close.
-	go func() { defer c.workers.Done(); c.runNodeTests(ctx, run, probe) }()
+	c.launchNodeTestsLocked(&nodeTestRun{subscriptionID: p.SubscriptionID, nodes: nodes, all: all})
 	return nil
 }
 
@@ -139,91 +103,6 @@ func (c *Controller) CancelNodeDelays() {
 		c.nodeTest.cancel()
 	}
 	c.finishNodeTestLocked(c.nodeTest)
-}
-
-func (c *Controller) finishNodeTestLocked(run *nodeTestRun) {
-	if run == nil || c.nodeTest != run {
-		return
-	}
-	for i := range c.view.NodeTests.Results {
-		result := &c.view.NodeTests.Results[i]
-		if result.Status == "waiting" || result.Status == "testing" {
-			result.Status = "cancelled"
-		}
-	}
-	c.view.NodeTests.Pending = false
-}
-
-func (c *Controller) publishNodeDelay(run *nodeTestRun, index int, status string, delay int64) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.invalidateNodeTestLocked()
-	if c.nodeTest != run || !c.view.NodeTests.Pending {
-		return false
-	}
-	for _, resultIndex := range run.groups[index] {
-		c.view.NodeTests.Results[resultIndex] = NodeDelayResult{NodeID: run.nodes[resultIndex].ID, Status: status, DelayMS: delay}
-	}
-	return true
-}
-
-func (c *Controller) runNodeTests(ctx context.Context, run *nodeTestRun, probe func(context.Context, Node) (int64, error)) {
-	defer run.cancel()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				c.mu.Lock()
-				c.invalidateNodeTestLocked()
-				c.mu.Unlock()
-			}
-		}
-	}()
-	jobs := make(chan int)
-	var workers sync.WaitGroup
-	for worker := 0; worker < 3; worker++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			for index := range jobs {
-				if ctx.Err() != nil {
-					return
-				}
-				if !c.publishNodeDelay(run, index, "testing", 0) {
-					return
-				}
-				attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
-				delay, err := probe(attempt, run.nodes[index])
-				cancel()
-				if ctx.Err() != nil {
-					return
-				}
-				c.publishNodeDelay(run, index, nodeProbeStatus(err), delay)
-			}
-		}()
-	}
-dispatch:
-	for _, index := range run.leaders {
-		select {
-		case <-ctx.Done():
-			break dispatch
-		case jobs <- index:
-		}
-	}
-	close(jobs)
-	workers.Wait()
-	run.cancel()
-	<-done
-	c.mu.Lock()
-	c.invalidateNodeTestLocked()
-	c.finishNodeTestLocked(run)
-	c.mu.Unlock()
 }
 
 func nodeProbeKey(node Node) string {

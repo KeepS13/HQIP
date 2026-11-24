@@ -9,6 +9,7 @@ import subprocess
 import tarfile
 
 from release_bundle import NODE_ASSETS, RELEASE_SCRIPTS, digest, verify_full_release
+from client_bundle import verify_client_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,6 +34,9 @@ def package_release(root, sha, previous_sha=None):
     inputs = {'hqip': dist / 'hqip-linux-amd64',
               'artifacts/HQIP-Windows-x64.zip': dist / 'HQIP-Windows-x64.zip',
               'artifacts/desktop-manifest.json': dist / 'desktop-manifest.json'}
+    client_root = dist / 'client-release'
+    for name in verify_client_bundle(client_root, sha):
+        inputs['artifacts/' + name] = client_root / name
     for name in NODE_ASSETS:
         source = dist / name
         if not source.is_file() or source.is_symlink() or nodes.get('sha256', {}).get(name) != digest(source):
@@ -80,6 +84,7 @@ def package_release(root, sha, previous_sha=None):
     manifest['nodeQuotaVersion'] = nodes.get('nodeQuotaVersion', 0)
     manifest['connectionSlotsVersion'] = nodes.get('connectionSlotsVersion', 0)
     manifest['subscriptionRenewalsVersion'] = 2
+    manifest['clientUpdatesVersion'] = 1
     if previous_sha:
         manifest['previousSourceSHA'] = previous_sha  # Deployment guard, never a source of files.
     (out / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

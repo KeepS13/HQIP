@@ -4,11 +4,10 @@ import { CreditCard, RefreshCw } from "lucide-react";
 import { Button, ErrorNotice, Loading, Modal, Notice, date, bytes } from "../components";
 import { userAPI, useUserData } from "./api";
 import { money, type PaymentInfo, type PaymentOrder } from "./payment-data";
-import type { CatalogSubscription, SubscriptionDetail, UserSubscription } from "./types";
+import type { SubscriptionDetail, UserSubscription } from "./types";
 import { clearRenewalDraft, renewalDraft, renewalExpiry, renewalOrderInput, saveRenewalDraft, type RenewalDraft } from "./renewal-data";
 
 function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: () => void }) {
-  const catalog = useUserData<CatalogSubscription[]>("/catalog", 15000);
   const detail = useUserData<SubscriptionDetail>(`/subscriptions/${encodeURIComponent(value.id)}`, 5000);
   const payment = useUserData<PaymentInfo>("/payment-info", 15000);
   const [draft, setDraft] = useState<RenewalDraft | null>(null);
@@ -17,11 +16,12 @@ function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: (
   const submitting = useRef(false);
   const navigate = useNavigate();
   const current = detail.data?.subscription;
-  const template = catalog.data?.find(t => t.id === value.templateId);
+  // Renewal uses the owned subscription's terms, including hidden shop plans.
+  const template = detail.data?.renewalTemplate;
   useEffect(() => {
     if (!draft && current && template) setDraft(renewalDraft(value.userId, template, current));
   }, [draft, current, template, value.userId]);
-  const dataError = detail.error || catalog.error || payment.error;
+  const dataError = detail.error || payment.error;
   const available = current?.renewable && payment.data?.enabled && Date.parse(current.expiresAt) > Date.now();
 
   async function submit(event: FormEvent) {
@@ -39,14 +39,14 @@ function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: (
       navigate(`/orders/${encodeURIComponent(order.id)}`);
     } catch (e) {
       setError((e as Error).message);
-      await Promise.all([detail.refresh(), catalog.refresh(), payment.refresh()]);
+      await Promise.all([detail.refresh(), payment.refresh()]);
     } finally { submitting.current = false; setBusy(false); }
   }
 
   return <Modal title="确认续费" description={`${value.templateName} · #${value.id.slice(-8)}`} onClose={() => { if (!busy) onClose(); }}>
-    {detail.loading || catalog.loading || payment.loading ? <Loading /> : <form className="form-stack" onSubmit={submit}>
-      <ErrorNotice message={dataError} retry={() => { void Promise.all([detail.refresh(), catalog.refresh(), payment.refresh()]); }} />
-      {!available && <Notice tone="warning">当前暂不可新建续费订单。仅支持本人持有、未到期、仍在售且启用的套餐，并需开放在线支付。若此前已提交，请到<Link to="/orders">我的订单</Link>核对结果。</Notice>}
+    {detail.loading || payment.loading ? <Loading /> : <form className="form-stack" onSubmit={submit}>
+      <ErrorNotice message={dataError} retry={() => { void Promise.all([detail.refresh(), payment.refresh()]); }} />
+      {!available && <Notice tone="warning">当前暂不可新建续费订单。仅支持本人持有、已开通、未到期且启用、有定价的套餐，并需开放在线支付。若此前已提交，请到<Link to="/orders">我的订单</Link>核对结果。</Notice>}
       {draft && <>
         {draft.attempted && <Notice>将继续确认上一次续费请求，沿用原订单参数。请先核对<Link to="/orders">我的订单</Link>，避免重复付款。</Notice>}
         <div className="commerce-checkout-total"><span>续费一期</span><strong>{money(draft.template.priceCents!)}</strong></div>
@@ -79,6 +79,8 @@ function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: (
 
 export function RenewalButton({ value }: { value: UserSubscription }) {
   const [open, setOpen] = useState(false);
+  // Eligibility excludes shop visibility; both listed and hidden plans use
+  // the same primary action, with no visibility-dependent styling.
   if (!value.renewable && !open) return null;
   return <><Button variant="primary" icon={RefreshCw} onClick={() => setOpen(true)}>续费订阅</Button>
     {open && <RenewalDialog value={value} onClose={() => setOpen(false)} />}</>;

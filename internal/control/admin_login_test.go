@@ -96,7 +96,7 @@ func TestAdminLoginSharedRedisBanAndFailureHandling(t *testing.T) {
 	}
 }
 
-type failureAfterPasswordProtection struct{ stage string }
+type failureAfterPasswordProtection struct{}
 
 func (f failureAfterPasswordProtection) Allow(context.Context, string, int, time.Duration) (bool, error) {
 	return true, nil

@@ -6,10 +6,11 @@ import re
 import stat
 import struct
 import zipfile
+from client_bundle import verify_client_bundle
 
 NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
                'hysteria-linux-amd64', 'hysteria-linux-arm64', 'caddy-linux-amd64')
-RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py',
+RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py', 'client_bundle.py',
                    'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py',
                    'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py',
                    'automatic_backup.py', 'commercial_protection.py', 'offline_deployment.py', 'traffic_billing_deployment.py', 'subscription_renewal_deployment.py', 'render_domains.py')
@@ -57,6 +58,13 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
+    updates = manifest.get('clientUpdatesVersion', 0)
+    if type(updates) is not int or updates not in ((0, 1) if allow_legacy else (1,)):
+        raise ValueError('New releases require clientUpdatesVersion 1')
+    if updates == 0:
+        required = required - {'scripts/client_bundle.py'}
+    else:
+        required = required | {'artifacts/godot-releases.json', 'artifacts/godot-downloads.json'}
     renewal = manifest.get('subscriptionRenewalsVersion', 0)
     if type(renewal) is not int or renewal not in ((0, 1, 2) if allow_legacy else (2,)):
         raise ValueError('New releases require subscriptionRenewalsVersion 2')
@@ -252,6 +260,8 @@ def verify_full_release(release, manifest=None, *, allow_legacy=False):
         if core.get('sha256', {}).get('hqip-hysteria-linux-' + arch) != hashes['artifacts/hysteria-linux-' + arch]:
             raise ValueError('Admission core provenance mismatch')
     verify_desktop(release, manifest, hashes)
+    if manifest.get('clientUpdatesVersion') == 1:
+        verify_client_bundle(release / 'artifacts', manifest['sourceSHA'], exact=False)
     return manifest
 
 

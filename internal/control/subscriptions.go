@@ -56,26 +56,6 @@ func (s *Server) adminSubscriptionRequests(w http.ResponseWriter, r *http.Reques
 	portalResult(w, v, err)
 }
 
-func (s *Server) decideSubscriptionRequest(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		ExpectedRevision int64  `json:"expectedRevision"`
-		TemplateRevision int64  `json:"templateRevision"`
-		Note             string `json:"note"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	action := "approve"
-	if strings.HasSuffix(r.URL.Path, "/reject") {
-		action = "reject"
-	}
-	v, err := s.Store.DecideSubscriptionRequest(r.PathValue("id"), action, b.Note, b.ExpectedRevision, b.TemplateRevision)
-	if err == nil {
-		s.Store.Audit("subscription.request."+action, v.ID)
-	}
-	portalResult(w, v, err)
-}
-
 func (s *Server) adminUserSubscriptions(w http.ResponseWriter, r *http.Request) {
 	v, err := s.Store.UserSubscriptions(r.PathValue("id"))
 	portalResult(w, v, err)
@@ -168,20 +148,6 @@ func (s *Server) userSubscriptionRequests(w http.ResponseWriter, r *http.Request
 	portalResult(w, v, err)
 }
 
-func (s *Server) cancelSubscriptionRequest(w http.ResponseWriter, r *http.Request, user, session string) {
-	var b struct {
-		ExpectedRevision int64 `json:"expectedRevision"`
-	}
-	if !readJSON(w, r, &b) {
-		return
-	}
-	err := s.Store.CancelSubscriptionRequest(user, r.PathValue("id"), b.ExpectedRevision)
-	if err == nil {
-		s.Store.Audit("subscription.request.cancel", r.PathValue("id"))
-	}
-	portalResult(w, map[string]bool{"ok": true}, err)
-}
-
 func (s *Server) userSubscriptions(w http.ResponseWriter, r *http.Request, user, session string) {
 	v, err := s.Store.UserSubscriptions(user)
 	portalResult(w, v, err)
@@ -193,6 +159,14 @@ func (s *Server) userSubscriptionDetail(w http.ResponseWriter, r *http.Request, 
 		portalResult(w, nil, err)
 		return
 	}
+	// Read renewal terms only after ownership is checked. Hidden templates
+	// stay out of the public catalog; order creation rechecks both revisions.
+	template, err := s.Store.SubscriptionTemplate(v.TemplateID)
+	if err != nil {
+		portalResult(w, nil, err)
+		return
+	}
+	template.AllocationShortfalls = nil // Administrator allocation diagnostics are not renewal terms.
 	nodes := []map[string]any{}
 	for _, id := range v.NodeIDs {
 		n, err := s.Store.Node(id)
@@ -214,7 +188,7 @@ func (s *Server) userSubscriptionDetail(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	link, err := s.Store.PortalSubscription(user, v.ID, "get")
-	portalResult(w, map[string]any{"subscription": v, "nodes": nodes, "subscriptionUrl": link}, err)
+	portalResult(w, map[string]any{"subscription": v, "renewalTemplate": template, "nodes": nodes, "subscriptionUrl": link}, err)
 }
 
 func (s *Server) nativeSelectSubscription(w http.ResponseWriter, r *http.Request, user, session string) {

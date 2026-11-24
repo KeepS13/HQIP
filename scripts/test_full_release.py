@@ -80,6 +80,8 @@ class FullReleaseTests(unittest.TestCase):
         self.nodes['sha256']['hqip-linux-amd64'] = digest(self.root / 'dist/hqip-linux-amd64')
         (self.root / 'dist/manifest.json').write_text(json.dumps(self.nodes))
         self.write_desktop()
+        from test_client_bundle import client_fixture
+        self.client_files = client_fixture(self.root / 'dist/client-release', self.sha)
 
     def write_desktop(self, outer=None, extras=(), entries=None):
         archive = self.root / 'dist/HQIP-Windows-x64.zip'
@@ -107,7 +109,9 @@ class FullReleaseTests(unittest.TestCase):
         archive = self.root / 'dist' / result['filename']
         materialize(archive, result['sha256'], self.sha, None, output)
         manifest = verify_full_release(output)
-        self.assertEqual(set(manifest['sha256']), REQUIRED | {'scripts/hqip_firewall.py'})
+        from client_bundle import verify_client_bundle
+        clients = {'artifacts/' + name for name in verify_client_bundle(self.root / 'dist/client-release', self.sha)}
+        self.assertEqual(set(manifest['sha256']), REQUIRED | {'scripts/hqip_firewall.py'} | clients)
         self.assertNotIn('previousSourceSHA', manifest)
 
     def test_stale_core_is_rejected_even_if_control_and_client_are_new(self):

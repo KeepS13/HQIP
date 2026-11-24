@@ -1,13 +1,10 @@
 package agent
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -220,9 +217,4 @@ func (a *Agent) observeManualCertificate() {
 	if err := a.ledger.saveCache(next); err == nil {
 		a.cache = next
 	}
-}
-
-func certificateFingerprint(b model.CertificateBundle) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", b.Version, b.CertificatePEM, b.PrivateKeyPEM)))
-	return hex.EncodeToString(h[:])
 }

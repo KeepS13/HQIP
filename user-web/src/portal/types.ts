@@ -107,12 +107,6 @@ export interface Release {
   size?: number;
   sourceSHA?: string;
 }
-export interface TurnstileSettings {
-  siteKey: string;
-  secretConfigured: boolean;
-  allowedHostnames: string[];
-  revision: number;
-}
 export const subscriptionLabels: Record<string, string> = {
   pending: "待开通",
   active: "可使用",
@@ -136,6 +130,8 @@ export interface UserProfile {
 }
 export interface SubscriptionDetail {
   subscription: UserSubscription;
+  // Owner-only renewal terms remain available when the shop hides the plan.
+  renewalTemplate?: SubscriptionTemplate;
   nodes: PortalNode[];
   subscriptionUrl: string;
 }

@@ -14,7 +14,6 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
-  CheckCircle2,
   ChevronRight,
   Copy,
   Inbox,
@@ -603,7 +602,4 @@ export function RefreshButton({ refresh }: { refresh: () => Promise<void> }) {
       刷新
     </Button>
   );
-}
-export function SuccessIcon() {
-  return <CheckCircle2 size={16} className="text-green" />;
 }

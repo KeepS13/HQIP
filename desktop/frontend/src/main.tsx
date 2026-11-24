@@ -65,7 +65,7 @@ function App() {
   useEffect(()=>{let mounted=true;const update=()=>{call('State').then(value=>{if(!mounted)return;setS(normalize(value));setRuntimeError('')}).catch(e=>{if(mounted)setRuntimeError(String(e).replace(/^Error: /,''))})};update();const timer=setInterval(update,700);return()=>{mounted=false;clearInterval(timer)}},[]);
   async function act(method:string,...args:unknown[]) {const sequence=++actionSequence.current;setBusy(method);setError('');try{await call(method,...args);const latest=normalize(await call('State'));if(sequence===actionSequence.current)setS(latest)}catch(e){if(sequence===actionSequence.current)setError(String(e).replace(/^Error: /,''))}finally{if(sequence===actionSequence.current)setBusy('')}}
   const recovering=s.runState==='recovering',on=s.runState==='connected',connecting=s.runState==='connecting',canStop=s.connectionIntent||on||connecting;
-  const selected=s.nodes.find(n=>n.id===s.desiredNodeId),actual=s.nodes.find(n=>n.id===(s.actualNodeId||s.desiredNodeId)),pack=s.subscription,m=s.metrics;
+  const selected=s.nodes.find(n=>n.id===s.desiredNodeId),actual=s.nodeChoices.find(n=>n.nodeId===s.actualNodeId&&n.subscriptionId===s.actualSubscriptionId),actualPack=s.subscriptions.find(p=>p.id===s.actualSubscriptionId),pack=s.subscription,m=s.metrics;
   const nodeTests=!s.nodeTests?.subscriptionId||s.nodeTests.subscriptionId===s.desiredSubscriptionId?s.nodeTests:undefined;
   const connectionDetail=recovering?'节点链路中断，正在恢复原节点连接…':s.selectionPending?'正在确认旧连接关闭并同步新订阅…':on?`${pack?.templateName||'当前订阅'} · ${actual?.name||'当前节点'}`:s.runState==='failed'?'代理已停止。处理提示后可以手动重连。':'先选订阅，再选节点，开启这台设备的连接。';
   const rate=(n:number)=>on&&m.available&&!m.stale?bytes(n)+'/s':'—';
@@ -99,7 +99,7 @@ function App() {
     <UpdateSettings state={s.updates} busy={!!busy} onCheck={()=>void act('CheckUpdates')} onDownload={()=>void act('DownloadUpdate')}/>
     {s.loggedIn?<button className="danger-outline" onClick={()=>void act('Logout')}><LogOut size={16}/>退出用户账户</button>:<button type="button" className="text-button" onClick={()=>setSection('network')}>返回账户登录</button>}
   </section>}
-  {help&&<section className="help-panel"><h3><CircleHelp size={17}/>使用提示</h3><p>点击“选择节点”，在弹窗中选择节点及其对应订阅。同名节点用订阅名称和编号区分；切换会短暂断开连接，待旧连接关闭后再连接新目标。</p><p>订阅到期、流量耗尽或被移除时，VPN 会关闭，不自动使用另一份订阅。已连接的节点授权被移除时会停止并提示，请手动选择其他节点。</p><p>启动并同步账户后自动测试一次所有有效订阅的节点，相同节点只测一次；也可点击“延迟测试”重新测试。该结果是 QUIC/TLS 握手延迟，不切换连接，不代表代理网页访问延迟。流量区的“检测延迟”通过当前代理访问 HTTPS，消耗计入该订阅；在线数按 HY2 客户端实例数加 VLESS 来源 IP 数计算，同一订阅跨节点共享上限。成功连接后网络短暂中断会在后台恢复同一节点；节点账本支持仍持有名额的连接在原节点断网续用或重连；新增名额需要账户服务确认，订阅到期或额度耗尽会停止。</p></section>}
+  {help&&<section className="help-panel"><h3><CircleHelp size={17}/>使用提示</h3><p>点击“选择节点”，在弹窗中选择节点及其对应订阅。同名节点用订阅名称和编号区分；切换会短暂断开连接，待旧连接关闭后再连接新目标。</p><p>订阅到期、流量耗尽或被移除时，VPN 会关闭，不自动使用另一份订阅。已连接的节点授权被移除时会停止并提示，请手动选择其他节点。</p><p>每次连接成功后自动检测一次当前连接的代理延迟。节点列表的“延迟测试”仅手动触发，结果为 QUIC/TLS 握手延迟，不代表代理网页访问延迟。流量区的“检测延迟”通过当前代理访问 HTTPS，消耗计入该订阅；在线数按 HY2 客户端实例数加 VLESS 来源 IP 数计算，同一订阅跨节点共享上限。成功连接后网络短暂中断会在后台恢复同一节点；节点账本支持仍持有名额的连接在原节点断网续用或重连；新增名额需要账户服务确认，订阅到期或额度耗尽会停止。</p></section>}
   </main><UpdatePrompt state={s.updates} busy={!!busy} onDownload={()=>void act('DownloadUpdate')} onSnooze={()=>void act('SnoozeUpdate')}/></div>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

@@ -37,7 +37,8 @@ class ManifestTransferTests(unittest.TestCase):
         self.assertEqual(urls, ['https://hqip.sharevps.online/',
                                 'https://cms-hqip.sharevps.online/',
                                 'https://hqip.sharevps.online/healthz',
-                                'https://hqip.sharevps.online/readyz'])
+                                'https://hqip.sharevps.online/readyz',
+                                'scripts/verify_client_public.py'])
 
     def test_alive_process_with_unavailable_storage_rejects_release(self):
         def response(args, **kwargs):

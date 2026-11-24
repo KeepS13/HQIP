@@ -31,6 +31,7 @@ type RulesRef struct {
 	URL     string `json:"url"`
 }
 type Profile struct {
+	ChangeToken       string         `json:"changeToken,omitempty"` // Optional v3 business-change capability, never authorization.
 	DeviceID          string         `json:"deviceId"`
 	Name              string         `json:"name"`
 	Enabled           bool           `json:"enabled"`
@@ -121,6 +122,7 @@ type View struct {
 	Status
 }
 type persisted struct {
+	LocalChoice            *localChoice                   `json:"localChoice,omitempty"`
 	Offline                *offlineAuthorization          `json:"offline,omitempty"`
 	LastSync               *time.Time                     `json:"lastSync,omitempty"`
 	AccountVersion         int                            `json:"accountVersion"`

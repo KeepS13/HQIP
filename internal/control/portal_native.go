@@ -66,6 +66,11 @@ func (s *Server) nativeRefresh(w http.ResponseWriter, r *http.Request) {
 	portalResult(w, t, e)
 }
 func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, session string) {
+	changeToken, err := s.Store.ClientChangeToken(r.Context(), user)
+	if err != nil {
+		portalResult(w, nil, err)
+		return
+	}
 	id, selectionRevision, err := s.Store.SelectedSubscription(user, session)
 	if err != nil {
 		portalResult(w, nil, err)
@@ -121,7 +126,8 @@ func (s *Server) nativeProfile(w http.ResponseWriter, r *http.Request, user, ses
 		Subscription   *model.UserSubscription    `json:"subscription"`
 		Subscriptions  []model.UserSubscription   `json:"subscriptions"`
 		AvailableNodes []model.ClientNodeEndpoint `json:"availableNodes"`
-	}{p, u, e, u.Subscriptions, availableNodes}
+		ChangeToken    string                     `json:"changeToken"`
+	}{p, u, e, u.Subscriptions, availableNodes, changeToken}
 	raw, _ := json.Marshal(v)
 	sum := sha256.Sum256(raw)
 	etag := "\"" + hex.EncodeToString(sum[:]) + "\""

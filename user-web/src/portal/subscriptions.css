@@ -146,6 +146,22 @@
   flex-wrap: wrap;
   align-items: center;
 }
+/* Keep card actions in one row; the node link absorbs spare width, including
+   when renewal is unavailable. Narrow cards may wrap its text, not the buttons. */
+.user-sub-card > .user-sub-actions {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.user-sub-card > .user-sub-actions > .button {
+  flex: 0 0 auto;
+  min-height: 46px;
+  padding: 12px 14px;
+}
+.user-sub-card > .user-sub-actions > a.button {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: normal;
+}
 .user-request-list {
   display: grid;
   gap: 16px;

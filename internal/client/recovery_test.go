@@ -281,8 +281,8 @@ func TestRecoveryLateProbeCannotResurrectAfterUserAction(t *testing.T) {
 			<-done
 			if action == "select" || action == "subscription" {
 				waitState(t, f.c, "connected")
-				if f.c.View().ActualNodeID != "B" {
-					t.Fatal("old recovery changed new selection")
+				if f.c.View().DesiredNodeID != "B" || f.c.View().ActualNodeID != "B" {
+					t.Fatal("old recovery response replaced the new connection")
 				}
 			} else if f.c.View().ConnectionIntent || f.e.Alive() {
 				t.Fatal("late response revived connection")

@@ -2,6 +2,7 @@
 /bin/
 /dist/
 /.local/
+/.diagnostics/
 *.db
 *.db-shm
 *.db-wal
@@ -11,9 +12,6 @@
 !runtime/hysteria/app/internal/http/test.key
 !runtime/hysteria/core/internal/integration_tests/test.key
 .env
-web/node_modules/
-web/dist/
-web/*.tsbuildinfo
 coverage.out
 *.exe
 __pycache__/
@@ -21,7 +19,6 @@ __pycache__/
 desktop/frontend/node_modules/
 desktop/frontend/dist/
 desktop/frontend/*.tsbuildinfo
-desktop/*.exe
 desktop/*.syso
 
 admin-web/node_modules/
@@ -30,3 +27,8 @@ admin-web/*.tsbuildinfo
 user-web/node_modules/
 user-web/dist/
 user-web/*.tsbuildinfo
+godot-client/.godot/
+native/android/.gradle/
+native/android/build/
+native/android/local.properties
+native/mobile/build/

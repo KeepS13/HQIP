@@ -1,0 +1,351 @@
+{
+  "loggedIn": true,
+  "deviceName": "离线预览设备",
+  "platform": "windows",
+  "version": "5.0.0-preview.4",
+  "coreVersion": "1.14.4",
+  "serverUrl": "https://hqip.sharevps.online",
+  "runState": "connected",
+  "connectionIcon": {
+    "name": "connected",
+    "label": "已连接"
+  },
+  "connectionIntent": true,
+  "desiredSubscriptionId": "test-subscription-001",
+  "desiredNodeId": "node-a",
+  "actualNodeId": "node-a",
+  "actualSubscriptionId": "test-subscription-001",
+  "mode": "rule",
+  "tunEnabled": false,
+  "subscription": {
+    "id": "test-subscription-001",
+    "templateName": "标准流量包",
+    "createdAt": "2026-11-01T00:00:00Z",
+    "status": "active",
+    "expiresAt": "2030-12-31T00:00:00Z",
+    "quotaBytes": 100000000000,
+    "usedBytes": 12500000000,
+    "reservedBytes": 500000,
+    "bandwidthMbps": 200,
+    "occupied": 1,
+    "maxConnections": 3
+  },
+  "subscriptions": [
+    {
+      "id": "test-subscription-001",
+      "templateName": "标准流量包",
+      "createdAt": "2026-11-01T00:00:00Z",
+      "status": "active",
+      "expiresAt": "2030-12-31T00:00:00Z",
+      "quotaBytes": 100000000000,
+      "usedBytes": 12500000000,
+      "reservedBytes": 500000,
+      "bandwidthMbps": 200,
+      "occupied": 1,
+      "maxConnections": 3
+    }
+  ],
+  "nodeChoices": [
+    {
+      "nodeId": "node-a",
+      "subscriptionId": "test-subscription-001",
+      "name": "香港 · 01",
+      "ready": true
+    },
+    {
+      "nodeId": "node-b",
+      "subscriptionId": "test-subscription-001",
+      "name": "日本 · 02",
+      "ready": true
+    }
+  ],
+  "nodeTests": {
+    "pending": false,
+    "results": [
+      {
+        "nodeId": "node-a",
+        "status": "success",
+        "delayMs": 36
+      },
+      {
+        "nodeId": "node-b",
+        "status": "success",
+        "delayMs": 72
+      }
+    ]
+  },
+  "metrics": {
+    "available": true,
+    "stale": false,
+    "uploadRate": 230000,
+    "downloadRate": 2700000,
+    "uploadBytes": 150000000,
+    "downloadBytes": 910000000,
+    "applicationConnections": 12,
+    "memoryBytes": 43000000,
+    "delayMs": 45,
+    "history": [
+      {
+        "uploadRate": 200000,
+        "downloadRate": 2100000
+      },
+      {
+        "uploadRate": 219792.31674036183,
+        "downloadRate": 2258935.464636049
+      },
+      {
+        "uploadRate": 238354.04308833624,
+        "downloadRate": 2411534.6738469205
+      },
+      {
+        "uploadRate": 254531.10080186673,
+        "downloadRate": 2551713.9787160284
+      },
+      {
+        "uploadRate": 267317.6787846317,
+        "downloadRate": 2673884.8727196185
+      },
+      {
+        "uploadRate": 275918.7695484469,
+        "downloadRate": 2773176.787846317
+      },
+      {
+        "uploadRate": 279799.59892832435,
+        "downloadRate": 2845631.268773781
+      },
+      {
+        "uploadRate": 278718.87574991497,
+        "downloadRate": 2888359.7839907683
+      },
+      {
+        "uploadRate": 272743.79414605454,
+        "downloadRate": 2899658.882433204
+      },
+      {
+        "uploadRate": 262245.8557510337,
+        "downloadRate": 2879078.104702556
+      },
+      {
+        "uploadRate": 247877.77152831652,
+        "downloadRate": 2827437.941460545
+      },
+      {
+        "uploadRate": 230532.87936418655,
+        "downloadRate": 2746797.1230556723
+      },
+      {
+        "uploadRate": 211289.60064478937,
+        "downloadRate": 2640370.544440921
+      },
+      {
+        "uploadRate": 191344.38923759133,
+        "downloadRate": 2512401.0974571714
+      },
+      {
+        "uploadRate": 171937.3417848304,
+        "downloadRate": 2367990.520124724
+      },
+      {
+        "uploadRate": 154275.0945006125,
+        "downloadRate": 2212896.0064478936
+      },
+      {
+        "uploadRate": 139455.80037536574,
+        "downloadRate": 2053300.685257936
+      },
+      {
+        "uploadRate": 128400.85134171332,
+        "downloadRate": 1895567.118378535
+      },
+      {
+        "uploadRate": 121797.59058679224,
+        "downloadRate": 1745983.645364118
+      },
+      {
+        "uploadRate": 120056.57688196976,
+        "downloadRate": 1610513.6872458248
+      },
+      {
+        "uploadRate": 123286.05802694893,
+        "downloadRate": 1494558.0037536575
+      },
+      {
+        "uploadRate": 131285.24052587262,
+        "downloadRate": 1402739.3820691295
+      },
+      {
+        "uploadRate": 143556.77395436866,
+        "downloadRate": 1338718.340888387
+      },
+      {
+        "uploadRate": 159337.67380005933,
+        "downloadRate": 1305047.1970932283
+      },
+      {
+        "uploadRate": 177646.76014408594,
+        "downloadRate": 1303068.3129313276
+      },
+      {
+        "uploadRate": 197345.66267619547,
+        "downloadRate": 1332860.5802694892
+      },
+      {
+        "uploadRate": 217209.59904702523,
+        "downloadRate": 1393236.2754238774
+      },
+      {
+        "uploadRate": 236003.52590244942,
+        "downloadRate": 1481788.4099552103
+      },
+      {
+        "uploadRate": 252558.92789750313,
+        "downloadRate": 1594986.6897021427
+      },
+      {
+        "uploadRate": 265846.47032092046,
+        "downloadRate": 1728318.256468994
+      },
+      {
+        "uploadRate": 275039.9981419791,
+        "downloadRate": 1876467.6014408593
+      },
+      {
+        "uploadRate": 279567.9023288941,
+        "downloadRate": 2033528.4777460028
+      },
+      {
+        "uploadRate": 279148.65972987056,
+        "downloadRate": 2193239.363880395
+      },
+      {
+        "uploadRate": 273808.3368191472,
+        "downloadRate": 2349233.090810702
+      },
+      {
+        "uploadRate": 263878.9690098792,
+        "downloadRate": 2495290.6809108863
+      },
+      {
+        "uploadRate": 249977.9163003354,
+        "downloadRate": 2625589.2789750313
+      },
+      {
+        "uploadRate": 232969.47881934053,
+        "downloadRate": 2734934.291079323
+      },
+      {
+        "uploadRate": 213911.1588304347,
+        "downloadRate": 2818966.4766493016
+      },
+      {
+        "uploadRate": 193987.91036305524,
+        "downloadRate": 2874335.737625189
+      },
+      {
+        "uploadRate": 174438.4645102181,
+        "downloadRate": 2898834.6762996837
+      },
+      {
+        "uploadRate": 156478.31112885042,
+        "downloadRate": 2891486.5972987055
+      },
+      {
+        "uploadRate": 141224.12556761637,
+        "downloadRate": 2852584.4453438185
+      },
+      {
+        "uploadRate": 129624.33920226639,
+        "downloadRate": 2783679.1264706245
+      },
+      {
+        "uploadRate": 122400.17056634571,
+        "downloadRate": 2687517.6782992906
+      },
+      {
+        "uploadRate": 120000.78347594372,
+        "downloadRate": 2567933.7543134093
+      },
+      {
+        "uploadRate": 122575.36019909909,
+        "downloadRate": 2429694.788193405
+      },
+      {
+        "uploadRate": 129963.82602492571,
+        "downloadRate": 2278311.931280198
+      },
+      {
+        "uploadRate": 141706.8019338264,
+        "downloadRate": 2119820.340362686
+      },
+      {
+        "uploadRate": 157074.1665599652,
+        "downloadRate": 1960538.5750216162
+      },
+      {
+        "uploadRate": 175110.45160150982,
+        "downloadRate": 1806816.6965984572
+      },
+      {
+        "uploadRate": 194694.24821190393,
+        "downloadRate": 1664783.1112885042
+      },
+      {
+        "uploadRate": 214607.93077049073,
+        "downloadRate": 1540100.2499251661
+      },
+      {
+        "uploadRate": 233613.36294613127,
+        "downloadRate": 1437738.824731477
+      },
+      {
+        "uploadRate": 250528.87901745908,
+        "downloadRate": 1361779.662709755
+      },
+      {
+        "uploadRate": 264302.75412412966,
+        "downloadRate": 1315251.0159468069
+      },
+      {
+        "uploadRate": 274078.59542469017,
+        "downloadRate": 1300007.8347594372
+      },
+      {
+        "uploadRate": 279248.5884555896,
+        "downloadRate": 1316657.816678946
+      },
+      {
+        "uploadRate": 279491.288090621,
+        "downloadRate": 1364537.1794682594
+      },
+      {
+        "uploadRate": 274791.60444197466,
+        "downloadRate": 1441737.1240250329
+      },
+      {
+        "uploadRate": 265441.74107637553,
+        "downloadRate": 1545179.9321783022
+      }
+    ]
+  },
+  "updates": {
+    "currentVersion": "5.0.0-preview.4",
+    "ready": false,
+    "message": "当前已是此渠道的可用版本"
+  },
+  "autoStart": {
+    "supported": true,
+    "enabled": false
+  },
+  "nodes": [
+    {
+      "id": "node-a",
+      "name": "香港 · 01",
+      "ready": true
+    },
+    {
+      "id": "node-b",
+      "name": "日本 · 02",
+      "ready": true
+    }
+  ]
+}

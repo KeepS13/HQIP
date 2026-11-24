@@ -1,0 +1,41 @@
+plugins { id 'com.android.application' version '8.6.1' }
+
+android {
+    namespace 'online.sharevps.hqip'
+    compileSdk 36
+    buildToolsVersion '37.0.0'
+    defaultConfig {
+        applicationId 'online.sharevps.hqip'
+        minSdk 26
+        targetSdk 36
+        // scripts/build_godot.py injects one identity into APK and Go runtime.
+        // A manual build must provide it too; stale fallback versions are unsafe.
+        versionCode = providers.gradleProperty('hqipSequence').get().toInteger()
+        versionName = providers.gradleProperty('hqipVersion').get()
+        ndk { abiFilters (project.findProperty('hqipABI') ?: 'arm64-v8a') }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    sourceSets { main { assets.srcDirs = ['../../.local/godot-android-assets'] } }
+    androidResources { ignoreAssetsPattern '!.svn:!.git:!.gitignore:!.ds_store:!*~' }
+    packaging { jniLibs { useLegacyPackaging false }; resources { excludes += ['META-INF/LICENSE', 'META-INF/NOTICE'] } }
+    signingConfigs {
+        release {
+            if (System.getenv('HQIP_ANDROID_KEYSTORE')) {
+                storeFile file(System.getenv('HQIP_ANDROID_KEYSTORE'))
+                storePassword System.getenv('HQIP_ANDROID_STORE_PASSWORD')
+                keyAlias System.getenv('HQIP_ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('HQIP_ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+}
+
+dependencies {
+    implementation files('../../.local/godot-tools/android-template/libs/release/godot-lib.template_release.aar')
+    implementation files('../../dist/godot-android/hqip-mobile.aar')
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.21'
+    implementation 'androidx.fragment:fragment:1.8.6'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.documentfile:documentfile:1.1.0'
+}

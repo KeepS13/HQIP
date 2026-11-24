@@ -71,43 +71,6 @@ func TestGlobalNodeDelayDeduplicatesEndpointsWithoutChangingSelection(t *testing
 	}
 }
 
-func TestAutomaticNodeDelaysWaitForSyncAndRunOncePerLogin(t *testing.T) {
-	c, _, _ := setupClient(t)
-	c.mu.Lock()
-	c.saved.Profile = catalogProfile()
-	c.view.LastSync = nil
-	c.mu.Unlock()
-	var calls atomic.Int32
-	c.nodeProbe = func(context.Context, Node) (int64, error) { calls.Add(1); return 15, nil }
-	c.startAutomaticNodeTests()
-	if calls.Load() != 0 {
-		t.Fatal("startup probe ran before profile sync")
-	}
-	now := time.Now()
-	c.mu.Lock()
-	c.view.LastSync = &now
-	c.mu.Unlock()
-	for i := 0; i < 5; i++ {
-		c.startAutomaticNodeTests()
-		waitNodeTests(t, c)
-	}
-	if calls.Load() != 1 {
-		t.Fatal("polling retriggered automatic probing", calls.Load())
-	}
-	c.mu.Lock()
-	api, err := NewAPI(c.saved.ServerURL, c.api.Tokens())
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.api = api
-	c.mu.Unlock()
-	c.startAutomaticNodeTests()
-	waitNodeTests(t, c)
-	if calls.Load() != 2 {
-		t.Fatal("new login did not get its own probe", calls.Load())
-	}
-}
-
 func TestGlobalNodeTestsKeepSelectionIndependentAndCancelRemovedAccess(t *testing.T) {
 	for _, removeAccess := range []bool{false, true} {
 		t.Run(map[bool]string{false: "selection-change", true: "removed-access"}[removeAccess], func(t *testing.T) {
@@ -195,6 +158,13 @@ func TestCombinedNodeSelectionConnectsOnlyRequestedSubscriptionAndNode(t *testin
 	}
 	waitState(t, c, "connected")
 	if err := c.SelectSubscriptionNode("b", "alternate"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
 	waitSubscription(t, c, "b")

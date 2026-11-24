@@ -190,50 +190,8 @@ export interface NodeDetail {
   traffic: TrafficPoint[];
   devices: Device[];
 }
-export interface DeviceDetail {
-  device: Device;
-  traffic: TrafficPoint[];
-  nodes: Node[];
-  clientAccount?: ClientAccount;
-  assignment?: Assignment;
-  sessions?: ClientSession[];
-  removals?: Removal[];
-}
-
-export interface ClientAccount {
-  username: string;
-  initialized: boolean;
-}
 export interface Assignment {
   nodeIds: string[];
   defaultNodeId: string;
   revision: number;
-}
-export interface ClientSession {
-  id: string;
-  clientName: string;
-  installationId: string;
-  coreVersion: string;
-  desiredNodeId: string;
-  actualNodeId: string;
-  runState: string;
-  mode: string;
-  tunEnabled: boolean;
-  connectionIntent: boolean;
-  desiredConfigRevision: number;
-  appliedConfigRevision: number;
-  processedConfigRevision: number;
-  lastSeen: string | null;
-  lastError: string;
-  revocationPending: boolean;
-}
-export interface Removal {
-  id: string;
-  nodeId: string;
-  deviceId: string;
-  revision: number;
-  status: string;
-  deadline: string | null;
-  createdAt: string;
-  immediate: boolean;
 }

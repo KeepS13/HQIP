@@ -14,7 +14,7 @@ Clash 输出 `DOMAIN`、`DOMAIN-SUFFIX`、`IP-CIDR`、`IP-CIDR6` 等普通规则
 
 Clash 使用 redir-host DNS；大陆及明确直连域名通过 `nameserver-policy` 使用 `223.5.5.5`、`119.29.29.29`，其他域名使用海外 DoH fallback；`.local`、`.lan`、`localhost` 保留系统解析，避免把局域网名字交给公共 DNS。fallback 禁用 GeoIP 判定，避免再次依赖用户的数据库。HTTP Host／TLS SNI 嗅探可识别应用直接连接 IP 的场景，`override-destination=false` 保留原目标地址。为了兼容 Meta 1.16.0，没有输出它不支持的 QUIC 嗅探项；QUIC 仍依据已知域名或目标 IP 分流。
 
-sing-box/HQIP 为大陆域名设置本地 DNS，路由中用于 IP 分类的 `resolve` 也显式使用本地解析器。HQIP 只有在旧缓存的 CIDR 与有效策略一致时才使用编译缓存，否则内嵌当前 CN 前缀。Windows 特权辅助程序仅允许声明式域名匹配、本地解析动作和合法的内嵌 IP 前缀；不会因这个扩展接收任意路径、脚本、额外 DNS 服务器或监听器。
+sing-box 导出为大陆域名设置本地 DNS。HQIP 原生客户端从 `5.0.0-preview.9` 起，用于 IP 分类的 `resolve` 遵循 DNS 分流，不再强制本地解析：已知大陆域名本地解析，未匹配域名通过节点使用远程 DoH，避免污染答案导致海外域名误走直连或直接解析失败。未收录域名仍按可信解析结果进行 CN IP 判断，CDN 选择可能与本地 DNS 不同。第三方导出配置的历史行为不由本次原生修复变更。HQIP 只有在旧缓存 CIDR 与有效策略一致时才使用编译缓存，否则内嵌当前 CN 前缀。Windows 特权辅助程序允许该未指定 server 的声明式解析动作；不会接收任意路径、脚本、额外 DNS 服务器或监听器。
 
 ## 数据与重建
 

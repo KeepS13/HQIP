@@ -29,6 +29,7 @@ func TestRenewalRoutesRequireOwnerCSRFAndReturnOriginalSubscription(t *testing.T
 	}
 	price := int64(100)
 	p.PriceCents = &price
+	p.Listed = false // Hiding the shop entry must not prevent an owner's renewal.
 	p, err = s.Store.SaveSubscriptionTemplate(p.ID, p, p.Revision)
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +48,23 @@ func TestRenewalRoutesRequireOwnerCSRFAndReturnOriginalSubscription(t *testing.T
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"success":true,"code":200,"data":{"id":"renewal-platform","payUrl":"https://pay.example.com/renewal"}}`))}, nil
 	})}
 	pub := s.PublicHandler()
+	detailPath := "/api/v1/user/subscriptions/" + sub.ID
+	if w := portalRequest(pub, "GET", detailPath, nil, foreignCookie, foreignCSRF, s.opts.UserOrigin); w.Code != 404 {
+		t.Fatal("foreign user read hidden renewal terms", w.Code, w.Body.String())
+	}
+	w := portalRequest(pub, "GET", detailPath, nil, cookie, userCSRF, s.opts.UserOrigin)
+	var detail struct {
+		Subscription model.UserSubscription      `json:"subscription"`
+		Template     *model.SubscriptionTemplate `json:"renewalTemplate"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &detail) != nil || !detail.Subscription.Renewable || detail.Template == nil || detail.Template.ID != p.ID || detail.Template.Listed || detail.Template.PriceCents == nil || *detail.Template.PriceCents != price || detail.Template.Revision != p.Revision {
+		t.Fatal("owner cannot read hidden renewal terms", w.Code, w.Body.String())
+	}
+	w = portalRequest(pub, "GET", "/api/v1/user/catalog", nil, cookie, userCSRF, s.opts.UserOrigin)
+	var catalog []model.CatalogSubscription
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &catalog) != nil || len(catalog) != 0 {
+		t.Fatal("hidden template leaked into shop", w.Code, w.Body.String())
+	}
 	body := model.PaymentOrderInput{RequestID: "renewal-route-request-0001", TemplateID: p.ID, TemplateRevision: p.Revision, RenewalSubscriptionID: sub.ID, ExpectedSubscriptionRevision: current.Revision}
 	if w := portalRequest(pub, "POST", "/api/v1/user/orders", body, cookie, "", s.opts.UserOrigin); w.Code != 403 {
 		t.Fatal("renewal skipped CSRF", w.Code)

@@ -76,10 +76,10 @@ export function SubscriptionCard({ value, actions }: { value: UserSubscription; 
       </dl>
       <div className="user-sub-actions">
         <Link
-          className="button button-secondary full-width"
+          className="button button-secondary"
           to={`/subscriptions/${value.id}`}
         >
-          查看节点与导入链接 <ArrowRight size={16} />
+          查看节点信息 <ArrowRight size={16} />
         </Link>
         {actions}
       </div>

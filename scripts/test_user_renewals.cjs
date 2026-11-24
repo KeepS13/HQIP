@@ -32,7 +32,7 @@ const subscriptions = ['a', 'b', 'exhausted', 'unpriced', 'expired', 'removed'].
 }));
 const orders = new Map(), writes = [], unexpected = [], errors = [];
 let holdWrite, releaseWrite, failWrite = false;
-let paymentEnabled = true;
+let paymentEnabled = true, catalogReads = 0;
 
 async function main() {
   assert.ok(fs.existsSync(path.join(assets, 'index.html')), 'Build user-web first');
@@ -53,12 +53,12 @@ async function main() {
         else if (p === '/api/v1/user/config') body = { portalEnabled: true, registrationEnabled: true };
         else if (p === '/api/v1/user/profile') body = { user, subscriptions, sessions: [] };
         else if (p === '/api/v1/user/subscriptions') body = subscriptions;
-        else if (p === '/api/v1/user/catalog') body = [template];
+        else if (p === '/api/v1/user/catalog') { catalogReads++; body = template.listed ? [template] : []; }
         else if (p === '/api/v1/user/payment-info') body = { enabled: paymentEnabled, payType: 'aloop', payDurationMinutes: 10 };
         else if (p.startsWith('/api/v1/user/subscriptions/')) {
           const subscription = subscriptions.find(s => s.id === decodeURIComponent(p.split('/').pop()));
           assert.ok(subscription, 'unknown subscription fixture');
-          body = { subscription, nodes: subscription.nodeIds.map(id => ({ id, name: id === 'original-b' ? '原节点 B' : '原节点 A', ready: true })), subscriptionUrl: '' };
+          body = { subscription, renewalTemplate: template, nodes: subscription.nodeIds.map(id => ({ id, name: id === 'original-b' ? '原节点 B' : '原节点 A', ready: true })), subscriptionUrl: '' };
         } else if (p === '/api/v1/user/orders' && request.method() === 'POST') {
           const input = request.postDataJSON();
           writes.push(input);
@@ -99,9 +99,24 @@ async function main() {
     await expect(card('unpriced').getByRole('button', { name: '续费订阅' })).toHaveCount(0);
     await expect(card('expired')).toHaveCount(0);
     await expect(card('a')).toContainText('3 / 3');
+    const listedButton = await card('b').getByRole('button', { name: '续费订阅' }).evaluate(button => {
+      const style = getComputedStyle(button), rect = button.getBoundingClientRect();
+      return { className: button.className, color: style.color, background: style.backgroundColor, width: rect.width, height: rect.height };
+    });
+    // The catalog really omits hidden plans. Renewal must use owned details,
+    // retaining the same primary button and layout after a visibility change.
+    template.listed = false;
+    await page.reload();
+    await expect(renew).toHaveCount(3);
+    const hiddenButton = await card('b').getByRole('button', { name: '续费订阅' }).evaluate(button => {
+      const style = getComputedStyle(button), rect = button.getBoundingClientRect();
+      return { className: button.className, color: style.color, background: style.backgroundColor, width: rect.width, height: rect.height };
+    });
+    assert.deepEqual(hiddenButton, listedButton, 'shop visibility changed renewal button styling');
     await page.screenshot({ path: path.join(output, 'overview-desktop.png'), fullPage: true });
     await card('b').getByRole('button', { name: '续费订阅' }).click();
     await expect(dialog.getByRole('button', { name: '创建续费订单' })).toBeEnabled();
+    assert.equal(catalogReads, 0, 'renewal depends on the public shop catalog');
     await expect(dialog).toContainText('原节点 B');
     await expect(dialog).not.toContainText('原节点 A');
     await expect(dialog).not.toContainText('candidate-only');

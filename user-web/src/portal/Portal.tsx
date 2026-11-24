@@ -311,13 +311,13 @@ function Auth({
   );
 }
 function Downloads() {
-  const releases = useUserData<{ releases: Release[] }>("/releases", 60000);
+  const releases = useUserData<{ releases: Release[] }>("/installers", 60000);
   return (
     <>
       <PageHeader
         eyebrow="HQIP CLIENT"
         title="每一台设备，轻松连接"
-        description="下载已发布的官方客户端，在系统浏览器登录你的账户。"
+        description="Windows 下载单个安装包，Android 下载 APK；安装后自动检查更新。"
       />
       <div className="portal-download-hero">
         <div className="portal-download-symbol">H</div>
@@ -394,7 +394,7 @@ function Downloads() {
         )}
       </Panel>
       <Notice>
-        官方客户端会打开系统浏览器完成登录。请核对网站地址，授权后会自动返回客户端。
+        Windows 更新下载完成后，下次启动自动启用。Android 更新需要确认系统安装提示；大多数安卓设备请选择 ARM64。
       </Notice>
     </>
   );

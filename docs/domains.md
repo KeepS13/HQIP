@@ -8,7 +8,7 @@
 
 正式服务器为`64.83.17.143`。双域名切换保留全部业务数据，用户站同时承载 API，管理站保持独立。服务器迁移历史见[保留数据迁移](server-migration-sharevps.md)。管理页面没有`/admin`前缀；两个网页由Nginx托管，API按路径分发至18090/18091回环端口。后续上线见[自动部署](automatic-deployment.md)，历史空站流程不适用于本次迁移。
 
-两个Vite前端支持`VITE_API_URL`和`VITE_ADMIN_URL`；管理端另支持`VITE_USER_URL`，构建变量优先于上述默认地址。开发端口为5173/5174，开发API为8080/8081；不要在开发期间放宽生产Origin、TLS或人机验证约束。
+两个 Vite 前端支持 `VITE_API_URL`；用户端另支持 `VITE_ADMIN_URL`，管理端另支持 `VITE_USER_URL`，构建变量优先于上述默认地址。开发端口为 5173/5174，开发 API 为 8080/8081；不要在开发期间放宽生产 Origin、TLS 或人机验证约束。
 
 发布必须使用已提交源码和完整产物：
 

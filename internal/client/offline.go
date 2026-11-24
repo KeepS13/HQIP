@@ -78,48 +78,6 @@ func (c *Controller) rememberOfflineLocked(connected bool) {
 	}
 }
 
-// Check before mutating selection or stopping the current core. This request
-// does not change login, selections, or authorization timestamps.
-func (c *Controller) selectionAvailable(subscription, node string) error {
-	c.mu.Lock()
-	api, generation := c.api, c.generation
-	if c.closed {
-		c.mu.Unlock()
-		return context.Canceled
-	}
-	capable := c.saved.Offline != nil
-	for _, n := range c.saved.Profile.Nodes {
-		capable = capable || n.OfflineAdmissionVersion == 1
-	}
-	changing := subscription != "" && subscription != c.saved.SelectedSubscriptionID || node != "" && node != c.saved.SelectedNodeID
-	c.mu.Unlock()
-	if !changing || api == nil || !capable {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
-	defer cancel()
-	_, _, _, err := api.Profile(ctx, "")
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, ErrUnauthorized) {
-		_ = c.expireSession(api)
-		return err
-	}
-	if !retryable(err) {
-		if !errors.Is(err, context.Canceled) {
-			c.failGeneration(generation, err.Error())
-		}
-		return err
-	}
-	c.mu.Lock()
-	if api == c.api && generation == c.generation {
-		c.view.ControlUnavailable = true
-	}
-	c.mu.Unlock()
-	return errors.New("账户服务暂不可用，已保留原连接；恢复后才能切换节点或订阅")
-}
-
 // Offline recovery trusts actual forwarding through the authenticated node.
 // The node, rather than a cached /connections response, enforces admission.
 func (c *Controller) recoverOffline(r *recoveryRun) (bool, error) {

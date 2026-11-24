@@ -54,6 +54,14 @@ func TestCloseJoinsSubscriptionReportBeforeReturning(t *testing.T) {
 	if err := c.SelectSubscription("b"); err != nil {
 		t.Fatal(err)
 	}
+	c.mu.Lock()
+	c.view.Mode = "global" // A real status change remains reportable.
+	c.mu.Unlock()
+	// Idle selection no longer reports or touches the server. Schedule the
+	// ordinary status worker explicitly to exercise shutdown's join contract.
+	if !c.launch(c.report) {
+		t.Fatal("status worker was not scheduled")
+	}
 	awaitClosedSignal(t, transport.started, "subscription status report did not start")
 	closed := make(chan struct{})
 	go func() { c.Close(); close(closed) }()

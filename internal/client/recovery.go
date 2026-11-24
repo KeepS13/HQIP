@@ -59,6 +59,7 @@ func (c *Controller) startRecoveryLocked(reason string) {
 	ctx, cancel := context.WithCancel(c.workCtx)
 	r := &recoveryRun{c.api, c.generation, c.selectionGeneration, c.saved.SelectedSubscriptionID, c.saved.SelectedNodeID, ctx, cancel}
 	c.recovery = r
+	c.cancelDelayLocked()
 	c.view.RunState = "recovering"
 	c.view.ActualNodeID, c.view.ActualSubscriptionID = "", ""
 	c.view.LastError, c.view.SyncError = "", ""
@@ -85,6 +86,15 @@ func (c *Controller) recoverConnection(r *recoveryRun) {
 			return
 		}
 		if done {
+			c.mu.Lock()
+			var measure func() error
+			if c.api == r.api && c.generation == r.generation && c.view.RunState == "connected" {
+				measure, _ = c.prepareDelayLocked()
+			}
+			c.mu.Unlock()
+			if measure != nil {
+				c.launch(func() { _ = measure() })
+			}
 			c.report()
 			return
 		}
@@ -264,6 +274,7 @@ func (c *Controller) stopRecovery(r *recoveryRun, message string) {
 
 func (c *Controller) stopStateLocked(message string) {
 	c.generation++
+	c.cancelDelayLocked()
 	c.cancelRecoveryLocked()
 	if c.cancelApply != nil {
 		c.cancelApply()

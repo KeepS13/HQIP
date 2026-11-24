@@ -129,7 +129,7 @@ func managementConnection(host, ip, process string, profile Profile, controlURL 
 		}
 		name := strings.ToLower(filepath.Base(strings.ReplaceAll(process, "\\", "/")))
 		switch name {
-		case "hqip.exe", "hqip-windows-amd64.exe", "hqip-helper.exe", "sing-box.exe":
+		case "hqip.exe", "hqip-windows-amd64.exe", "hqip-runtime.exe", "hqip-helper.exe", "sing-box.exe":
 			return true
 		}
 	}

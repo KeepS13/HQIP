@@ -286,7 +286,9 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		if template.Revision != in.TemplateRevision {
 			return out, ErrConflict
 		}
-		if !template.Enabled || !template.Listed || template.PriceCents == nil {
+		// Hidden plans remain renewable by their owners; only new purchases
+		// require a shop listing. validateRenewalOrder checks ownership below.
+		if !template.Enabled || template.PriceCents == nil || (in.RenewalSubscriptionID == "" && !template.Listed) {
 			return out, errors.New("该订阅暂不可购买")
 		}
 		if e = validSubscriptionTemplate(template); e != nil {

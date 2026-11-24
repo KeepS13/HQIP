@@ -216,32 +216,11 @@ func (c *Controller) MeasureDelay() error {
 		return context.Canceled
 	}
 	defer c.workers.Done()
-	engine, ok := c.engine.(delayEngine)
-	if !ok {
-		return errors.New("当前内核不支持延迟检测")
-	}
 	c.mu.Lock()
-	if c.view.RunState != "connected" || c.view.SelectionPending || c.view.Metrics.DelayPending {
-		c.mu.Unlock()
-		return errors.New("请连接当前节点后再测试延迟")
-	}
-	g := c.generation
-	c.view.Metrics.DelayPending = true
+	measure, err := c.prepareDelayLocked()
 	c.mu.Unlock()
-	ctx, cancel := context.WithTimeout(c.workCtx, 5*time.Second)
-	defer cancel()
-	delay, err := engine.Delay(ctx)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if g != c.generation || c.view.RunState != "connected" {
-		return nil
-	}
-	c.view.Metrics.DelayPending = false
 	if err != nil {
-		c.view.Metrics.DelayMS = nil
 		return err
 	}
-	now := time.Now()
-	c.view.Metrics.DelayMS, c.view.Metrics.DelayAt = &delay, &now
-	return nil
+	return measure()
 }

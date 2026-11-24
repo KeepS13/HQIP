@@ -15,11 +15,13 @@ import stat
 import subprocess
 import tempfile
 import zipfile
+from client_bundle import CLIENT_PLATFORMS, verify_client_bundle
 
 LINUX_FILES = ('hqip-linux-amd64', 'hqip-migrate-postgres-linux-amd64',
                'agent-linux-amd64', 'agent-linux-arm64', 'hysteria-linux-amd64',
                'hysteria-linux-arm64', 'caddy-linux-amd64', 'manifest.json')
 WINDOWS_FILES = ('HQIP-Windows-x64.zip', 'desktop-manifest.json')
+CLIENT_KINDS = tuple('client-' + platform for platform in CLIENT_PLATFORMS)
 
 
 def digest(path):
@@ -43,12 +45,19 @@ def allowed(kind, name):
         return False
     if kind == 'windows-release':
         return name in WINDOWS_FILES
+    if kind in CLIENT_KINDS:
+        platform = kind.removeprefix('client-')
+        return name in ('godot-releases.json', 'godot-downloads.json') or bool(
+            re.fullmatch('godot/[a-f0-9]{64}/[^/]+', name) and path.name in CLIENT_PLATFORMS[platform][:2])
     return (name in {'dist/' + item for item in LINUX_FILES}
             or name.startswith(('admin-web/dist/', 'user-web/dist/')))
 
 
 def verify_files(kind, root, sha):
     """Validate same-commit, clean build manifests before upload and after download."""
+    if kind in CLIENT_KINDS:
+        verify_client_bundle(root, sha, [kind.removeprefix('client-')], signatures=True)
+        return
     folder = root / 'dist' if kind == 'linux-release' else root
     manifest = json.loads((folder / ('manifest.json' if kind == 'linux-release' else 'desktop-manifest.json')).read_text())
     if manifest.get('sourceSHA') != sha or manifest.get('dirty') is not False:
@@ -70,12 +79,16 @@ def package(kind, root, output, sha):
     # Explicit roots reproduce the existing Actions upload layout. No credentials,
     # repository working files, or unrelated generated files enter the archive.
     source = root if kind == 'linux-release' else root / 'dist'
+    if kind in CLIENT_KINDS:
+        source = root / 'dist' / kind
     verify_files(kind, source, sha)
     files = [source / name for name in WINDOWS_FILES] if kind == 'windows-release' else [
         source / 'dist' / name for name in LINUX_FILES]
     if kind == 'linux-release':
         for site in ('admin-web', 'user-web'):
             files.extend(path for path in (source / site / 'dist').rglob('*') if path.is_file())
+    if kind in CLIENT_KINDS:
+        files = [p for p in source.rglob('*') if p.is_file()]
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(files):
             name = path.relative_to(source).as_posix()
@@ -161,7 +174,7 @@ def transfer(action, kind, root, env):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('upload', 'download', 'cleanup'))
-    parser.add_argument('kind', choices=('linux-release', 'windows-release'))
+    parser.add_argument('kind', choices=('linux-release', 'windows-release', *CLIENT_KINDS))
     parser.add_argument('--root', type=Path, default=Path.cwd())
     args = parser.parse_args()
     transfer(args.action, args.kind, args.root, os.environ)

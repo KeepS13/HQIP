@@ -9,7 +9,7 @@ import (
 	"github.com/KeepS13/HQIP/internal/model"
 )
 
-var ErrSubscriptionRenewal = errors.New("该订阅不可续费：仅支持本人持有且尚未到期的在售套餐")
+var ErrSubscriptionRenewal = errors.New("该订阅不可续费：须本人持有、已开通且未到期，订阅及套餐启用并有定价")
 var ErrSubscriptionPeriodExpiry = errors.New("到期时间必须晚于最后一期的开始时间，不能截断已续费周期")
 
 func validateRenewalOrder(tx *sql.Tx, user string, in model.PaymentOrderInput, now time.Time) (*model.UserSubscription, error) {

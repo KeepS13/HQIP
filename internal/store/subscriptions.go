@@ -40,9 +40,10 @@ func userSubscription(q portalQuery, user, id string, now time.Time) (*model.Use
 		return nil, err
 	}
 	// Renewal extends this owned instance regardless of purchase/manual origin.
+	// Shop visibility only controls new purchases, never an owner's renewal.
 	// Exhausted traffic and occupied slots do not prevent prepaying another term;
 	// neither the current ledger nor its connection limit changes on payment.
-	e.Renewable = !e.ActivationPending && !revoked && userEnabled && t.Enabled && t.Listed && t.PriceCents != nil && expires > now.Unix()
+	e.Renewable = !e.ActivationPending && !revoked && userEnabled && t.Enabled && t.PriceCents != nil && expires > now.Unix()
 	var allocated string
 	if err = q.QueryRow("SELECT target_count,node_ids FROM subscription_allocations WHERE subscription_id=?", id).Scan(&e.NodesPerSubscription, &allocated); err != nil {
 		return nil, err

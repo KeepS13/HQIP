@@ -153,7 +153,8 @@ def remote_space_script():
 
 def remote_retention_script():
     # Run the CI checkout's verifier, not executable code from deletion candidates.
-    return ((ROOT / 'scripts/release_bundle.py').read_text(encoding='utf-8')
+    return ((ROOT / 'scripts/client_bundle.py').read_text(encoding='utf-8') + '\n'
+            + (ROOT / 'scripts/release_bundle.py').read_text(encoding='utf-8').replace('from client_bundle import verify_client_bundle', '')
             + '\nimport fcntl, os, shutil, stat, sys, time, urllib.request\n'
             + 'MIN_FREE_BYTES = ' + str(MIN_FREE_BYTES) + '\n'
             + inspect.getsource(check_ci_space) + '\n' + inspect.getsource(retain_releases)
@@ -284,6 +285,7 @@ def check_public():
                           '--user-agent', 'Go-http-client/1.1', url], capture_output=True, text=True)
         if url.endswith(('/healthz', '/readyz')) and json.loads(result.stdout).get('ok') is not True:
             raise ValueError('Public API is unhealthy')
+    command([sys.executable, 'scripts/verify_client_public.py'])
 
 
 if __name__ == '__main__':

@@ -60,16 +60,6 @@ export interface SubscriptionRequest {
   subscriptionId: string;
   revision: number;
 }
-export interface PortalNode {
-  id: string;
-  name: string;
-  ready?: boolean;
-  status?: string;
-  domain?: string;
-  server?: string;
-  publicIp?: string;
-  sni?: string;
-}
 export interface UserSession {
   id: string;
   clientName?: string;
@@ -79,27 +69,6 @@ export interface UserSession {
   current?: boolean;
   kind?: string;
   revoked?: boolean;
-}
-export interface UserSessionResponse {
-  authenticated: boolean;
-  user?: PortalUser;
-  csrfToken?: string;
-}
-export interface PortalConfig {
-  registrationEnabled: boolean;
-  portalEnabled: boolean;
-  turnstileSiteKey: string;
-  turnstileConfigured: boolean;
-  recoveryHold?: boolean;
-}
-export interface Release {
-  version: string;
-  platform: string;
-  url: string;
-  sha256?: string;
-  name?: string;
-  size?: number;
-  sourceSHA?: string;
 }
 export interface TurnstileSettings {
   siteKey: string;

@@ -98,7 +98,9 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 	business := []string{"mixed-in"}
 	if o.TUN {
 		business = append(business, "tun-in")
-		routeRules = append(routeRules, map[string]any{"inbound": []string{"tun-in"}, "process_name": []string{"HQIP.exe", "hqip-windows-amd64.exe", "sing-box.exe", "hqip-helper.exe"}, "action": "route", "outbound": "direct"})
+		// Godot's controller lives in its own companion process. Keep its
+		// management sockets outside TUN just like the original Wails host.
+		routeRules = append(routeRules, map[string]any{"inbound": []string{"tun-in"}, "process_name": []string{"HQIP.exe", "hqip-windows-amd64.exe", "hqip-runtime.exe", "sing-box.exe", "hqip-helper.exe"}, "action": "route", "outbound": "direct"})
 	}
 	// Pause precedes DNS, private-address and user rules. Proxy traffic never
 	// falls through to a direct outbound while authorization is stale.
@@ -117,9 +119,10 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 			return nil, e
 		}
 		for _, rule := range rr {
-			if rule["action"] == "resolve" {
-				rule["server"] = "local"
-			}
+			// Resolve through DNS policy, not an unconditional local resolver.
+			// Mainland/control domains use local DNS; unmatched domains use DoH
+			// through the node before CN-IP classification. A polluted local
+			// answer must never force an overseas domain onto the direct route.
 			if _, processRule := rule["process_name"]; processRule {
 				if !o.TUN {
 					continue

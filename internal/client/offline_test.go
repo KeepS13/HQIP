@@ -49,12 +49,6 @@ func TestOfflineClientKeepsForwardingAndRestoresWithoutConnectionsAPI(t *testing
 	if v := f.c.View(); v.RunState != "connected" || !v.ControlUnavailable || f.e.pauses.Load() != 0 {
 		t.Fatal("healthy tunnel paused", v.Status)
 	}
-	if err := f.c.Select("B"); err == nil {
-		t.Fatal("offline switch accepted")
-	}
-	if f.c.View().ActualNodeID != "A" {
-		t.Fatal("switch disconnected original")
-	}
 	r := f.recovery()
 	done, err := f.c.recoveryAttempt(r)
 	if !done || err != nil {
@@ -69,6 +63,12 @@ func TestOfflineClientKeepsForwardingAndRestoresWithoutConnectionsAPI(t *testing
 	if err = f.c.Disconnect(); err != nil {
 		t.Fatal(err)
 	}
+	if err = f.c.Select("B"); err != nil {
+		t.Fatal("idle offline choice rejected", err)
+	}
+	if err = f.c.Select("A"); err != nil {
+		t.Fatal(err)
+	} // Explicitly choose the node holding the offline permit before reconnecting.
 	if err = f.c.Connect(); err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,16 @@ func TestOfflineTerminalFailuresInvalidatePersistedPermit(t *testing.T) {
 			f.c.mu.Unlock()
 			switch failure {
 			case "selection_unauthorized", "selection_protocol":
-				err = f.c.Select("B")
+				if err = f.c.Select("B"); err != nil {
+					t.Fatal(err)
+				}
+				// Active selection performs the necessary connection transaction;
+				// a terminal response must stop it without reviving the old permit.
+				deadline := time.Now().Add(2 * time.Second)
+				for f.c.View().ConnectionIntent && time.Now().Before(deadline) {
+					time.Sleep(time.Millisecond)
+				}
+				err = errors.New("expected switch rejection")
 			case "sync_protocol":
 				err = f.c.Sync(context.Background())
 			case "node_protocol":

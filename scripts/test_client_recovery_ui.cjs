@@ -49,12 +49,8 @@ async function load(source, directory, name) {
   assert.match(failed, /role="alert"/);
   assert.match(failed, /首次连接失败/);
   assert.match(failed, /<h2>连接失败<\/h2>/);
-  const admin = path.join(root, 'admin-web/src/pages/DeviceClients.tsx');
-  const text = fs.readFileSync(admin, 'utf8');
-  const start = text.indexOf('function sessionStatus('), end = text.indexOf('function ClientSessions(', start);
-  const { sessionStatus } = await load(text.slice(start, end) + '\nexport {sessionStatus};', path.dirname(admin), 'admin-status-fixture');
-  assert.equal(sessionStatus({ runState: 'recovering', lastSeen: new Date().toISOString() }).label, '恢复中');
-  assert.equal(sessionStatus({ runState: 'recovering', lastSeen: '2000-01-01' }).label, '心跳过期');
+  // The removed administrator device-session page no longer owns client UI
+  // state. Keep this regression scoped to the desktop components still shipped.
   delete globalThis.__recoveryFixture;
-  console.log('PASS desktop recovery/restored states, first failure, admin recovering/stale status');
+  console.log('PASS desktop recovery/restored states and first failure');
 })().catch(error => { console.error(error); process.exitCode = 1; });

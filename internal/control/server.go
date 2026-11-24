@@ -33,16 +33,18 @@ type Options struct {
 	Installer                                       Installer
 }
 type Server struct {
-	Store           *store.Store
-	opts            Options
-	runner          Installer
-	mu              sync.Mutex
-	attempts        map[string][]time.Time
-	authSlots       chan struct{}
-	wake            chan struct{}
-	initErr         error
-	operations      operationRuntime
-	adminLoginLocal adminLoginProtection
+	Store                 *store.Store
+	opts                  Options
+	runner                Installer
+	mu                    sync.Mutex
+	attempts              map[string][]time.Time
+	authSlots             chan struct{}
+	wake                  chan struct{}
+	initErr               error
+	operations            operationRuntime
+	adminLoginLocal       adminLoginProtection
+	clientChangesMu       sync.Mutex
+	clientChangesSessions map[string]bool // One stream per native session; owned by clientChangesMu.
 }
 
 func New(s *store.Store, opts Options) *Server {
@@ -125,6 +127,7 @@ func (s *Server) headers(m http.Handler, origin string) http.Handler {
 	// Bound concurrent work before parsing bodies or waiting for a database
 	// connection. Overload is explicit and retryable, not an unbounded queue.
 	slots := make(chan struct{}, 64)
+	changeSlots := make(chan struct{}, 2048) // Long-lived reads must not consume the ordinary API budget.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		browserAPI := strings.HasPrefix(r.URL.Path, "/api/") && (origin == s.opts.AdminOrigin || strings.HasPrefix(r.URL.Path, "/api/v1/user/"))
 		if browserAPI {
@@ -175,9 +178,13 @@ func (s *Server) headers(m http.Handler, origin string) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		if r.URL.Path != "/healthz" {
+			requestSlots := slots
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v3/client/changes" {
+				requestSlots = changeSlots
+			}
 			select {
-			case slots <- struct{}{}:
-				defer func() { <-slots }()
+			case requestSlots <- struct{}{}:
+				defer func() { <-requestSlots }()
 			default:
 				w.Header().Set("Retry-After", "1")
 				fail(w, http.StatusServiceUnavailable, "服务繁忙，请稍后重试")
