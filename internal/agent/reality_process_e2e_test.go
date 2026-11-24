@@ -88,24 +88,28 @@ func TestRealityDirectSurvivesHY2ProcessCrashAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer socket.Close()
-	exchange := func(c net.Conn) {
+	exchange := func(c net.Conn, maxWait time.Duration) {
 		t.Helper()
-		// Adding a source waits for the existing shared-rate decrease/ACK round.
-		_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+		started := time.Now()
+		_ = c.SetDeadline(time.Now().Add(maxWait))
 		payload := []byte("independent VLESS payload")
 		if _, e := c.Write(payload); e != nil {
-			t.Fatal("VLESS interrupted", e)
+			connections, queryErr := f.db.PortalConnections(user.ID, "")
+			t.Fatalf("VLESS interrupted after %s: %v; connections=%+v; query=%v", time.Since(started), e, connections, queryErr)
 		}
 		got := make([]byte, len(payload))
 		if _, e := io.ReadFull(c, got); e != nil || string(got) != string(payload) {
 			t.Fatal("VLESS data mismatch", e)
 		}
+		if elapsed := time.Since(started); elapsed > time.Second {
+			t.Logf("shared-rate exchange waited %s", elapsed)
+		}
 	}
-	exchange(socket)
+	exchange(socket, 20*time.Second)
 	id := first.Snapshot().ID
 	f.stopCores[0]() // Kill only the test-owned process; no graceful QUIC final.
 	for range 7 {
-		exchange(socket)
+		exchange(socket, 20*time.Second)
 		time.Sleep(time.Second)
 	}
 	second := connect("198.51.100.2") // New authorization while HY2 remains stopped.
@@ -113,13 +117,18 @@ func TestRealityDirectSurvivesHY2ProcessCrashAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exchange(other)
+	// A new source waits for the Agent report, existing child's rate decrease
+	// and ACK, then the new grant's release receipt. Independent five-second
+	// report/renew clocks can exceed 20 seconds under race instrumentation.
+	// Bound only this initial handshake at 45 seconds; the surviving socket's
+	// exchanges and the later revocation/settlement deadlines stay unchanged.
+	exchange(other, 45*time.Second)
 	_ = other.Close()
 	_ = second.Close()
 	stop := startE2EProcess(t, core, []string{"server", "-c", path})
 	defer stop()
 	for range 6 {
-		exchange(socket)
+		exchange(socket, 20*time.Second)
 		time.Sleep(time.Second)
 	}
 	if first.Snapshot().ID != id || first.Snapshot().Closed {
