@@ -242,10 +242,29 @@ func startAcceptanceCore(t *testing.T, binary string, config any, path string) *
 		t.Fatal(err)
 	}
 	cmd := exec.Command(binary, "run", "-c", path)
+	// Keep child startup errors with the isolated fixture. A readiness timeout
+	// alone cannot distinguish slow scheduling from a failed listener/config.
+	logFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := logFile.Name()
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
+		logFile.Close()
+		if t.Failed() {
+			if raw, readErr := os.ReadFile(logPath); readErr == nil {
+				t.Logf("isolated core output: %s", raw)
+			}
+		}
+	})
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
 	return cmd
 }
 

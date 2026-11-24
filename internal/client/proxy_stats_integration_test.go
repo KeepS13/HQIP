@@ -52,8 +52,11 @@ func TestPinnedCoreProxyStatistics(t *testing.T) {
 	stats, _ := freePort()
 	proxyTCP, _ := freePort()
 	directTCP, _ := freePort()
-	proxyUDP, _ := freePort()
-	directUDP, _ := freePort()
+	// TCP availability does not imply UDP availability on Windows (reserved
+	// ranges and protocol-specific bindings differ). Keep both UDP reservations
+	// until configuration is ready so they cannot select the same free port.
+	proxyUDP, releaseProxyUDP := reserveStatsUDPPort(t)
+	directUDP, releaseDirectUDP := reserveStatsUDPPort(t)
 	inbound := func(tag, network string, port, target int) map[string]any {
 		return map[string]any{"type": "direct", "tag": tag, "network": network, "listen": "127.0.0.1", "listen_port": port, "override_address": "127.0.0.1", "override_port": target}
 	}
@@ -64,6 +67,8 @@ func TestPinnedCoreProxyStatistics(t *testing.T) {
 		"route":        map[string]any{"final": "proxy", "rules": []any{map[string]any{"inbound": []string{"direct-tcp", "direct-udp"}, "outbound": "direct", "action": "route"}}},
 		"experimental": map[string]any{"v2ray_api": map[string]any{"listen": net.JoinHostPort("127.0.0.1", portString(stats)), "stats": map[string]any{"enabled": true, "outbounds": []string{"proxy"}}}},
 	}
+	releaseProxyUDP()
+	releaseDirectUDP()
 	startAcceptanceCore(t, binary, config, filepath.Join(t.TempDir(), "stats.json"))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -109,4 +114,15 @@ func TestPinnedCoreProxyStatistics(t *testing.T) {
 	if err != nil || nextUp != up || nextDown != down {
 		t.Fatal("reading reset cumulative counters", nextUp, nextDown, err)
 	}
+}
+
+func reserveStatsUDPPort(t *testing.T) (int, func()) {
+	t.Helper()
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := func() { listener.Close() }
+	t.Cleanup(release)
+	return listener.LocalAddr().(*net.UDPAddr).Port, release
 }
