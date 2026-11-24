@@ -106,7 +106,7 @@ func (s *Server) clientInstallerDownload(w http.ResponseWriter, r *http.Request)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", "attachment; filename="+release.Filename)
 		w.Header().Set("ETag", "\""+release.SHA256+"\"")
-		http.ServeContent(w, r, release.Filename, info.ModTime(), file)
+		serveVerifiedDownload(w, r, release.Filename, info.ModTime(), file)
 		return
 	}
 	fail(w, 404, "该安装包已不可用，请刷新下载页面")

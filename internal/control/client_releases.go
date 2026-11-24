@@ -77,7 +77,7 @@ func (s *Server) godotDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", "\""+release.SHA256+"\"")
 		w.Header().Set("Content-Disposition", "attachment; filename="+release.Filename)
 		w.Header().Set("Content-Type", "application/octet-stream")
-		http.ServeContent(w, r, release.Filename, stat.ModTime(), file)
+		serveVerifiedDownload(w, r, release.Filename, stat.ModTime(), file)
 		return
 	}
 	fail(w, 404, "该更新包已不可用，请稍后重试")

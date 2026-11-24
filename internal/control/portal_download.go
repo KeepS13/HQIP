@@ -150,5 +150,5 @@ func (s *Server) portalDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Header().Set("CDN-Cache-Control", "public, max-age=31536000, immutable")
 	}
-	http.ServeContent(w, r, desktopFilename, stat.ModTime(), f)
+	serveVerifiedDownload(w, r, desktopFilename, stat.ModTime(), f)
 }
