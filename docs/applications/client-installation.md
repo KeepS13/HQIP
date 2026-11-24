@@ -10,15 +10,16 @@ Windows 安装包包含完整首版，无需手动解压或首次联网下载运
 
 Windows 的更新传输仍是内部 ZIP，但用户只接触安装 EXE 和应用内更新。程序运行时需要界面、Go 运行时和代理内核等多个文件，所以“一个文件”指下载交付形式，安装后由软件维护完整目录。当前实现不是纯在线空壳，也不在代理连接期间替换进程。
 
-覆盖安装保留 active/pending 指针，避免覆盖已通过更新激活的版本。卸载删除安装目录中的程序和更新版本，保留独立账户数据；仅当开机启动项仍准确指向本次安装时才删除。安装/卸载通过启动器互斥量检查在运行的实例，要求正常退出，不强制结束网络进程。
+覆盖安装保留 active/pending 指针，但启动器忽略低于安装包内置序号的指针，避免旧更新遮住新安装包；较新的已验证更新仍可使用。卸载删除安装目录中的程序和更新版本，保留独立账户数据；仅当开机启动项仍准确指向本次安装时才删除。安装/卸载通过启动器互斥量检查在运行的实例，要求正常退出，不强制结束网络进程。
 
 ## 构建
 
 依赖原有 Go/Godot/Android 工具，Windows 新增 Inno Setup 6（本地验证 6.7.3）。`--iscc`、`HQIP_ISCC`、PATH、项目 `.local/godot-tools/inno/ISCC.exe` 或默认安装位置提供编译器。脚本不自动下载安装编译器；下载工具应验证官方发行签名。首次构建前沿用已有发布密钥，不重新生成身份。
 
 ```powershell
-python scripts/build_godot.py --platform all --version 5.0.0-preview.16 --sequence 5000016
-python scripts/build_godot.py --platform android --android-arch amd64 --version 5.0.0-preview.16 --sequence 5000016
+$clientRelease = Get-Content packaging/client-version.json -Raw | ConvertFrom-Json
+python scripts/build_godot.py --platform all --version $clientRelease.version --sequence $clientRelease.sequence
+python scripts/build_godot.py --platform android --android-arch amd64 --version $clientRelease.version --sequence $clientRelease.sequence
 python -m unittest discover -s scripts -p test_package_godot_windows.py
 go test -tags=with_utls ./internal/client ./internal/clientrelease ./cmd/hqip-launcher ./cmd/hqip-client-release
 ```
@@ -44,9 +45,9 @@ go run ./cmd/hqip-client-release -prune -apply -public-key <现有公钥> -outpu
 
 ### 生产发布
 
-本地打包不会部署生产服务。仍需按 [Godot 客户端](godot-client.md) 发布已有控制端更新路由、签名清单与完整更新包，并把网站 Windows 下载入口切到安装 EXE。只有渠道上线并通过联网升级验收后，才能向用户承诺已安装客户端无需回网站获取新版。大陆网络和 Android ARM64 真机仍需现场验证。
+本地打包不会部署生产服务。正式发布使用同一提交的 [CI 与部署流程](../deployment/client-release-ci.md)，包含控制端路由、签名清单、完整更新包和网站安装包入口。旧 5.x 预览版因版本编号重置需覆盖安装一次 1.0.0；之后按签名序号更新。大陆网络和 Android ARM64 真机仍需现场验证。
 
-2026-11-24 实测官方 `/api/v3/client/releases` 返回 HTTP 404，确认当前尚无可用线上更新清单。本轮仅完成本地构建和验证，未部署服务器、未修改网站下载入口。Windows EXE 尚未配置 Authenticode 发布者签名；应用内更新仍使用既有 Ed25519 身份，Android 沿用既有 release 签名。
+preview.16 本地验证阶段（2026-11-24）官方更新接口尚返回 404；这是早期记录，后续发布结果以 [CI 与部署记录](../deployment/client-release-ci.md) 为准。Windows EXE 尚未配置 Authenticode 发布者签名；应用内更新仍使用既有 Ed25519 身份，Android 沿用既有 release 签名。
 
 ## 本轮验证
 

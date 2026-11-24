@@ -1,6 +1,6 @@
 # Godot 客户端重做
 
-状态（2026-11-24）：当前构建版本 `5.0.0-preview.16`，序号 `5000016`，目标为 Windows x64、Android arm64/x64。尚未替换线上 Wails 安装包，也未部署新增服务端路由与发布清单。iOS/macOS 尚未发布。
+发布基线（2026-11-24）：正式版本 `1.0.0`，内部序号 `5000021`，目标为 Windows x64、Android arm64/x64。后续版本统一读取 `packaging/client-version.json`；生产结果和回滚记录见 [CI 与部署](../deployment/client-release-ci.md)。Wails 保留兼容用途，iOS/macOS 尚未发布。
 
 preview.16 将 Windows 首次交付改为单个 EXE 安装包，并让 Windows/Android 在未登录时也能后台检查更新。安装、修复、卸载和验证边界见 [安装与自动更新](client-installation.md)。
 
@@ -36,22 +36,24 @@ Godot 编辑器 Play 使用 `dist/godot-windows/versions/bundled/hqip-runtime.ex
 Android 手机使用 `dist/HQIP-Android-arm64.apk`；x86_64 模拟器使用 `dist/HQIP-Android-x64.apk`。面向 Android 8.0/API 26 及以上设备，compile/target SDK 36。它使用持久本地发布签名，不是 debug 签名。启动后后台下载新版 APK，不要求登录，再由系统确认安装；普通应用不能静默替换自身。后台 VPN 由前台服务维持。
 
 ```powershell
-python scripts/build_godot.py --platform all --version 5.0.0-preview.16 --sequence 5000016
+$clientRelease = Get-Content packaging/client-version.json -Raw | ConvertFrom-Json
+python scripts/build_godot.py --platform all --version $clientRelease.version --sequence $clientRelease.sequence
 # x86_64 模拟器单独构建，脚本保留同版本其他已校验产物的摘要
-python scripts/build_godot.py --platform android --android-arch amd64 --version 5.0.0-preview.16 --sequence 5000016
+python scripts/build_godot.py --platform android --android-arch amd64 --version $clientRelease.version --sequence $clientRelease.sequence
 # 也可指定 windows 或 android
 ```
 
 构建依赖：Go 1.26.10、Godot 4.7.2 及导出模板、Inno Setup 6、JDK 21、Android SDK/NDK、gomobile、Gradle。已缓存工具位于 `.local/godot-tools`。脚本复核固定 sing-box 哈希，注入版本/序号/更新公钥，生成 Windows EXE 安装包及内部更新 ZIP、Android 签名 APK 和 `dist/godot-build.json` 摘要；不会上传或部署。版本与序号现在必须显式传入。
 
-版本更新时传入更高 `--version` 和 `--sequence`。`.local/godot-signing/ed25519.seed`、`android.jks` 与 `android.json` 是本地私密签名身份，必须私密备份并在后续构建沿用，不提交仓库、不放入安装包。当前公钥为 `611cdf0e186c76eb55e6fefce30c6c9af5bdfe6e34bbc034086d2c7ecad2ba85`。
+每次修改已发布包都必须提高 `--sequence`；展示版本由同一配置提供，可按产品需要重新编号。`.local/godot-signing/ed25519.seed`、`android.jks` 与 `android.json` 是本地私密签名身份，必须私密备份并在后续构建沿用，不提交仓库、不放入安装包。当前公钥为 `611cdf0e186c76eb55e6fefce30c6c9af5bdfe6e34bbc034086d2c7ecad2ba85`。
 
 ## 更新上线材料
 
-`dist/HQIP-Godot-Windows-x64.zip` 只用于更新，不能当作首次安装包。`dist/godot-channel` 包含签名清单及按摘要存放的三个平台更新包（Windows x64、Android arm64/x64）。部署时先将完整包复制到控制端现有 `--artifact-dir` 的 `godot/` 子目录，再原子替换 `godot-releases.json`；保证控制端服务账号有读取权限，禁止同时运行多个发布写入者。控制端必须先部署本次新增路由的构建：
+`dist/HQIP-Godot-Windows-x64.zip` 只用于更新，不能当作首次安装包。`dist/godot-channel` 是本地签名渠道材料；正式部署使用 [CI 的同提交完整发布包](../deployment/client-release-ci.md)，同时包含控制端、网站、签名更新清单、独立安装包清单和全部交付文件。只复制 `godot-releases.json` 与更新 ZIP 不会更新网站的 EXE 安装入口。部署流程负责校验、备份、完整目录切换和回滚；禁止同时运行多个发布写入者。当前入口：
 
 - `GET /api/v3/client/releases`：签名发布清单。
 - `GET /downloads/godot/{sha256}/{filename}`：校验后的包与 Range 下载。
+- `GET /api/v1/user/installers`、`GET /downloads/client/{sha256}/{filename}`：Windows EXE 与 Android APK 的列表及下载。
 - `GET /api/v3/client/changes`：认证业务变更通知，需允许持续 NDJSON 响应和刷新转发缓冲。
 
 用户已要求沿用现有域名与服务器配置，因此继续经过当前 Cloudflare 转发，不修改源站的来源限制。账户、规则、更新 HTTP 请求在客户端禁用代理，Windows 绑定物理出口，Android 使用非 VPN Network。大陆链路是否稳定仍需当地网络验收，本轮没有此结果。

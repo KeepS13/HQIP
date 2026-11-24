@@ -1,10 +1,10 @@
 # HQIP 项目地图
 
-客户端部署（2026-11-24）：Windows 安装包、Android 双 ABI APK 与签名更新渠道纳入同一提交的完整发布包。CI 拆分独立任务，保留数据库、支付并发与真实代理门禁，新增原生客户端构建和 Godot 回归。构建身份、接口和发布约束见 [客户端 CI](deployment/client-release-ci.md)。
+客户端部署（2026-11-24）：正式 1.0.0（序号 5000021）已上线，源提交 `43edb67`。运行 `45473579214` 的 12 项门禁和生产部署全部通过；完整 Windows EXE 公网下载、所有交付路径首尾范围、签名渠道及服务健康验收完成。测试/构建约 9 分钟，包含部署验收约 17 分钟。构建身份、回滚历史和发布证据见 [客户端 CI](deployment/client-release-ci.md)。
 
 仓库清理（2026-11-24）：移除经调用图与静态引用确认的旧入口、前端复制模型和孤立组件；本地旧产物回收约 5.44 GiB，签名发布工具增加两版本保留与安全回收。仍在 CI/生产发布链使用的 Wails 客户端、业务迁移和签名身份保留，详见 [清理记录](reviews/2026-11-24-repository-cleanup.md)。
 
-客户端安装与更新（2026-11-24）：当前本地预览版为 5.0.0-preview.16。`client-presentation` / `client-runtime.updates v1` 增加 Windows 当前用户 EXE 安装包，固定启动器和版本目录由安装器管理，Android 继续交付签名 APK。启动后不再以账户登录作为公开签名更新检查的前提；版本切换仍在下次启动，Android 仍走系统安装确认。构建与验证记录见 [安装与自动更新](applications/client-installation.md)。
+客户端安装与更新（2026-11-24）：正式版本重新定义为 1.0.0，内部序号继续递增，唯一来源为 `packaging/client-version.json`。`client-presentation` / `client-runtime.updates v1` 提供 Windows 当前用户 EXE 安装包，固定启动器和版本目录由安装器管理，Android 交付签名 APK。启动后无需登录即可检查更新；Windows 下次启动切换，Android 仍走系统安装确认。旧 5.x 预览版需覆盖安装一次，之后按签名序号更新。构建与验证记录见 [安装与自动更新](applications/client-installation.md)。
 
 节点卡片命中修复（2026-11-24）：preview.15 将透明占位控件从鼠标命中中排除，修复卡片右下角点击死区；42 个真实输入点及禁用节点回归通过。仅调整 Godot 展示层，未增加请求，详情见 [节点卡片点击死区](incidents/2026-11-24-node-card-hit-area.md)。
 
@@ -20,7 +20,7 @@
 
 性能与稳定性维护（2026-11-23）：`client-presentation` 的两个网站共用无框架依赖的 `web-shared/polling.ts` 调度器，API/鉴权仍由各应用独立管理。目标为每个读取任务最多一个在途请求，提交后刷新最多合并一个后续读取，15 秒取消超时读取、后台暂停、故障退避最多 60 秒（原间隔更长时保留）。客户端采样和 `protocol-outbound` 的多地址连接优化及验证边界记录在 `docs/reviews/2026-11-23-performance-stability.md`；不改变计费、准入和协议凭据契约。
 
-客户端重做（2026-11-23）：按用户确认先实现 Windows、Android；Godot 沿用原版深色布局与品牌，复用 `internal/client` 的账户、订阅、离线许可与连接生命周期。已生成本地预览包，服务端更新入口尚未部署，iOS/macOS 尚未发布。契约见 [客户端运行时与更新](contracts/client-runtime.md)，构建、签名和验收边界见 [Godot 客户端](applications/godot-client.md)。应用版本与 API v3 分离；新功能采用可选能力，更新检查失败不能清除账户或中断有效连接。按用户要求保留现有域名和 Cloudflare 配置，用户已追加授权隔离测试及 HQIP 测试账号/订阅；前版已完成真实账户、模拟器 VLESS 流量/断网恢复/系统覆盖更新验收。preview.15 阶段：保留原版样式、统一左侧导航与 DPI 布局，修复仪表盘套餐展示、交互尺寸、规则 DNS，并将未连接时的本机选择与连接授权分离；专项验证见 [交互与规则模式修复](incidents/2026-11-24-client-interaction-routing.md)。本次追加订阅纯展示、自适应卡片、商城入口与当前节点单独测速，见 [订阅页与测速记录](incidents/2026-11-24-subscriptions-selected-probe.md)。本次进一步修复 [未连接节点即时切换](incidents/2026-11-24-instant-local-selection.md)，此前删除自动列表测速；preview.13 仅恢复连接成功后的当前连接单次延迟检测。当前代理不可接管，真实 VPN 仅在独立模拟器验证；详情与未覆盖项见 [本轮验收记录](incidents/2026-11-23-client-consistency.md)。
+客户端重做（2026-11-23）：按用户确认先实现 Windows、Android；Godot 沿用原版深色布局与品牌，复用 `internal/client` 的账户、订阅、离线许可与连接生命周期。该阶段仅生成本地预览包，尚未部署更新入口；后续正式发布见客户端 CI 记录。iOS/macOS 尚未发布。契约见 [客户端运行时与更新](contracts/client-runtime.md)，构建、签名和验收边界见 [Godot 客户端](applications/godot-client.md)。应用版本与 API v3 分离；新功能采用可选能力，更新检查失败不能清除账户或中断有效连接。按用户要求保留现有域名和 Cloudflare 配置，用户已追加授权隔离测试及 HQIP 测试账号/订阅；前版已完成真实账户、模拟器 VLESS 流量/断网恢复/系统覆盖更新验收。preview.15 阶段：保留原版样式、统一左侧导航与 DPI 布局，修复仪表盘套餐展示、交互尺寸、规则 DNS，并将未连接时的本机选择与连接授权分离；专项验证见 [交互与规则模式修复](incidents/2026-11-24-client-interaction-routing.md)。本次追加订阅纯展示、自适应卡片、商城入口与当前节点单独测速，见 [订阅页与测速记录](incidents/2026-11-24-subscriptions-selected-probe.md)。本次进一步修复 [未连接节点即时切换](incidents/2026-11-24-instant-local-selection.md)，此前删除自动列表测速；preview.13 仅恢复连接成功后的当前连接单次延迟检测。当前代理不可接管，真实 VPN 仅在独立模拟器验证；详情与未覆盖项见 [本轮验收记录](incidents/2026-11-23-client-consistency.md)。
 
 本次精简：每份订阅的同时在线上限改为 HY2 在线客户端实例数加 VLESS 来源 IP 数，节点分配数独立保留。同 IP 的两个 HY2 实例加一个 VLESS 来源占三个名额。直接复用 portal_leases、订阅事务和 Agent 账本及已有计费协议字段，不新增设备表、缓存服务或授权额度。来源 IP 存在现有连接表，HY2 实例与 VLESS IP 合计不再增加数据库列。仅 VLESS 在同一订阅内按来源 IP 跨节点去重；HY2 每条独立客户端会话单独计数。旧记录缺少可信协议或 IP 时按许可逐条计数。发布先升级控制端，再统一升级节点与内核。完整语义见 [在线计数契约](contracts/online-ips.md)。
 

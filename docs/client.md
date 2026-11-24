@@ -1,6 +1,6 @@
 # HQIP Windows 4.8.2 客户端
 
-新版交付（2026-11-24）：Godot `5.0.0-preview.16` 使用 Windows 单个 EXE 安装包、Android 直接 APK；启动后即后台检查更新，不要求登录。安装包和升级说明见 [安装与自动更新](applications/client-installation.md)。下文 ZIP/WebView2 安装说明仅适用于仍在线上提供的旧 Wails 4.x，尚未替换网站下载入口。
+新版交付（2026-11-24）：Godot 正式版本为 `1.0.0`，Windows 使用单个 EXE 安装包，Android 直接提供 APK；启动后即后台检查更新，不要求登录。安装包、旧预览版覆盖安装和升级说明见 [安装与自动更新](applications/client-installation.md)。下文 ZIP/WebView2 说明仅适用于兼容保留的旧 Wails 4.x；新版网站使用独立安装包入口。
 
 用户入口为 [hqip.sharevps.online](https://hqip.sharevps.online)，管理入口为 [cms-hqip.sharevps.online](https://cms-hqip.sharevps.online)。客户端连接 API `https://hqip.sharevps.online`，使用邮箱账户通过系统浏览器完成 PKCE 授权；客户端不保存账户密码，DPAPI 保护令牌和连接配置。用户网页注册、改密及管理员重置密码均至少 6 个 Unicode 字符、最多 1024 字节。注册、网页登录仍需要 Turnstile。
 
