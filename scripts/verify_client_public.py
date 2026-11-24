@@ -84,13 +84,18 @@ def download_range(url, start, end, total):
     """Accept only an exact 206 range; never concatenate an ignored/wrong range."""
     with tempfile.TemporaryDirectory(prefix='hqip-public-download-') as temporary:
         output, headers = Path(temporary) / 'part', Path(temporary) / 'headers'
-        budget = '120' if end - start + 1 > 32 else '20'
+        # A 32-byte tail can be delayed after its 206 headers (29.35s observed
+        # publicly). Response size does not bound edge/origin readiness. Keep
+        # one finite transfer budget for probes and chunks; fast replies finish
+        # immediately, while connection setup still has a shorter bound.
         try:
             result = subprocess.run(['curl', '--fail', '--silent', '--show-error', '--retry', '1', '--retry-all-errors',
-                '--max-time', budget, '--max-filesize', str(end - start + 1), '--user-agent', 'Go-http-client/1.1',
+                '--connect-timeout', '15', '--max-time', '180', '--max-filesize', str(end - start + 1), '--user-agent', 'Go-http-client/1.1',
                 '--range', f'{start}-{end}', '--dump-header', str(headers), '--output', str(output),
                 '--write-out', '%{http_code}', url], check=True, capture_output=True)
         except subprocess.CalledProcessError as error:
+            received = output.stat().st_size if output.exists() else 0
+            print(f'Public range {start}-{end}/{total}: HTTP {error.stdout.decode(errors="replace").strip()}, received {received} bytes.', flush=True)
             print(error.stderr.decode(errors='replace'), flush=True)
             raise
         values = re.findall(rb'(?im)^content-range:\s*([^\r\n]+)', headers.read_bytes())
