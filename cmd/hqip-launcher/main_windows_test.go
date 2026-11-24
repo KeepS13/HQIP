@@ -71,10 +71,10 @@ func TestLauncherActivatesOrRollsBackCompleteVersion(t *testing.T) {
 	t.Setenv("HQIP_LAUNCHER_TEST_HELPER", "1")
 	for _, mode := range []string{"success", "early-exit", "crash-after-ready", "hang"} {
 		t.Run(mode, func(t *testing.T) {
+			// The fallback child uses the same timeout as the candidate. Keep a
+			// realistic process-start budget on busy CI runners; the hung fixture
+			// sleeps for ten seconds, so two seconds still proves timeout recovery.
 			startupTimeout = 2 * time.Second
-			if mode == "hang" {
-				startupTimeout = 150 * time.Millisecond
-			}
 			root := t.TempDir()
 			version := strings.Repeat("a", 64)
 			helperVersion(t, root, "bundled", "success")
