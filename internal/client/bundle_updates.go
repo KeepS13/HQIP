@@ -26,20 +26,22 @@ type BundleUpdateView struct {
 	Message  string `json:"message"`
 }
 type BundleUpdater struct {
-	mu                     sync.Mutex
-	dir, platform, version string
-	source                 func() string
-	stage                  func(string, clientrelease.Release, clientrelease.Envelope) error
-	http                   *http.Client
-	view                   BundleUpdateView
-	publicKey              string
-	installed              int64
-	prepared               string // owned by the single Check worker
+	mu            sync.Mutex
+	dir, platform string
+	source        func() string
+	stage         func(string, clientrelease.Release, clientrelease.Envelope) error
+	http          *http.Client
+	view          BundleUpdateView
+	publicKey     string
+	installed     int64
+	prepared      string // owned by the single Check worker
 }
 
-func NewBundleUpdater(dir, platform, version string, source func() string, stage func(string, clientrelease.Release, clientrelease.Envelope) error) *BundleUpdater {
+// NewBundleUpdater retains the display-version argument for source compatibility.
+// Only the signed sequence orders releases; product version names may be reset.
+func NewBundleUpdater(dir, platform, _ string, source func() string, stage func(string, clientrelease.Release, clientrelease.Envelope) error) *BundleUpdater {
 	sequence, _ := strconv.ParseInt(AppSequence, 10, 64)
-	return &BundleUpdater{dir: dir, platform: platform, version: version, source: source, stage: stage, publicKey: UpdatePublicKey, installed: sequence, http: &http.Client{Transport: newDirectHTTPTransport(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, view: BundleUpdateView{Message: "节点与规则自动同步，当前版本可继续使用"}}
+	return &BundleUpdater{dir: dir, platform: platform, source: source, stage: stage, publicKey: UpdatePublicKey, installed: sequence, http: &http.Client{Transport: newDirectHTTPTransport(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, view: BundleUpdateView{Message: "节点与规则自动同步，当前版本可继续使用"}}
 }
 func (u *BundleUpdater) View() BundleUpdateView { u.mu.Lock(); defer u.mu.Unlock(); return u.view }
 
@@ -123,7 +125,9 @@ func (u *BundleUpdater) checkAndStage(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if r.Platform != u.platform || r.APIMin > 3 || r.APIMax < 3 || normalizedVersion(r.Version) == "" || compareVersion(r.Version, u.version) <= 0 || r.Sequence <= u.installed || r.Sequence < seen.Sequence {
+		// Sequence is authenticated and monotonic across display-version resets.
+		// Installed and persisted high-water values both prevent package replay.
+		if r.Platform != u.platform || r.APIMin > 3 || r.APIMax < 3 || normalizedVersion(r.Version) == "" || r.Sequence <= u.installed || r.Sequence < seen.Sequence {
 			continue
 		}
 		if r.Sequence == seen.Sequence && r.SHA256 != seen.SHA256 {
