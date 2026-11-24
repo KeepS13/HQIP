@@ -197,31 +197,19 @@ func (u *BundleUpdater) setMessage(message string) {
 func (u *BundleUpdater) download(ctx context.Context, url, path string, release clientrelease.Release) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	response, err := u.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return errors.New("update download unavailable")
-	}
 	partial := path + ".part"
 	file, err := os.OpenFile(partial, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(partial)
-	n, err := io.Copy(file, io.LimitReader(response.Body, release.Size+1))
+	err = u.transferBundle(ctx, url, file, release.Size)
 	closed := file.Close()
 	if err != nil {
 		return err
 	}
 	if closed != nil {
 		return closed
-	}
-	if n != release.Size {
-		return errors.New("incomplete update download")
 	}
 	verified, err := clientrelease.VerifyFile(partial, release)
 	if err != nil {
