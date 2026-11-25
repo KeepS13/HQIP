@@ -27,6 +27,7 @@ type pendingRevocation struct {
 }
 
 type cachedState struct {
+	HostNetworkVersion      int                          `json:"hostNetworkVersion,omitempty"`
 	NodeQuotaVersion        int                          `json:"nodeQuotaVersion,omitempty"`
 	OfflineAdmissionVersion int                          `json:"offlineAdmissionVersion"`
 	PortalEnabled           bool                         `json:"portalEnabled"`

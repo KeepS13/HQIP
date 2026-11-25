@@ -83,6 +83,7 @@ func (s *Server) AdminHandler() http.Handler {
 		"POST /api/v1/nodes/{id}/external-verification": s.externalVerification,
 		"POST /api/v1/nodes/{id}/verification-config":   s.verificationConfig,
 		"GET /api/v1/nodes/{id}/events":                 s.events,
+		"GET /api/v1/nodes/{id}/user-traffic":           s.nodeUserTraffic,
 		"GET /api/v1/devices":                           s.listDevices, "POST /api/v1/devices": s.createDevice,
 		"GET /api/v1/devices/{id}": s.deviceDetail, "PATCH /api/v1/devices/{id}": s.updateDevice,
 		"POST /api/v1/devices/{id}/rotate":      s.rotateDevice,

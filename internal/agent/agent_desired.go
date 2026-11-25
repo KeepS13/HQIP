@@ -29,7 +29,7 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 	}
 	a.cacheMu.Lock()
 	defer a.cacheMu.Unlock()
-	if desired.Revision < a.cache.DesiredRevision || desired.Revision == a.cache.DesiredRevision && desired.NodeQuotaVersion == a.cache.NodeQuotaVersion {
+	if desired.Revision < a.cache.DesiredRevision || desired.Revision == a.cache.DesiredRevision && desired.NodeQuotaVersion == a.cache.NodeQuotaVersion && desired.HostNetworkVersion == a.cache.HostNetworkVersion {
 		return nil
 	}
 	replay := desired.Revision-a.cache.DesiredRevision > 1
@@ -37,6 +37,7 @@ func (a *Agent) applyDesired(desired model.AgentDesired) error {
 	next.PortalEnabled = desired.PortalEnabled
 	next.OfflineAdmissionVersion = desired.OfflineAdmissionVersion
 	next.NodeQuotaVersion = desired.NodeQuotaVersion
+	next.HostNetworkVersion = desired.HostNetworkVersion
 	next.DesiredRevision, next.Credentials = desired.Revision, credentials
 	now := a.now()
 	for _, device := range desired.Devices {

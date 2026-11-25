@@ -1,4 +1,5 @@
 import type { RuntimeOverview } from "./traffic-types";
+import type { HostNetworkUsage } from "./host-network";
 
 export interface Session {
   authenticated: boolean;
@@ -38,6 +39,7 @@ export interface ServerRenewal {
   revision: number;
 }
 export interface Node {
+  hostNetwork?: HostNetworkUsage;
   id: string;
   serverId: string;
   addressId: string;
@@ -95,6 +97,7 @@ export interface Device {
 }
 
 export interface ManagedServer {
+  hostNetwork?: HostNetworkUsage;
   id: string;
   name: string;
   sshHost: string;

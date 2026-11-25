@@ -7,6 +7,7 @@ import (
 
 func (s *Store) Desired(id string) (model.AgentDesired, error) {
 	var result model.AgentDesired
+	result.HostNetworkVersion = 1
 	result.PortalEnabled = s.PortalEnabled()
 	if s.OfflineAdmissionEnabled(id) {
 		result.OfflineAdmissionVersion = model.OfflineAdmissionVersion

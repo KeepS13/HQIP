@@ -1,5 +1,9 @@
 # HQIP 项目地图
 
+节点用户排行（2026-11-25，本地实现与验证，尚未发布）：仅在管理员节点详情页下方增加用户累计实际代理流量分页排行，合并同用户的多份订阅，支持点击用户详情；口径与接口见 [node-user-traffic v1](contracts/node-user-traffic.md)，验证见 [排行验收](reviews/2026-11-25-node-user-traffic.md)。
+
+网卡监控扩展（2026-11-25，本地验证完成，尚未发布）：新增 `host-network v1`，在管理员界面并列保留节点用户代理流量与整机网卡收发总量；同机去重、离线持久化补报和未知历史边界见 [网卡计量契约](contracts/host-network.md)。16 台 Linux 真实快照、PostgreSQL、竞态与浏览器验收见 [流量检查记录](reviews/2026-11-25-host-network-audit.md)。
+
 客户端部署（2026-11-24）：正式 1.0.0（序号 5000021）已上线，源提交 `43edb67`。运行 `45473579214` 的 12 项门禁和生产部署全部通过；完整 Windows EXE 公网下载、所有交付路径首尾范围、签名渠道及服务健康验收完成。测试/构建约 9 分钟，包含部署验收约 17 分钟。构建身份、回滚历史和发布证据见 [客户端 CI](deployment/client-release-ci.md)。
 
 仓库清理（2026-11-24）：移除经调用图与静态引用确认的旧入口、前端复制模型和孤立组件；本地旧产物回收约 5.44 GiB，签名发布工具增加两版本保留与安全回收。仍在 CI/生产发布链使用的 Wails 客户端、业务迁移和签名身份保留，详见 [清理记录](reviews/2026-11-24-repository-cleanup.md)。
@@ -28,6 +32,7 @@
 | --- | --- | --- |
 | subscription-admission | control / internal/store、internal/control | offline-admission v1；node-quota v1；[connection-slots v3](contracts/connection-slots.md) |
 | node-metering | Agent / internal/agent，runtime/nodepolicy | [公共守卫](contracts/protocol-policy.md)、本地持久化子租约、协议计费段 |
+| host-network | internal/hostnetwork、Agent、store、admin-web | [host-network v1](contracts/host-network.md)：整机网卡收发、同机去重、离线补报及明确未知范围 |
 | protocol-outbound | internal/reality、internal/outbound；HY2 server 适配器 | VLESS 独立 TCP/UDP 出站、共同节点出口策略 |
 | traffic-billing | store、model、runtime billing | 固定点倍率与幂等累计报告 |
 | client-presentation | internal/client、internal/clientbridge、desktop、godot-client、native、user-web | 用户余额与原始链路统计；[client-runtime.commands / updates v1](contracts/client-runtime.md) |

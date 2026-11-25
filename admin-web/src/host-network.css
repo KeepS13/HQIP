@@ -1,0 +1,47 @@
+/* Keep host counter explanations within the existing panel's content gutters. */
+.host-network-panel > .billing-help {
+  margin: 12px 22px 20px;
+}
+.host-network-panel > .notice {
+  margin: 0 22px 16px;
+}
+.host-network-panel .usage-breakdown {
+  margin-top: 12px;
+  row-gap: 20px;
+}
+.host-network-panel .usage-breakdown > div:nth-child(even) {
+  border-left: 1px solid var(--border);
+  padding-left: 25px;
+}
+.host-network-panel .table-wrap {
+  margin: 16px 22px;
+  overflow-x: auto;
+}
+.host-network-panel table {
+  min-width: 280px;
+}
+.host-network-panel caption {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.8;
+  text-align: left;
+  margin-bottom: 8px;
+}
+.host-network-panel .details-list > div {
+  align-items: flex-start;
+}
+@media (max-width: 600px) {
+  .host-network-panel > .billing-help,
+  .host-network-panel > .notice,
+  .host-network-panel .table-wrap {
+    margin-left: 17px;
+    margin-right: 17px;
+  }
+  .host-network-panel .details-list > div {
+    display: grid;
+    gap: 4px;
+  }
+  .host-network-panel .details-list dd {
+    text-align: left;
+  }
+}

@@ -1,0 +1,29 @@
+.node-user-traffic { min-width: 0; margin-bottom: 24px; scroll-margin-top: 24px; }
+.node-user-traffic .panel { padding: 0 20px 20px; }
+.node-user-traffic .panel-heading { padding-left: 0; padding-right: 0; }
+.node-user-traffic-help { color: var(--muted); font-size: 12px; line-height: 1.7; margin-bottom: 16px; }
+.node-user-traffic-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+.node-user-traffic-scroll { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.node-user-traffic table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
+.node-user-traffic th, .node-user-traffic td { padding: 10px 16px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.node-user-traffic th { color: var(--muted); font-weight: 500; background: var(--panel-light); }
+.node-user-traffic th svg { vertical-align: -2px; }
+.node-user-traffic th:nth-child(2), .node-user-traffic td:nth-child(2) { text-align: left; }
+.node-user-traffic td { border-top: 1px solid var(--border); }
+.node-user-traffic-rank { width: 60px; color: var(--muted); }
+.node-user-traffic-user { color: var(--purple); display: inline-flex; gap: 8px; align-items: center; min-height: 44px; max-width: 360px; }
+.node-user-traffic-user span { overflow: hidden; text-overflow: ellipsis; }
+.node-user-traffic-user svg { flex: none; }
+.node-user-traffic-user:hover span { text-decoration: underline; }
+.node-user-traffic td .badge { margin-left: 8px; }
+.node-user-traffic-pages { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.node-user-traffic-pages > div { display: flex; gap: 8px; }
+.node-user-traffic-pages .button { min-height: 44px; }
+.node-user-traffic-empty { color: var(--muted); padding: 28px 0; line-height: 1.7; }
+.node-user-traffic-swipe { display: none; }
+@media (max-width: 600px) {
+  .node-user-traffic .panel { padding: 0 14px 14px; }
+  .node-user-traffic-swipe { display: block; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .node-user-traffic th, .node-user-traffic td { padding: 8px 12px; }
+  .node-user-traffic-user { max-width: 230px; }
+}

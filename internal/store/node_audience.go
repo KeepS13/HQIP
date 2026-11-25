@@ -24,7 +24,12 @@ func (s *Store) NodesWithAudience() ([]model.NodeListItem, error) {
 		return nil, err
 	}
 	out := make([]model.NodeListItem, 0, len(nodes))
+	network, err := s.HostNetworks()
+	if err != nil {
+		return nil, err
+	}
 	for _, node := range nodes {
+		node.HostNetwork = network[node.ServerID]
 		out = append(out, model.NodeListItem{Node: node, Audience: audience[node.ID]})
 	}
 	return out, nil

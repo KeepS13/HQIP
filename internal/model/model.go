@@ -13,6 +13,7 @@ type Metrics struct {
 }
 
 type Node struct {
+	HostNetwork         *HostNetworkUsage  `json:"hostNetwork,omitempty"`
 	ID                  string             `json:"id"`
 	QueuedJobID         int64              `json:"-"`
 	ServerID            string             `json:"serverId"`
@@ -103,6 +104,7 @@ type AgentRemovalStatus struct {
 }
 
 type AgentDesired struct {
+	HostNetworkVersion      int                `json:"hostNetworkVersion,omitempty"`
 	NodeQuotaVersion        int                `json:"nodeQuotaVersion,omitempty"`
 	OfflineAdmissionVersion int                `json:"offlineAdmissionVersion,omitempty"`
 	PortalEnabled           bool               `json:"portalEnabled"`
@@ -124,6 +126,7 @@ type UsageBucket struct {
 }
 
 type AgentReport struct {
+	HostNetwork      []HostNetworkSample  `json:"hostNetwork,omitempty"`
 	Reality          *RealityEndpoint     `json:"reality,omitempty"`
 	At               time.Time            `json:"at"`
 	Revision         int64                `json:"revision"`

@@ -123,6 +123,7 @@ func (a *Agent) sync(ctx context.Context) (syncErr error) {
 	}
 
 	a.cacheMu.RLock()
+	networkEnabled := a.cache.HostNetworkVersion == 1
 	report.Revision = a.cache.AppliedRevision
 	report.Removals = removalStatuses(a.cache)
 	if v := a.cache.Retirement; v != nil {
@@ -149,6 +150,13 @@ func (a *Agent) sync(ctx context.Context) (syncErr error) {
 		}
 	}
 	a.liveMu.RUnlock()
+	var networkBatch map[string]string
+	if networkEnabled {
+		networkBatch, report.HostNetwork, err = a.ledger.pendingHostNetwork()
+		if err != nil {
+			return err
+		}
+	}
 	for id, count := range a.directOnline() {
 		if report.Online == nil {
 			report.Online = make(map[string]int)
@@ -162,6 +170,13 @@ func (a *Agent) sync(ctx context.Context) (syncErr error) {
 	if err := a.ledger.acknowledge(batch); err != nil {
 		a.deferReportRetry()
 		return err
+	}
+	// Only a control response advertising this contract can acknowledge the
+	// extension. A compatible rollback leaves queued host counters untouched.
+	if desired.HostNetworkVersion == 1 {
+		if err := a.ledger.acknowledgeHostNetwork(networkBatch); err != nil {
+			return err
+		}
 	}
 	a.reportBackoff, a.reportRetryAt = 0, time.Time{}
 	if err := a.applyDesired(desired); err != nil {

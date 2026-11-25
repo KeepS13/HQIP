@@ -143,7 +143,14 @@ func (a *Agent) sampleLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	lastLog := time.Time{}
+	lastNetwork := time.Time{}
 	for {
+		if networkSampleDue(a.now(), lastNetwork) {
+			lastNetwork = a.now()
+			if err := a.sampleHostNetwork(ctx); err != nil && ctx.Err() == nil {
+				a.log.Warn("服务器网卡采集失败，保留已有累计", "error", err)
+			}
+		}
 		if err := a.sample(ctx); err != nil && ctx.Err() == nil && a.now().Sub(lastLog) >= time.Minute {
 			a.log.Warn("节点统计暂不可用", "error", err)
 			lastLog = a.now()

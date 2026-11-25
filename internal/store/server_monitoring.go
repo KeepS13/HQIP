@@ -105,6 +105,11 @@ func (s *Store) UsageTotals() (model.UsageTotals, error) {
 }
 
 func (s *Store) serverMonitoring(v *model.Server) error {
+	network, err := s.HostNetwork(v.ID)
+	if err != nil {
+		return err
+	}
+	v.HostNetwork = network
 	totals, err := s.usageTotals(v.ID)
 	if err != nil {
 		return err

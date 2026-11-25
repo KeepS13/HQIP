@@ -4,6 +4,7 @@ import { ArrowDown, ArrowRight, ArrowUp, CalendarClock, Clock3, Globe2, Plus, Se
 import { api, usePolling } from "../api";
 import { Badge, Breadcrumb, Button, Empty, ErrorNotice, Field, Loading, Meter, Modal, NodeBadge, Notice, PageHeader, Panel, RefreshButton, Resource, bytes, date, useToast } from "../components";
 import TrafficAnalyticsPanel from "../TrafficAnalyticsPanel";
+import { HostNetworkCompact, HostNetworkPanel } from "../HostNetwork";
 import { AddNode } from "./AddNode";
 import { NodeIPSwitch } from "./NodeIPSwitch";
 import { isPublicIPv4 } from "../public-ipv4";
@@ -134,7 +135,7 @@ export function Servers() {
           <h2>{server.name}</h2><p className="server-address mono">{server.sshHost}:{server.sshPort}</p>
           <div className="server-identity"><ShieldCheck size={13} /><span>{server.machineId ? "身份已验证" : "身份待验证"}</span><span>{server.platform || "系统待检测"}</span></div>
           <BillingSummary resource={server} compact />
-          <ServerResources server={server} stale={!!error} /><ServerRates server={server} stale={!!error} /><ServerQuota server={server} />
+          <ServerResources server={server} stale={!!error} /><ServerRates server={server} stale={!!error} /><ServerQuota server={server} /><HostNetworkCompact value={server.hostNetwork} />
         </div>
         <div className="server-card-footer"><span>{server.nodeCount} 个节点 <i /> {server.ipCount} 个 IP</span><strong>管理 IP 与节点 <ArrowRight size={15} /></strong></div>
       </Link>;
@@ -192,6 +193,7 @@ export function ServerPage() {
     </div>
     <div className="server-management-grid"><BillingSummary resource={server} /><ServerCredentialPanel server={server} /></div>
     <OperationHistory serverId={server.id} />
+    <HostNetworkPanel value={server.hostNetwork} serverId={server.id} />
     <TrafficAnalyticsPanel serverId={id} refreshVersion={trafficRevision} />
     <Panel title="节点流量贡献" subtitle="各节点实际上传与下载；实时速率含探测，代理用量不含探测">
       {activeUsage.length ? <div className="table-scroll"><table><thead><tr><th>节点 / 公网 IP / 域名</th><th>状态</th><th>实时速率</th><th>代理用量</th><th>本月上传 / 下载</th><th>累计代理流量</th></tr></thead><tbody>{activeUsage.map(node => <tr key={node.id}>

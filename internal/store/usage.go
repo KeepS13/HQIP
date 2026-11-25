@@ -35,6 +35,9 @@ func (s *Store) ReportContext(ctx context.Context, nodeID string, r model.AgentR
 		r.Certificate = nil
 	}
 	now := s.Now()
+	if err := validateHostNetwork(r.HostNetwork, now); err != nil {
+		return err
+	}
 	if err := validateHourlyReport(r, now); err != nil {
 		return err
 	}
@@ -131,6 +134,9 @@ func (s *Store) ReportContext(ctx context.Context, nodeID string, r model.AgentR
 			}
 		}
 		if err = RecordServerBillingUsage(tx, nodeID, now); err != nil {
+			return err
+		}
+		if err = recordHostNetwork(ctx, tx, nodeID, r.HostNetwork, now); err != nil {
 			return err
 		}
 		return tx.Commit()

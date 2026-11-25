@@ -538,7 +538,7 @@ export default function App() {
             </Routes>
             <footer className="page-footer">
               <span>HQIP · 你的私人网络控制台</span>
-              <span>所有流量为代理流量 · 时区 UTC+8</span>
+              <span>代理用量与整机网卡流量分别标注 · 时区 UTC+8</span>
             </footer>
           </main>
         </div>
