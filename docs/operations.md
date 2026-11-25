@@ -1,6 +1,6 @@
 # 运维
 
-HQIP控制站计划从 `107.151.244.106` 保留数据迁移到 `64.83.17.143:22/root`，完成状态以实际验收记录为准。用户网页为 https://hqip.sharevps.online，管理网页为 https://cms-hqip.sharevps.online，API与客户端下载为 https://api-hqip.sharevps.online。控制服务使用PostgreSQL＋Redis；Windows只运行客户端，不承担控制服务或SSH反向隧道。
+HQIP控制站当前运行于 `64.83.17.143:22/root`；旧站 `107.151.244.106` 的迁移记录见[保留数据迁移](server-migration-sharevps.md)。用户网页、API与客户端下载共用 https://hqip.sharevps.online，管理网页为 https://cms-hqip.sharevps.online。以已部署的 Nginx 配置及服务 `--public-url` 为准，不使用历史文档中的独立 API 子域名。控制服务使用PostgreSQL＋Redis；Windows只运行客户端，不承担控制服务或SSH反向隧道。
 
 此次使用[保留数据迁移](server-migration-sharevps.md)，不能运行历史空站初始化、退役现有节点或重置商业配置；后续更新使用[自动部署](automatic-deployment.md)。服务路径与运行身份见[服务器部署与运行](server-deployment.md)。保留现有PG业务数据、配套主密钥和节点账本，不得用旧SQLite覆盖。
 
@@ -13,8 +13,8 @@ systemctl status hqip-control.service hqip-storage.service nginx.service
 journalctl --namespace=hqip-control -u hqip-control.service -n 100 --no-pager
 curl --fail --silent --show-error http://127.0.0.1:18090/readyz
 curl --fail --silent --show-error http://127.0.0.1:18091/readyz
-curl --fail --silent --show-error https://api-hqip.sharevps.online/healthz
-curl --fail --silent --show-error https://api-hqip.sharevps.online/readyz
+curl --fail --silent --show-error https://hqip.sharevps.online/healthz
+curl --fail --silent --show-error https://hqip.sharevps.online/readyz
 ```
 
 `/healthz`只证明进程存活；`/readyz`还检查PG和Redis，不能用前者代替后者。Redis故障时新的受限认证请求返回503，不退回进程内限流。检查存储服务、连接池、网络和磁盘后恢复依赖，不要通过删除环境文件或清空数据绕过检查。
