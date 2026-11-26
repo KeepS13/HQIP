@@ -1,8 +1,8 @@
 # HQIP 项目地图
 
-Clash DNS 与网站恢复（2026-11-26，本地完成、尚未发布）：`routing` 修复 HY2 / VLESS 节点引导解析，海外 DoH 经节点；Clash、sing-box、待开通配置及 HQIP 原生官方站点名单统一保留官网、后台和验证码直连。准备客户端序号 `5000023`，不覆盖已发布 `5000022`。行为边界见 [导入契约](contracts/subscription-import-links.md)，实测及未上线状态见 [验收记录](reviews/2026-11-26-clash-dns-recovery.md)。
+Clash DNS 与网站恢复（2026-11-27，已发布 `339286d`）：`routing` 修复 HY2 / VLESS 节点引导解析，海外 DoH 经节点；Clash、sing-box、待开通配置及 HQIP 原生官方站点名单统一保留官网、后台和验证码直连。正式客户端为 `1.0.0 / 5000023`。行为边界见 [导入契约](contracts/subscription-import-links.md)，实测见 [验收记录](reviews/2026-11-26-clash-dns-recovery.md)，CI、备份及公网结果见 [发布记录](deployment/2026-11-27-client-compatibility.md)。
 
-全部客户端导入审查（同日，本地完成、尚未发布）：检查页面 7 种客户端及 HQIP 原生入口；修复 Verge 一键导入参数顺序，补充服务端统一的精确直连名单及恢复帮助。v2rayN 配套核心和 sing-box 的 vus1 双协议验证通过，Apple/Android 应用真机仍未覆盖，见 [兼容审查](reviews/2026-11-26-client-compatibility.md)。
+全部客户端导入审查（2026-11-26 完成，2026-11-27 已上线）：检查页面 7 种客户端及 HQIP 原生入口；修复 Verge 一键导入参数顺序，补充服务端统一的精确直连名单及恢复帮助。v2rayN 配套核心和 sing-box 的 vus1 双协议验证通过，Apple/Android 应用真机仍未覆盖，见 [兼容审查](reviews/2026-11-26-client-compatibility.md)。
 
 节点用户排行（2026-11-25，已发布 `5157d54`）：仅在管理员节点详情页下方增加用户累计实际代理流量分页排行，合并同用户的多份订阅，支持点击用户详情；口径与接口见 [node-user-traffic v1](contracts/node-user-traffic.md)，本地验证见 [排行验收](reviews/2026-11-25-node-user-traffic.md)，生产结果见 [流量监控发布](deployment/2026-11-25-traffic-monitoring.md)。
 

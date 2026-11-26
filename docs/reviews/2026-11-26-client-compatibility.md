@@ -1,6 +1,6 @@
 # 网站客户端兼容审查
 
-日期：2026-11-26，Asia/Taipei。归属 `subscription-admission.import-links v1`、`routing`、`client-presentation`。本轮在已有 [Clash DNS 修复](2026-11-26-clash-dns-recovery.md) 上继续检查网站全部客户端。当前仅修改本地工作区，未提交、推送或部署；不能将本记录理解为所有线上用户已经更新。
+日期：2026-11-26，Asia/Taipei。归属 `subscription-admission.import-links v1`、`routing`、`client-presentation`。本轮在已有 [Clash DNS 修复](2026-11-26-clash-dns-recovery.md) 上继续检查网站全部客户端。2026-11-27 已发布 `339286d` 与正式客户端序号 `5000023`，完整 CI 和公网结果见 [发布记录](../deployment/2026-11-27-client-compatibility.md)；发布成功不表示所有既有用户已刷新订阅或安装更新。
 
 ## 发现与修复
 
@@ -21,7 +21,7 @@
 | v2rayNG | 2.3.15 UrlSchemeActivity、HY2/VLESS 解析源码与 URL-safe 订阅令牌 | 网页导入/编码回归；未在 Android 应用实际导入或接管 VPN |
 | Shadowrocket | 节点订阅入口、复制/下载、独立配置路由操作 | App Store 官方说明与页面回归；闭源 URI 解析、iOS/Apple Silicon 应用和连接未实测 |
 | Sing Box | 官方 remote-profile URI、完整 JSON | sing-box 1.14.4 原生配置检查与真实 HY2 路由回归；vus1 HY2/VLESS 各 204/200；Apple/Android GUI 未实测 |
-| HQIP Windows / Android | 官网下载入口、共享官方直连名单；Windows 系统代理例外 | `internal/client` / `internal/winclient` 原有回归与新增名单回归已通过；新序号 5000023 尚未打包发布，不声称安装包已修复上线 |
+| HQIP Windows / Android | 官网下载入口、共享官方直连名单；Windows 系统代理例外 | `internal/client` / `internal/winclient` 原有回归与新增名单回归已通过；新序号 5000023 已完成三平台签名构建与公网发布，移动端真机边界仍保留 |
 
 v2rayN 包 SHA-256 为 `9b94718c2a214a246b04dec84b9a27f1f0ced8489c2dd25eb80a0fbb806bd13f`，与官方 release asset digest 相同。真实核心测试保留节点域名和 SNI，仅使用随机回环 HTTP 端口；结束后停止测试实例并删除含凭据的临时配置。没有修改系统代理/TUN。现有 Android 模拟器正在运行其他项目，因此未打断其活动。
 
@@ -54,4 +54,4 @@ v2rayN 包 SHA-256 为 `9b94718c2a214a246b04dec84b9a27f1f0ced8489c2dd25eb80a0fbb
 
 公共接口只新增无凭据主机数组，无数据库写入或服务端网络请求。恢复帮助按需发一个请求，15 秒有界、卸载取消、错误可重试，不增加定时轮询或影响复制/导入。修改及新增生产源文件均不超过 300 行。原有未提交流量计量工作保留，未混入本轮功能结论。
 
-上线须按 `docs/automatic-deployment.md` 生成同一提交的完整服务端、网站与客户端产物。已有第三方用户要刷新并启用完整订阅；节点 URI 用户仍需配置精确直连规则。不能由网页覆盖任意用户的第三方代理全局模式，也不能使境外本地出口自动变成大陆 IP。
+上线已按 `docs/automatic-deployment.md` 生成并验收同一提交的完整服务端、网站与客户端产物。已有第三方用户要刷新并启用完整订阅；节点 URI 用户仍需配置精确直连规则。不能由网页覆盖任意用户的第三方代理全局模式，也不能使境外本地出口自动变成大陆 IP。

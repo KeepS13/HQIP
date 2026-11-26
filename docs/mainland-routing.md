@@ -18,6 +18,8 @@ sing-box 导出为大陆域名设置本地 DNS。HQIP 原生客户端从 `5.0.0-
 
 ## 节点解析与官网恢复修复（2026-11-26）
 
+2026-11-27（Asia/Taipei）已随 `339286d` 上线，正式客户端序号 `5000023`；完整 CI、首轮超时与重跑、备份和真实订阅公网验收见 [发布记录](deployment/2026-11-27-client-compatibility.md)。已有用户需要更新并启用完整订阅，HQIP 原生用户需要更新客户端。
+
 现场 Clash Verge Rev 2.5.10 / Mihomo 1.19.33 的 vus1 HY2 与 VLESS Reality 均因节点域名进入全地址 fallback，而直连海外 DoH 超时。修复在两条 Clash 导出路径统一设置节点专用直连 DNS，并让海外 DoH 使用现有 `节点选择`，避免节点引导失败及每个未缓存海外域名的约 5 秒直连 DNS 等待。
 
 `internal/rules/service_bypass.go` 统一精确网站主机规则：部署配置中的用户站、API、管理站，以及 Turnstile 的 `challenges.cloudflare.com`。Clash 将直连规则放在大陆 IP 分类和管理员规则之前，并提供对应本地 DNS；sing-box 补齐管理员站点和验证码。待开通配置也保留恢复入口，其他流量继续拒绝。HQIP 客户端同步官方站点的路由/DNS 与 Windows 代理例外。此名单不是认证来源或任意域名信任名单。
