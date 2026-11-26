@@ -160,9 +160,12 @@ type AgentConfig struct {
 	Managed         bool                `json:"managed"`
 	Domain          string              `json:"domain"`
 	PublicIP        string              `json:"publicIp"`
-	AgentService    string              `json:"agentService"`
-	CertificateMode string              `json:"certificateMode"`
-	ControllerID    string              `json:"controllerId"`
+	// BindIP is the verified local NAT address. Empty retains legacy PublicIP
+	// binding; advertised identity and owner checks always continue using PublicIP.
+	BindIP          string `json:"bindIp,omitempty"`
+	AgentService    string `json:"agentService"`
+	CertificateMode string `json:"certificateMode"`
+	ControllerID    string `json:"controllerId"`
 }
 
 type TaskEvent struct {

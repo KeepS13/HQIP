@@ -220,7 +220,7 @@ func (r *Runner) Install(ctx context.Context, in Input, log LogFunc, pin PinFunc
 }
 
 func serverConfig(n model.Node, acmeViaCaddy bool, statsSecret string) ([]byte, error) {
-	return instanceConfig(n, acmeViaCaddy, statsSecret)
+	return instanceConfig(n, n.PublicIP, acmeViaCaddy, statsSecret)
 }
 
 func (r *Runner) Verify(ctx context.Context, in Input, log LogFunc) (Result, error) {

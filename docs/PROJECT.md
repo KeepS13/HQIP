@@ -34,6 +34,7 @@ Clash DNS 与网站恢复（2026-11-27，已发布 `339286d`）：`routing` 修�
 
 | 模块 | 所有者与位置 | 契约 |
 | --- | --- | --- |
+| node-provisioning | internal/provision、Agent、节点升级脚本 | [node-network v1](contracts/node-network.md)：直连/NAT 本机地址识别、部署、重部署与兼容 Agent 升级 |
 | subscription-admission | control / internal/store、internal/control | offline-admission v1；node-quota v1；[connection-slots v3](contracts/connection-slots.md) |
 | node-metering | Agent / internal/agent，runtime/nodepolicy | [公共守卫](contracts/protocol-policy.md)、本地持久化子租约、协议计费段 |
 | host-network | internal/hostnetwork、Agent、store、admin-web | [host-network v1](contracts/host-network.md)：整机网卡收发、同机去重、离线补报及明确未知范围 |

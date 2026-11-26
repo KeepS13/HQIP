@@ -32,6 +32,7 @@ func (e *AgentUpgradeError) Error() string {
 		"reality_start_failed":    "Reality 握手检查失败，已尝试恢复原 Agent；请检查目标域名连通性与 TCP 端口",
 		"reality_firewall_failed": "Reality 防火墙规则创建失败，已尝试恢复原 Agent",
 		"reality_port_busy":       "节点 IP 的 TCP 443 和 8443 均被占用，未停止原服务",
+		"nat_unsupported":         "当前 Agent 发布版本不支持 NAT 节点，原服务未停止",
 		"inactive_service":        "节点服务未运行，请先检查节点状态",
 		"core_changed":            "检测到转发核心发生重启，请检查服务器状态",
 		"rollback_failed":         "原 Agent 恢复失败，请立即检查节点服务和任务备份",
@@ -44,6 +45,7 @@ func (e *AgentUpgradeError) Error() string {
 }
 
 type AgentRelease struct {
+	NodeNetworkVersion      int               `json:"nodeNetworkVersion,omitempty"`
 	ConnectionSlotsVersion  int               `json:"connectionSlotsVersion,omitempty"`
 	NodeQuotaVersion        int               `json:"nodeQuotaVersion,omitempty"`
 	TrafficBillingVersion   int               `json:"trafficBillingVersion,omitempty"`
@@ -55,6 +57,7 @@ type AgentRelease struct {
 
 func (r *Runner) AgentRelease() (AgentRelease, error) {
 	var raw struct {
+		NodeNetworkVersion      int               `json:"nodeNetworkVersion"`
 		ConnectionSlotsVersion  int               `json:"connectionSlotsVersion"`
 		NodeQuotaVersion        int               `json:"nodeQuotaVersion"`
 		TrafficBillingVersion   int               `json:"trafficBillingVersion"`
@@ -77,11 +80,11 @@ func (r *Runner) AgentRelease() (AgentRelease, error) {
 	if len(raw.SourceSHA) != 40 {
 		return AgentRelease{}, errors.New("Agent 发布版本无效")
 	}
-	return AgentRelease{ConnectionSlotsVersion: raw.ConnectionSlotsVersion, NodeQuotaVersion: raw.NodeQuotaVersion, SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion, TrafficBillingVersion: raw.TrafficBillingVersion}, nil
+	return AgentRelease{NodeNetworkVersion: raw.NodeNetworkVersion, ConnectionSlotsVersion: raw.ConnectionSlotsVersion, NodeQuotaVersion: raw.NodeQuotaVersion, SourceSHA: raw.SourceSHA, SHA256: raw.SHA256, OfflineAdmissionVersion: raw.OfflineAdmissionVersion, VLESSRealityVersion: raw.VLESSRealityVersion, TrafficBillingVersion: raw.TrafficBillingVersion}, nil
 }
 
 func (release AgentRelease) upgradeManifest(arch, hash string) []byte {
-	data, _ := json.Marshal(map[string]any{"connectionSlotsVersion": release.ConnectionSlotsVersion, "nodeQuotaVersion": release.NodeQuotaVersion, "agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "trafficBillingVersion": release.TrafficBillingVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
+	data, _ := json.Marshal(map[string]any{"nodeNetworkVersion": release.NodeNetworkVersion, "connectionSlotsVersion": release.ConnectionSlotsVersion, "nodeQuotaVersion": release.NodeQuotaVersion, "agentTelemetryVersion": 1, "offlineAdmissionVersion": release.OfflineAdmissionVersion, "vlessRealityVersion": release.VLESSRealityVersion, "trafficBillingVersion": release.TrafficBillingVersion, "agentSourceSHA": release.SourceSHA, "sha256": map[string]string{"agent-linux-" + arch: hash}})
 	return data
 }
 

@@ -18,14 +18,20 @@ type firewallRule struct {
 	Protocol string `json:"proto"`
 }
 
-func applyFirewall(ctx context.Context, rm *remote, n model.Node, acmeViaCaddy bool, realityPort int) ([]firewallRule, error) {
-	rules := []firewallRule{{IP: n.PublicIP, Port: n.Port, Protocol: "udp"}}
+// The guest firewall receives the translated destination on NAT hosts.
+func nodeFirewallRules(n model.Node, bindIP string, acmeViaCaddy bool, realityPort int) []firewallRule {
+	rules := []firewallRule{{IP: bindIP, Port: n.Port, Protocol: "udp"}}
 	if realityPort > 0 {
-		rules = append(rules, firewallRule{IP: n.PublicIP, Port: realityPort, Protocol: "tcp"})
+		rules = append(rules, firewallRule{IP: bindIP, Port: realityPort, Protocol: "tcp"})
 	}
 	if n.CertificateMode != "cloudflare" && !acmeViaCaddy {
-		rules = append(rules, firewallRule{IP: n.PublicIP, Port: 80, Protocol: "tcp"})
+		rules = append(rules, firewallRule{IP: bindIP, Port: 80, Protocol: "tcp"})
 	}
+	return rules
+}
+
+func applyFirewall(ctx context.Context, rm *remote, n model.Node, bindIP string, acmeViaCaddy bool, realityPort int) ([]firewallRule, error) {
+	rules := nodeFirewallRules(n, bindIP, acmeViaCaddy, realityPort)
 	out, err := rm.run(ctx, pythonCommand(firewallScript, map[string]any{"action": "apply", "nodeId": n.ID, "rules": rules}), nil)
 	var response struct {
 		Added []firewallRule `json:"added"`

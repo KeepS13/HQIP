@@ -87,6 +87,7 @@ def error_code(error, stage):
     if isinstance(error, BlockingIOError) and stage == 'host_lock':
         return 'host_busy'
     known = {
+        'NAT nodes require a compatible Agent': 'nat_unsupported',
         'Agent checksum mismatch': 'artifact_checksum',
         'Agent telemetry initialization failed': 'agent_start_failed',
         'Reality ingress initialization failed': 'reality_start_failed',

@@ -39,6 +39,7 @@ type TakeoverCandidate struct {
 
 type PreflightResult struct {
 	ServerInspection
+	BindIP             string              `json:"bindIp,omitempty"`
 	Fingerprint        string              `json:"fingerprint"`
 	Conflicts          []string            `json:"conflicts"`
 	TakeoverCandidates []TakeoverCandidate `json:"takeoverCandidates"`
@@ -62,6 +63,8 @@ type hostSocket struct {
 }
 type hostInventory struct {
 	ServerInspection
+	RouteIP      string              `json:"routeIp,omitempty"`
+	ExitIP       string              `json:"exitIp,omitempty"`
 	FreeBytes    int64               `json:"freeBytes"`
 	Sockets      []hostSocket        `json:"sockets"`
 	Units        []TakeoverCandidate `json:"units"`
@@ -150,14 +153,9 @@ func (r *Runner) assess(n model.Node, inv hostInventory) PreflightResult {
 	if inv.FreeBytes < 256<<20 {
 		out.Conflicts = append(out.Conflicts, "可用磁盘不足 256 MiB")
 	}
-	bound := false
-	for _, ip := range inv.BoundIPs {
-		if ip == n.PublicIP {
-			bound = true
-		}
-	}
-	if !bound {
-		out.Conflicts = append(out.Conflicts, "选定公网 IPv4 尚未直接配置在服务器网卡")
+	out.BindIP = nodeBindingIP(n.PublicIP, inv)
+	if out.BindIP == "" {
+		out.Conflicts = append(out.Conflicts, "选定公网 IPv4 未配置在网卡，且无法验证本机地址到该公网 IP 的 NAT 出口映射")
 	}
 	candidateUnits := map[string]bool{}
 	for _, unit := range inv.Units {
@@ -171,10 +169,10 @@ func (r *Runner) assess(n model.Node, inv hostInventory) PreflightResult {
 	}
 	authPort, statsPort := localPorts(n)
 	for _, s := range inv.Sockets {
-		relevant := s.Protocol == "udp" && s.Port == n.Port && addressOverlaps(s.Host, n.PublicIP)
+		relevant := s.Protocol == "udp" && s.Port == n.Port && addressOverlaps(s.Host, out.BindIP)
 		relevant = relevant || (s.Protocol == "tcp" && (s.Port == authPort || s.Port == statsPort) && addressOverlaps(s.Host, "127.0.0.1"))
 		if n.CertificateMode != "cloudflare" && !n.ACMEViaCaddy && !n.SharedHost {
-			relevant = relevant || (s.Protocol == "tcp" && s.Port == 80 && addressOverlaps(s.Host, n.PublicIP))
+			relevant = relevant || (s.Protocol == "tcp" && s.Port == 80 && addressOverlaps(s.Host, out.BindIP))
 		}
 		if !relevant {
 			continue

@@ -25,6 +25,28 @@ def process_unit(pid):
             return units[-1]
     return ''
 
+def network_binding(target, addresses):
+    """Observe NAT only for an unbound target; never change addresses/routes.
+
+    The route source must actually exist on this host. A source-bound HTTPS
+    query proves the advertised exit, not inbound reachability; deployment's
+    external proxy verification remains mandatory. Failures leave it unknown.
+    """
+    if not target or target in addresses:
+        return '', ''
+    try:
+        routes = json.loads(command('ip', '-j', '-4', 'route', 'get', '1.1.1.1'))
+        source = routes[0].get('prefsrc', routes[0].get('src', ''))
+        ip = ipaddress.IPv4Address(source)
+        if source not in addresses or ip.is_unspecified or ip.is_loopback or ip.is_multicast or ip.is_link_local:
+            return '', ''
+        observed = command('curl', '-4', '--noproxy', '*', '--fail', '--silent',
+                           '--connect-timeout', '3', '--max-time', '8', '--interface', source,
+                           'https://api.ipify.org')
+        return source, str(ipaddress.IPv4Address(observed))
+    except (ValueError, OSError, IndexError, KeyError, subprocess.TimeoutExpired):
+        return '', ''
+
 if os.geteuid() != 0:
     raise SystemExit('root-required')
 for name in ('systemctl', 'ss', 'ip', 'tar', 'flock', 'curl'):
@@ -62,9 +84,12 @@ units.update(('hysteria.service','hysteria-server.service','hy2.service'))
 if (legacyowner or pathlib.Path('/etc/hqip-node/agent.json').exists()) and not pathlib.Path('/etc/hqip-node/retired-by').exists():
     units.add('hqip-hysteria.service')
 target = args.get('publicIp','')
+routeip, exitip = network_binding(target, addresses)
+# Socket/takeover checks must see the post-NAT destination on this host.
+localtarget = routeip if routeip and exitip == target else target
 targetport = args.get('port',443)
 for socket in sockets:
-    if socket['protocol'] == 'udp' and socket['port'] == targetport and socket['host'] in (target,'0.0.0.0','::','*'):
+    if socket['protocol'] == 'udp' and socket['port'] == targetport and socket['host'] in (localtarget,'0.0.0.0','::','*'):
         units.update(u for u in socket['units'] if u)
 if nodeid:
     units.add('hqip-hysteria-' + nodeid + '.service')
@@ -95,11 +120,13 @@ for unit in sorted(units):
         endpoint = listen.group(1) if listen else ':443'
         try: listenhost,listenport=endpoint.rsplit(':',1)
         except ValueError: listenhost,listenport='', '443'
-        if target and (listenport!=str(targetport) or listenhost not in ('',target,'0.0.0.0','::','[::]','*')):
+        if target and (listenport!=str(targetport) or listenhost not in ('',localtarget,'0.0.0.0','::','[::]','*')):
             continue
     own = nodeid and unit in ('hqip-hysteria-'+nodeid+'.service','hqip-agent-'+nodeid+'.service')
     resultunits.append({'unit':unit,'configPath':configpath,'binaryPath':executable,'active':p.get('ActiveState')=='active','enabled':p.get('UnitFileState') in ('enabled','enabled-runtime'),'kind':'hqip-legacy' if legacy else ('native-hy2' if native else ('hqip-instance' if own else 'unsupported')),'unitHash':hashlib.sha256(unittext.encode()).hexdigest(),'files':files})
 result = {'machineId':read('/etc/machine-id').strip(),'platform':osrel.get('ID','')+' '+osrel.get('VERSION_ID',''),'architecture':os.uname().machine,'boundIps':addresses,'freeBytes':shutil.disk_usage('/').free,'sockets':sorted(sockets,key=lambda x:(x['protocol'],x['host'],x['port'])),'units':resultunits,'owner':owner,'legacyOwner':legacyowner}
+if routeip:
+    result.update(routeIp=routeip, exitIp=exitip)
 if legacyowner:
     result['legacyHashes'] = {path:digest(path) for path in ('/etc/hqip-node/owner','/etc/hqip-node/agent.json','/etc/hqip-node/hysteria.yaml')}
 print(json.dumps(result,sort_keys=True,separators=(',',':')))

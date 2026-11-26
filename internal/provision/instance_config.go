@@ -39,8 +39,10 @@ func localPorts(n model.Node) (int, int) {
 	return a, s
 }
 
-func instanceConfig(n model.Node, acmeViaCaddy bool, statsSecret string) ([]byte, error) {
-	if !idRE.MatchString(n.ID) || net.ParseIP(n.PublicIP).To4() == nil {
+// bindIP is the verified local address; n.PublicIP remains the advertised node
+// identity. Exact local binds preserve isolation between addresses on one host.
+func instanceConfig(n model.Node, bindIP string, acmeViaCaddy bool, statsSecret string) ([]byte, error) {
+	if !idRE.MatchString(n.ID) || net.ParseIP(n.PublicIP).To4() == nil || !validBindingIP(bindIP) {
 		return nil, fmt.Errorf("无效节点或 IPv4")
 	}
 	p := pathsFor(n.ID)
@@ -54,17 +56,17 @@ func instanceConfig(n model.Node, acmeViaCaddy bool, statsSecret string) ([]byte
 	}
 	config := map[string]any{
 		"hqipAdmission": map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d", authPort), "secret": statsSecret},
-		"listen":        net.JoinHostPort(n.PublicIP, strconv.Itoa(n.Port)),
+		"listen":        net.JoinHostPort(bindIP, strconv.Itoa(n.Port)),
 		"auth":          map[string]any{"type": "http", "http": map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d/auth?secret=%s", authPort, statsSecret)}},
 		"trafficStats":  map[string]any{"listen": fmt.Sprintf("127.0.0.1:%d", statsPort), "secret": statsSecret},
 		"acl":           map[string]any{"inline": rules},
 		"resolver":      map[string]any{"type": "udp", "udp": map[string]any{"addr": "1.1.1.1:53", "timeout": "4s"}},
-		"outbounds":     []any{map[string]any{"name": "direct", "type": "direct", "direct": map[string]any{"mode": "4", "bindIPv4": n.PublicIP}}},
+		"outbounds":     []any{map[string]any{"name": "direct", "type": "direct", "direct": map[string]any{"mode": "4", "bindIPv4": bindIP}}},
 	}
 	if n.CertificateMode == "cloudflare" {
 		config["tls"] = map[string]any{"cert": p.State + "/certificates/current/cert.pem", "key": p.State + "/certificates/current/key.pem"}
 	} else {
-		host, port := n.PublicIP, 80
+		host, port := bindIP, 80
 		if acmeViaCaddy {
 			host, port = "127.0.0.1", 18080
 		}

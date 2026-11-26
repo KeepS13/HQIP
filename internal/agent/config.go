@@ -41,6 +41,12 @@ func LoadConfig(path string) (model.AgentConfig, error) {
 }
 
 func normalizeConfig(cfg *model.AgentConfig) error {
+	if cfg.BindIP != "" {
+		ip := net.ParseIP(cfg.BindIP)
+		if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || (cfg.Managed && ip.IsLoopback()) {
+			return errors.New("Agent 本机绑定 IPv4 无效")
+		}
+	}
 	if r := cfg.Reality; r != nil {
 		if r.Port < 1 || r.Port > 65535 || r.BackendPort < 0 || r.BackendPort > 65535 || net.ParseIP(cfg.PublicIP).To4() == nil || cfg.Domain == "" || r.ServerName == "" || strings.ContainsAny(r.ServerName, ":/\\ \t\r\n") {
 			return errors.New("Reality 配置无效")

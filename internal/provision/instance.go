@@ -41,7 +41,7 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 			return
 		}
 	}
-	log("preflight", "检查域名、SSH、主机身份和独立 IP 监听")
+	log("preflight", "检查域名、SSH、主机身份和本机监听地址")
 	if err = validateDNS(ctx, in.Node); err != nil {
 		return
 	}
@@ -82,10 +82,8 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 			return res, errors.New("原 Caddy 验证路由不存在，请切换 Cloudflare DNS 验证或使用节点独立 IP 的 HTTP 验证")
 		}
 	}
-	// This verifies source binding before stopping any previous installation.
-	out, e := rm.run(ctx, "curl --noproxy '*' --fail --silent --show-error --max-time 20 --interface "+shellQuote(in.Node.PublicIP)+" https://api.ipify.org", nil)
-	if e != nil || strings.TrimSpace(out) != in.Node.PublicIP {
-		return res, errors.New("选定 IPv4 的直接出站验证失败，未修改网卡或路由")
+	if e := r.verifyNetworkBinding(ctx, rm, pre.BindIP, in.Node.PublicIP, log); e != nil {
+		return res, e
 	}
 	arch := "amd64"
 	if inv.Architecture != "x86_64" {
@@ -159,9 +157,9 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 		}
 	}
 	if realityConfig == nil {
-		// Each public IP gets its own TCP endpoint. Keep shared-host HTTPS on
+		// Each local binding gets its own TCP endpoint. Keep shared-host HTTPS on
 		// 443 intact by selecting 8443 only when the exact-IP bind is occupied.
-		raw, e := rm.run(ctx, pythonCommand(realityPortScript, map[string]any{"ip": in.Node.PublicIP}), nil)
+		raw, e := rm.run(ctx, pythonCommand(realityPortScript, map[string]any{"ip": pre.BindIP}), nil)
 		if e != nil {
 			return res, errors.New("没有可用的 Reality TCP 端口")
 		}
@@ -179,8 +177,11 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 	realityConfig.BackendPort = in.Node.Port
 	ac := model.AgentConfig{ControlURL: strings.TrimRight(r.options.ControlURL, "/"), NodeID: in.Node.ID, Token: in.AgentToken, Listen: fmt.Sprintf("127.0.0.1:%d", res.AuthPort), StatePath: p.State + "/state.db", StatsURL: fmt.Sprintf("http://127.0.0.1:%d", res.StatsPort), StatsSecret: statsSecret, HysteriaService: p.CoreUnit, AgentService: p.AgentUnit, NodeDir: p.Config, Managed: true, ControllerID: r.controllerIdentity(), Domain: in.Node.Domain, PublicIP: in.Node.PublicIP, CertificateMode: in.Node.CertificateMode}
 	ac.Reality = realityConfig
+	if pre.BindIP != in.Node.PublicIP {
+		ac.BindIP = pre.BindIP
+	}
 	agentJSON, _ := json.MarshalIndent(ac, "", "  ")
-	hyYAML, e := serverConfig(in.Node, res.ACMEViaCaddy, statsSecret)
+	hyYAML, e := instanceConfig(in.Node, pre.BindIP, res.ACMEViaCaddy, statsSecret)
 	if e != nil {
 		return res, e
 	}
@@ -201,7 +202,7 @@ func (r *Runner) installInstance(ctx context.Context, in Input, log LogFunc, pin
 	if err != nil {
 		return res, errors.New("启动独立节点服务失败")
 	}
-	addedFirewall, e = applyFirewall(ctx, rm, in.Node, res.ACMEViaCaddy, realityConfig.Port)
+	addedFirewall, e = applyFirewall(ctx, rm, in.Node, pre.BindIP, res.ACMEViaCaddy, realityConfig.Port)
 	if e != nil {
 		return res, errors.New("管理节点自有 UFW 规则失败，请检查节点防火墙")
 	}

@@ -134,7 +134,7 @@ func (a *Agent) startReality(ctx context.Context) (func(), error) {
 	}
 	var short [8]byte
 	_, _ = hex.Decode(short[:], []byte(endpoint.ShortID))
-	dialer := &net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: net.ParseIP(a.cfg.PublicIP)}}
+	dialer := &net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: net.ParseIP(a.cfg.LocalIP())}}
 	tlsConfig := &utls.RealityConfig{
 		Type: "tcp", Dest: net.JoinHostPort(cfg.ServerName, "443"), DialContext: dialer.DialContext,
 		Config:      utls.Config{ServerName: cfg.ServerName, SessionTicketsDisabled: true},
@@ -145,7 +145,7 @@ func (a *Agent) startReality(ctx context.Context) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	listener, err := net.Listen("tcp", net.JoinHostPort(a.cfg.PublicIP, strconv.Itoa(cfg.Port)))
+	listener, err := net.Listen("tcp", net.JoinHostPort(a.cfg.LocalIP(), strconv.Itoa(cfg.Port)))
 	if err != nil {
 		return nil, errors.New("Reality TCP port unavailable")
 	}
@@ -226,7 +226,7 @@ func (a *Agent) connectRealityBackend(ctx context.Context, password, clientIP st
 	if err != nil {
 		return nil, err
 	}
-	direct, err := outbound.NewDirect(a.cfg.PublicIP)
+	direct, err := outbound.NewDirect(a.cfg.LocalIP())
 	if err != nil {
 		return nil, err
 	}

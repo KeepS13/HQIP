@@ -94,6 +94,7 @@ def main():
     manifest = {"sourceSHA": source_sha, "dirty": dirty, "hysteriaVersion": "2.13.0-hqip.1", "hqipAdmissionVersion": 1, "offlineAdmissionVersion": 1, "vlessRealityVersion": 1, "caddyVersion": "2.11.7", "sha256": {name: digest(OUT / name) for name in names}}
     manifest['trafficBillingVersion'] = 1
     manifest['nodeQuotaVersion'] = 1
+    manifest['nodeNetworkVersion'] = 1
     manifest['connectionSlotsVersion'] = 3
     if extension.exists():
         manifest["hysteriaSource"] = json.loads(extension.read_text(encoding="utf-8"))
