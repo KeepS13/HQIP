@@ -6,7 +6,7 @@ Version: 1（兼容现有单份导入链接）
 
 Consumers: user-web、第三方 Clash/Mihomo、V2Ray、sing-box 客户端。
 
-人工开通扩展：`pending` 订阅同样允许创建/复制/轮换链接并进入合并集合，见 [activation v1](../subscription-activation.md)。尚未开通的单份或仅含待开通成员的合并链接返回 200 空节点配置；Clash/sing-box 拒绝转发，V2Ray 为零条 URI。它不授予连接权限；首次分配节点并开通后刷新原链接即可。以下“有效订阅集合”在链接管理语境包含待开通成员；全部失效 403、没有合格自动节点 503 不适用于仅待开通的集合。
+人工开通扩展：`pending` 订阅同样允许创建/复制/轮换链接并进入合并集合，见 [activation v1](../subscription-activation.md)。尚未开通的单份或仅含待开通成员的合并链接返回 200 空节点配置；Clash/sing-box 仅允许恢复网站直连、其余拒绝，V2Ray 为零条 URI。它不授予代理连接权限；首次分配节点并开通后刷新原链接即可。以下“有效订阅集合”在链接管理语境包含待开通成员；全部失效 403、没有合格自动节点 503 不适用于仅待开通的集合。
 
 ## 请求与响应
 
@@ -38,6 +38,22 @@ Consumers: user-web、第三方 Clash/Mihomo、V2Ray、sing-box 客户端。
 Clash、sing-box 的完整配置及 HQIP 原生规则模式统一执行大陆域名和 IPv4/IPv6 直连，优先于保存的旧服务分组，其余自定义规则保持顺序。配置生成时组合内置快照，因此已有 LAN-only 包也生效；导出不写回规则历史、哈希或凭据。Clash 内联 CN 地址，不依赖客户端 Geo 数据库，并提供大陆 DNS 策略和保留目标地址的 HTTP/TLS 域名嗅探。sing-box 使用本地 DNS 做大陆域名及 IP 分类。
 
 `format=v2ray` 保持 Base64 节点 URI 列表，不携带路由，不能自动修改 v2rayN、v2rayNG 或 Shadowrocket 的配置。它们需要在客户端选择大陆直连规则；全局模式或本地覆写不受服务器配置保证。真实验证版本、数据更新和其他边界见 [大陆分流](../mainland-routing.md)。
+
+## 节点 DNS 与网站恢复（2026-11-26）
+
+Clash 完整配置为节点域名提供独立的 `proxy-server-nameserver`（`223.5.5.5`、`119.29.29.29`）；海外 DoH fallback 经 `节点选择` 查询，不能在建立代理前依赖海外直连 DoH。官网、API、管理员站点从部署的 `PublicURL`、`UserOrigin`、`AdminOrigin` 提取精确主机名，并与登录所需的 `challenges.cloudflare.com` 一起置于规则最前，使用直连 DNS。仅 URL 本身是 IP 时输出 /32 或 /128，不解析并绕过共享 CDN 网段，也不放宽父域名。
+
+sing-box 完整配置使用相同网站名单；待开通 Clash/sing-box 只允许这些网站直连，其余仍拒绝，不下发代理凭据。HQIP 原生客户端的官方域名名单与 Windows 系统代理例外同步，包含用户站、管理站和验证码；它们不属于授权来源白名单，不改变登录安全校验。
+
+现有用户须更新并重新启用完整订阅；原生客户端须安装包含本次代码的新版本。直连使用用户实际本地出口，不能把境外网络变成大陆 IP。网站服务端不能覆盖其他代理软件、用户手动选择的 Clash 全局模式或第三方节点 URI 的路由；这些情况须在对应客户端添加直连例外。验证码走本地线路不保证其运营商在所有网络可达。
+
+## 各客户端导入与恢复帮助（2026-11-26）
+
+通用 `clash://install-config` 与 Verge 专用 `clash-verge://install-config` 将 `name` 放在前、编码后的 `url` 放在最后；Clash Verge Rev 2.5.10 会读取 `url=` 后的整个尾部，后置名称会污染订阅路径。选择 Verge 时使用其官方注册的专用 scheme，避免其他已安装 Clash 应用接管。CMFA 使用同样顺序的 `clashmeta://install-config` 并传递名称；v2rayNG 和 sing-box 保持 URL 查询参数加名称 fragment。v2rayN、Shadowrocket 保留复制后手动添加，不生成未经验证的唤起链接。
+
+公共 `GET /api/v1/user/config` 增加 `directAccessHosts: string[]`，由 `ServiceBypassHosts` 从同一部署配置生成，只包含精确主机名/IP，不包含端口、路径或凭据。导入页面在用户首次展开恢复帮助时读取一次，关闭/切换订阅取消请求；15 秒超时后可重试，不新增轮询。仅在页面中展示和复制地址不代表客户端路由已配置成功。
+
+节点 URI 的三个客户端须手动添加优先规则；v2rayN/NG 域名使用 `full:` 精确匹配并选择 `direct`，Shadowrocket 使用 `DOMAIN` → `DIRECT`，IP 地址使用 IP 规则。说明及验证范围见 [客户端兼容审查](../reviews/2026-11-26-client-compatibility.md)。
 
 ## 导出性能边界
 

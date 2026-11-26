@@ -159,6 +159,8 @@ func TestOfficialControlDomainsBypassProxyAndTUNDNS(t *testing.T) {
 			want := map[string]bool{"203.0.113.7": true}
 			if address == DefaultServerURL || address == DefaultServerURL+"/" || address == previousOfficialServerURL || address == previousOfficialServerURL+"/" {
 				want["hqip.sharevps.online"] = true
+				want["cms-hqip.sharevps.online"] = true
+				want["challenges.cloudflare.com"] = true
 			} else {
 				u, err := url.Parse(address)
 				if err != nil {

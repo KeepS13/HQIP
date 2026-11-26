@@ -8,12 +8,21 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/KeepS13/HQIP/internal/rules"
 )
 
 // Portal settings and Turnstile verification share the existing server policy.
 func (s *Server) portalConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, _ := s.Store.TurnstileSettings()
-	reply(w, 200, map[string]any{"registrationEnabled": s.Store.PortalSetting("portal_registration") == "true", "portalEnabled": s.Store.PortalEnabled(), "recoveryHold": s.Store.PortalSetting("portal_recovery_hold") == "true", "turnstileSiteKey": cfg.SiteKey, "turnstileConfigured": cfg.SecretConfigured})
+	// Public routing guidance uses the same exact hosts as subscription export;
+	// it carries no credentials and does not extend trusted authentication origins.
+	reply(w, 200, map[string]any{
+		"registrationEnabled": s.Store.PortalSetting("portal_registration") == "true",
+		"portalEnabled":       s.Store.PortalEnabled(), "recoveryHold": s.Store.PortalSetting("portal_recovery_hold") == "true",
+		"turnstileSiteKey": cfg.SiteKey, "turnstileConfigured": cfg.SecretConfigured,
+		"directAccessHosts": rules.ServiceBypassHosts(s.opts.PublicURL, s.opts.UserOrigin, s.opts.AdminOrigin),
+	})
 }
 func (s *Server) portalSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "PUT" {

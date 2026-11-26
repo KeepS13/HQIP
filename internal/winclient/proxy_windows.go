@@ -5,7 +5,6 @@ package winclient
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -223,15 +222,6 @@ func (p *ProxyManager) Restore() error {
 		}
 		return p.restoreLocked(os.Getpid(), stamp)
 	})
-}
-
-func ownedProxyValues(port int) map[string]proxyValue {
-	return map[string]proxyValue{
-		"ProxyEnable":   {Present: true, Kind: registry.DWORD, Number: 1},
-		"ProxyServer":   {Present: true, Kind: registry.SZ, Text: fmt.Sprintf("127.0.0.1:%d", port)},
-		"ProxyOverride": {Present: true, Kind: registry.SZ, Text: "<local>;hqip.sharevps.online"},
-		"AutoConfigURL": {},
-	}
 }
 
 func (p *ProxyManager) Enable(port int) error {

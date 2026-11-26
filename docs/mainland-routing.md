@@ -16,6 +16,14 @@ Clash 使用 redir-host DNS；大陆及明确直连域名通过 `nameserver-poli
 
 sing-box 导出为大陆域名设置本地 DNS。HQIP 原生客户端从 `5.0.0-preview.9` 起，用于 IP 分类的 `resolve` 遵循 DNS 分流，不再强制本地解析：已知大陆域名本地解析，未匹配域名通过节点使用远程 DoH，避免污染答案导致海外域名误走直连或直接解析失败。未收录域名仍按可信解析结果进行 CN IP 判断，CDN 选择可能与本地 DNS 不同。第三方导出配置的历史行为不由本次原生修复变更。HQIP 只有在旧缓存 CIDR 与有效策略一致时才使用编译缓存，否则内嵌当前 CN 前缀。Windows 特权辅助程序允许该未指定 server 的声明式解析动作；不会接收任意路径、脚本、额外 DNS 服务器或监听器。
 
+## 节点解析与官网恢复修复（2026-11-26）
+
+现场 Clash Verge Rev 2.5.10 / Mihomo 1.19.33 的 vus1 HY2 与 VLESS Reality 均因节点域名进入全地址 fallback，而直连海外 DoH 超时。修复在两条 Clash 导出路径统一设置节点专用直连 DNS，并让海外 DoH 使用现有 `节点选择`，避免节点引导失败及每个未缓存海外域名的约 5 秒直连 DNS 等待。
+
+`internal/rules/service_bypass.go` 统一精确网站主机规则：部署配置中的用户站、API、管理站，以及 Turnstile 的 `challenges.cloudflare.com`。Clash 将直连规则放在大陆 IP 分类和管理员规则之前，并提供对应本地 DNS；sing-box 补齐管理员站点和验证码。待开通配置也保留恢复入口，其他流量继续拒绝。HQIP 客户端同步官方站点的路由/DNS 与 Windows 代理例外。此名单不是认证来源或任意域名信任名单。
+
+`scripts/verify_clash_recovery.py` 使用 HTTP 订阅测试导出，节点地址保留为测试域名、备用 DNS 故意不响应，验证节点仍可建立连接；随后关闭测试代理并验证三个网站仍命中精确 `DOMAIN → DIRECT`，排除回环 IP 规则掩盖错误。测试不接管系统代理。兼容版本及现场完整 HTTPS 测试见 [本次验收](reviews/2026-11-26-clash-dns-recovery.md)。生效及客户端无法覆盖的边界见 [导入契约](contracts/subscription-import-links.md)。
+
 ## 数据与重建
 
 固定快照日期：2026-11-23。域名由 V2Fly 官方编译器展开 `cn`（即 `geosite:cn` 的兼容集合），保留 include 属性过滤和 full/domain 区别。不是从个人订阅复制节点或凭据。

@@ -1,6 +1,10 @@
 package client
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/KeepS13/HQIP/internal/rules"
+)
 
 const DefaultServerURL = "https://hqip.sharevps.online"
 const UserSiteURL = "https://hqip.sharevps.online"
@@ -18,5 +22,5 @@ func migrateOfficialServerURL(server string) string {
 }
 
 func officialBypassDomains() []string {
-	return []string{"hqip.sharevps.online"}
+	return rules.OfficialServiceHosts()
 }

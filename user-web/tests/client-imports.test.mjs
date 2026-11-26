@@ -35,6 +35,7 @@ test("client schemes preserve URL query characters and Unicode names without fra
   }
   assert.equal(new URL(clientImportScheme("v2rayng", subscription, name)).hostname, "install-sub");
   assert.equal(new URL(clientImportScheme("singbox", subscription, name)).hostname, "import-remote-profile");
+  assert.equal(new URL(clientImportScheme("verge", subscription, name)).protocol, "clash-verge:", "use Verge's registered scheme when multiple Clash apps are installed");
   assert.equal(clientImportScheme("v2rayn", subscription, name), "");
   assert.equal(clientImportScheme("shadowrocket", subscription, name), "");
   assert.equal(clientImportScheme("clash", "", name), "");
@@ -44,6 +45,24 @@ test("each client receives its native subscription family", () => {
   assert.deepEqual(Object.fromEntries(importClients.map(({ id, format }) => [id, format])), {
     clash: "clash", verge: "clash", cmfa: "clash", v2rayn: "v2ray", v2rayng: "v2ray", shadowrocket: "v2ray", singbox: "singbox",
   });
+});
+
+test("Clash Verge 2.5.10 tail parser receives only the encoded subscription URL", () => {
+  // Verge's extract_subscription_url consumes the entire tail after `url=`.
+  // A normal URLSearchParams assertion misses a trailing name being downloaded
+  // as part of the token path (no query) or nested query (explicit format).
+  for (const subscription of [
+    "https://example.test/usub/token_A-123",
+    "https://example.test/usub/token_A-123?format=clash&source=a%26b",
+  ]) {
+    for (const id of ["clash", "verge"]) {
+      const link = new URL(clientImportScheme(id, subscription, "HQIP 香港 + #2"));
+      const query = link.search.slice(1);
+      const imported = decodeURIComponent(query.slice(query.indexOf("url=") + 4));
+      assert.equal(imported, subscription);
+      assert.equal(link.searchParams.get("name"), "HQIP 香港 + #2");
+    }
+  }
 });
 
 test("subscription selection never substitutes another user's intended package", () => {

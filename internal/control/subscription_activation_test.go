@@ -24,7 +24,10 @@ func TestPendingSingBoxPinnedCoreCheck(t *testing.T) {
 	if err != nil || !strings.Contains(string(version), "sing-box version 1.14.4") {
 		t.Fatal("expected pinned sing-box 1.14.4", err)
 	}
-	body, _ := pendingPortalConfig("singbox")
+	body, _, err := pendingPortalConfig("singbox", "https://hqip.sharevps.online", "https://cms-hqip.sharevps.online")
+	if err != nil {
+		t.Fatal(err)
+	}
 	file := filepath.Join(t.TempDir(), "pending.json")
 	if err = os.WriteFile(file, body, 0600); err != nil {
 		t.Fatal(err)
@@ -72,19 +75,19 @@ func TestPendingSubscriptionLinkAndAdminActivation(t *testing.T) {
 				Proxies []any    `yaml:"proxies"`
 				Rules   []string `yaml:"rules"`
 			}
-			if err = yaml.Unmarshal(w.Body.Bytes(), &c); err != nil || len(c.Proxies) != 0 || len(c.Rules) != 1 || c.Rules[0] != "MATCH,REJECT" {
+			if err = yaml.Unmarshal(w.Body.Bytes(), &c); err != nil || len(c.Proxies) != 0 || len(c.Rules) < 2 || c.Rules[len(c.Rules)-1] != "MATCH,REJECT" {
 				t.Fatal(c, err)
 			}
 		case "singbox":
 			var c struct {
-				Outbounds []any `json:"outbounds"`
+				Outbounds []struct{ Type string } `json:"outbounds"`
 				Route     struct {
 					Rules []struct {
 						Action string `json:"action"`
 					} `json:"rules"`
 				} `json:"route"`
 			}
-			if err = json.Unmarshal(w.Body.Bytes(), &c); err != nil || len(c.Outbounds) != 0 || len(c.Route.Rules) != 1 || c.Route.Rules[0].Action != "reject" {
+			if err = json.Unmarshal(w.Body.Bytes(), &c); err != nil || len(c.Outbounds) != 1 || c.Outbounds[0].Type != "direct" || len(c.Route.Rules) < 2 || c.Route.Rules[len(c.Route.Rules)-1].Action != "reject" {
 				t.Fatal(c, err)
 			}
 		case "v2ray":

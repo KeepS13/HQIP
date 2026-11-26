@@ -8,6 +8,10 @@ import (
 // exceptions for LAN discovery and media apps. Explicit mainland DNS policies
 // take priority over fallback, so domestic CDN lookup never uses overseas DNS.
 // No GEOIP/GEOSITE or provider download is needed to start this configuration.
+// Node bootstrap must use reachable direct resolvers independently of fallback:
+// otherwise a timed-out overseas DoH resolver prevents either protocol dialing.
+// Overseas DoH uses the existing node selector after that bootstrap, avoiding a
+// five-second direct-DNS timeout before each uncached overseas website request.
 func clashDNS(bundle rules.Bundle) map[string]any {
 	local := []string{"223.5.5.5", "119.29.29.29"}
 	policy := map[string]any{}
@@ -30,9 +34,10 @@ func clashDNS(bundle rules.Bundle) map[string]any {
 	return map[string]any{
 		"enable": true, "ipv6": true, "enhanced-mode": "redir-host",
 		"default-nameserver": local, "nameserver": local,
-		"nameserver-policy": policy,
-		"fallback":          []string{"https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"},
-		"fallback-filter":   map[string]any{"geoip": false, "ipcidr": []string{"0.0.0.0/0", "::/0"}},
+		"proxy-server-nameserver": local,
+		"nameserver-policy":       policy,
+		"fallback":                []string{"https://1.1.1.1/dns-query#节点选择", "https://8.8.8.8/dns-query#节点选择"},
+		"fallback-filter":         map[string]any{"geoip": false, "ipcidr": []string{"0.0.0.0/0", "::/0"}},
 	}
 }
 

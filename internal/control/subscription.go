@@ -113,6 +113,7 @@ func (s *Server) clashConfig(device model.Device, nodes []model.Node) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
+	bundle.Rules = append(rules.ServiceBypassRules(s.opts.PublicURL, s.opts.UserOrigin, s.opts.AdminOrigin), bundle.Rules...)
 	routeRules, err := bundle.ClashRules("节点选择", "DIRECT")
 	if err != nil {
 		return nil, err

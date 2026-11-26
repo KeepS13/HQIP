@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
-	"net/url"
 
 	"github.com/KeepS13/HQIP/internal/model"
 	"github.com/KeepS13/HQIP/internal/rules"
@@ -36,10 +35,8 @@ func portalSingBoxSubscription(profile model.ClientProfile, bundle rules.Bundle,
 			domains = append(domains, host)
 		}
 	}
-	for _, raw := range serviceURLs {
-		if u, parseErr := url.Parse(raw); parseErr == nil && (u.Scheme == "https" || u.Scheme == "http") {
-			addBypass(u.Hostname())
-		}
+	for _, host := range rules.ServiceBypassHosts(serviceURLs...) {
+		addBypass(host)
 	}
 	defaultTag := ""
 	for _, node := range profile.Nodes {

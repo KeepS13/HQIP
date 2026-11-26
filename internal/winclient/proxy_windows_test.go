@@ -52,7 +52,7 @@ func TestOwnedProxyBypassAndSnapshotRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(strings.Split(got["ProxyOverride"].Text, ";"), []string{"<local>", "hqip.sharevps.online"}) {
+	if !reflect.DeepEqual(strings.Split(got["ProxyOverride"].Text, ";"), []string{"<local>", "hqip.sharevps.online", "cms-hqip.sharevps.online", "challenges.cloudflare.com"}) {
 		t.Fatal("system proxy bypass contains retired or unexpected domains")
 	}
 	if got["ProxyEnable"].Number != 1 || got["ProxyServer"].Text != "127.0.0.1:14001" || got["AutoConfigURL"].Present {

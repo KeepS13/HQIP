@@ -12,6 +12,7 @@ const assets = path.join(root, 'user-web', 'dist');
 const output = path.join(root, '.local', 'client-imports-qa');
 const origin = 'https://hqip.example.test';
 const apiOrigin = 'https://hqip.sharevps.online';
+const recoveryHosts = ['hqip.sharevps.online', 'cms-hqip.sharevps.online', 'challenges.cloudflare.com'];
 const user = { id: 'fixture-user', email: 'demo@example.test', enabled: true, revision: 1 };
 const nodes = [{ id: 'fixture-node', name: '测试节点', server: 'node.example.test', ready: true }];
 const createSubscription = (id, status = 'active') => ({
@@ -34,6 +35,7 @@ let heldRead = null;
 let holdWrite = false;
 let heldWrite = null;
 let failNextRead = false;
+let failNextRecoveryRead = false;
 let failNextWrite = false;
 let detailDelayMs = 0;
 const writes = [], unexpected = [], errors = [];
@@ -60,7 +62,10 @@ async function main() {
       const match = /^\/api\/v1\/user\/subscriptions\/([^/]+)(\/import-link(?:\/(rotate|revoke))?)?$/.exec(p) || (combined && [p, 'all', '/import-link', combined[1]]);
       let body, status = 200;
       if (p === '/api/v1/user/session') body = { authenticated, user, csrfToken: 'fixture-csrf' };
-      else if (p === '/api/v1/user/config') body = { portalEnabled: true, registrationEnabled: true, turnstileConfigured: true, turnstileSiteKey: 'fixture-site-key' };
+      else if (p === '/api/v1/user/config') {
+        if (failNextRecoveryRead) { failNextRecoveryRead = false; status = 503; body = { error: '直连帮助暂不可用' }; }
+        else body = { portalEnabled: true, registrationEnabled: true, turnstileConfigured: true, turnstileSiteKey: 'fixture-site-key', directAccessHosts: recoveryHosts };
+      }
       else if (p === '/api/v1/user/profile') body = { user, subscriptions: visibleSubscriptions, sessions: [] };
       else if (p === '/api/v1/user/login' && req.method() === 'POST') {
         authenticated = true;
@@ -160,7 +165,7 @@ async function main() {
     await select.selectOption('fixture-sub-a');
     await value(tokens.get('fixture-sub-a'));
     const cases = [
-      ['Clash / Mihomo', 'clash', 'clash:'], ['Clash Verge Rev', 'clash', 'clash:'],
+      ['Clash Meta / Mihomo', 'clash', 'clash:'], ['Clash Verge Rev', 'clash', 'clash-verge:'],
       ['Clash Meta Android', 'clash', 'clashmeta:'], ['v2rayN', 'v2ray', null],
       ['v2rayNG', 'v2ray', 'v2rayng:'], ['Shadowrocket', 'v2ray', null], ['Sing Box', 'singbox', 'sing-box:'],
     ];
@@ -175,11 +180,23 @@ async function main() {
         const scheme = new URL(await link.getAttribute('href'));
         assert.equal(scheme.protocol, protocol);
         assert.equal(scheme.searchParams.get('url'), expected);
+        if (['clash:', 'clash-verge:'].includes(protocol)) assert.equal(decodeURIComponent(scheme.search.slice(scheme.search.indexOf('url=') + 4)), expected, 'Verge consumes the complete url= tail');
         if (['v2rayng:', 'sing-box:'].includes(protocol)) assert.equal(decodeURIComponent(scheme.hash.slice(1)), 'HQIP 同名套餐 · 香港 + #2 -sub-a');
       } else assert.equal(await link.count(), 0);
       const exported = new URL(await page.getByRole('link', { name: '导出配置', exact: true }).getAttribute('href'));
       assert.equal(exported.searchParams.get('download'), '1');
       assert.equal(exported.searchParams.get('format') || 'clash', format);
+      const help = page.locator('details').filter({ has: page.getByText('官网直连与连接故障恢复', { exact: true }) });
+      if (label === 'Clash Meta / Mihomo') failNextRecoveryRead = true;
+      await help.locator('summary').click();
+      if (label === 'Clash Meta / Mihomo') {
+        await help.getByText('直连帮助暂不可用', { exact: true }).waitFor();
+        await help.getByRole('button', { name: '重试', exact: true }).click();
+      }
+      await help.getByRole('button', { name: '复制直连地址', exact: true }).click();
+      assert.equal(await page.evaluate(() => window.fixtureClipboard), recoveryHosts.join('\n'));
+      await help.getByText(format === 'v2ray' ? '更新订阅不会自动添加官网直连规则' : '完整配置已包含下列网站', { exact: false }).waitFor();
+      await help.locator('summary').click();
     }
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: '导出配置', exact: true }).click()]);
     assert.equal(download.suggestedFilename(), 'hqip-singbox.json');
@@ -277,6 +294,8 @@ async function main() {
     await value(tokens.get('fixture-sub-a'));
     await page.setViewportSize({ width: 390, height: 844 });
     await client('Sing Box').click();
+    await page.getByText('官网直连与连接故障恢复', { exact: true }).click();
+    await page.getByRole('button', { name: '复制直连地址', exact: true }).waitFor();
     await snapshot('mobile');
     await page.setViewportSize({ width: 320, height: 720 });
     await snapshot('narrow');

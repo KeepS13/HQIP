@@ -5,6 +5,7 @@ import { Badge, Button, CopyButton, Empty, ErrorNotice, Field, Loading, Modal, N
 import { clientImportScheme, importClients, selectedImportSubscription, subscriptionImportURL, type ImportClient, type ImportClientID } from "./client-imports";
 import { subscriptionLabels, type UserSubscription } from "./types";
 import { useImportLink, type LinkAction } from "./useImportLink";
+import { ClientRecoveryHelp } from "./ClientRecoveryHelp";
 import "./client-imports.css";
 
 function ImportSubscription({ subscription, subscriptions, client, onBusyChange }: { subscription: UserSubscription | null; subscriptions: UserSubscription[]; client: ImportClient; onBusyChange: (busy: boolean) => void }) {
@@ -69,6 +70,7 @@ function ImportSubscription({ subscription, subscriptions, client, onBusyChange 
           </div>
         </>}
         <p className="client-import-help">{client.help}</p>
+        <ClientRecoveryHelp client={client} />
         <Notice tone="warning">怀疑链接泄露时，请轮换链接。{scope}的旧链接会立即作废，旧配置中的节点凭据也会失效；正在使用这些凭据的连接会被断开，必须重新导入新链接才能继续使用。</Notice>
         <p className="client-import-help">所有客户端格式共用所选订阅的链接和凭据，轮换会同时影响它们。订阅额度与有效期保留，HQIP 官方客户端不受影响。连接断开由节点同步撤销状态后执行，可能有短暂延迟。</p>
         {!subscription && <p className="client-import-help">合并链接包含本次复制时的有效订阅。购买新订阅后请重新复制合并链接；其中任一订阅轮换或撤销后，也需要重新复制合并链接。</p>}

@@ -73,7 +73,11 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.portalImportProfile(user, subscriptions)
 	if errors.Is(err, errPortalActivationPending) {
-		body, contentType := pendingPortalConfig(format)
+		body, contentType, configErr := pendingPortalConfig(format, s.opts.PublicURL, s.opts.UserOrigin, s.opts.AdminOrigin)
+		if configErr != nil {
+			portalResult(w, nil, configErr)
+			return
+		}
 		s.writePortalImport(w, r, user, subscriptions, format, body, contentType)
 		return
 	}
@@ -122,7 +126,7 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 			portalResult(w, nil, rulesErr)
 			return
 		}
-		body, err = portalSingBoxSubscription(p, v.Bundle, s.opts.PublicURL, s.opts.UserOrigin)
+		body, err = portalSingBoxSubscription(p, v.Bundle, s.opts.PublicURL, s.opts.UserOrigin, s.opts.AdminOrigin)
 		contentType = "application/json; charset=utf-8"
 	} else {
 		v, rulesErr := s.Store.Rules()
@@ -135,6 +139,9 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 			portalResult(w, nil, rulesErr)
 			return
 		}
+		// Recovery websites and their DNS must remain usable when the selected
+		// node is unavailable, including with historical reject/proxy rules.
+		bundle.Rules = append(rules.ServiceBypassRules(s.opts.PublicURL, s.opts.UserOrigin, s.opts.AdminOrigin), bundle.Rules...)
 		routeRules, rulesErr := bundle.ClashRules("节点选择", "DIRECT")
 		if rulesErr != nil {
 			portalResult(w, nil, rulesErr)
