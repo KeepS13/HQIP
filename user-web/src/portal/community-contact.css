@@ -1,0 +1,104 @@
+.community-contact {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px 24px;
+  margin-bottom: 28px;
+  border: 1px solid var(--purple);
+  border-radius: 12px;
+  background: var(--panel-light);
+}
+.community-contact-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  color: var(--purple);
+  background: var(--bg);
+}
+.community-contact-info {
+  flex: 1;
+  min-width: 0;
+}
+.community-contact-info strong {
+  display: block;
+  font-size: 13px;
+}
+.community-contact-number {
+  display: block;
+  margin: 4px 0;
+  color: var(--purple);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+.community-contact-info p,
+.community-contact-action > span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.community-contact-action {
+  max-width: 300px;
+}
+.community-contact-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.community-contact-action .button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.community-contact-action .button-secondary {
+  border-color: var(--purple);
+  color: var(--purple);
+}
+.community-contact-action > span:not(:empty) {
+  display: block;
+  margin-top: 8px;
+}
+.community-contact-compact {
+  margin: 24px 0 0;
+  padding: 16px;
+  gap: 12px;
+}
+.community-contact-compact .community-contact-icon {
+  width: 40px;
+  height: 40px;
+}
+.community-contact-compact .community-contact-action {
+  flex-basis: 100%;
+  max-width: none;
+}
+.community-contact-compact .community-contact-action .button {
+  flex: 1;
+}
+@media (max-width: 560px) {
+  .community-contact {
+    padding: 16px;
+    gap: 12px;
+  }
+  .community-contact-action {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .community-contact-action .button {
+    flex: 1;
+  }
+}
+/* The onboarding grid styles all anchors as cards; keep its group title inline. */
+.portal-start-grid .portal-start-community .community-group-link {
+  display: inline-flex;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  color: var(--purple);
+}

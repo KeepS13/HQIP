@@ -58,6 +58,7 @@ import {
 import { SubscriptionCatalog } from "./Commerce";
 import { UserOrderDetail, UserOrders } from "./Orders";
 import { ClientImports } from "./ClientImports";
+import { CommunityContact } from "./CommunityContact";
 import "./portal.css";
 
 export function PortalBrand() {
@@ -177,6 +178,7 @@ function Auth({
               ? "注册后选择订阅，付款成功后自动开通。"
               : "登录后，继续你的连接。"}
           </p>
+          <CommunityContact compact />
           <div className="portal-auth-tabs">
             <button
               type="button"
@@ -755,6 +757,7 @@ export default function Portal() {
             </div>
           </header>
           <main className="page-content portal-content">
+            <CommunityContact />
             <PortalHome onLogout={logout} />
             <footer className="page-footer">
               <span>HQIP · 你的世界，自由连接</span>

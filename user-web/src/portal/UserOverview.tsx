@@ -4,6 +4,7 @@ import { CopyButton, Empty, Panel } from "../components";
 import type { UserProfile } from "./types";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { RenewalButton } from "./Renewal";
+import { QQ_GROUP, QQ_GROUP_URL } from "./CommunityContact";
 
 // Account summary and onboarding actions, including the public support group.
 export function UserOverview({ profile }: { profile: UserProfile }) {
@@ -109,9 +110,13 @@ export function UserOverview({ profile }: { profile: UserProfile }) {
           <div className="portal-start-community">
             <span><Users size={25} aria-hidden="true" /></span>
             <div>
-              <h3>加入 QQ 交流群</h3>
-              <p>QQ群：383590149 · 使用交流与帮助</p>
-              <CopyButton value="383590149" label="复制群号" />
+              <h3>
+                <a className="community-group-link" href={QQ_GROUP_URL} target="_blank" rel="noopener noreferrer">
+                  加入 QQ 交流群 <ArrowUpRight size={16} aria-hidden="true" />
+                </a>
+              </h3>
+              <p>QQ群：{QQ_GROUP} · 使用交流与帮助</p>
+              <CopyButton value={QQ_GROUP} label="复制群号" />
             </div>
           </div>
         </div>
