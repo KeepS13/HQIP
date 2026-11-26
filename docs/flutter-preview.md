@@ -100,3 +100,14 @@ gh workflow run flutter-preview.yml --repo KeepS13/HQIP --ref main -f action=rol
 ```
 
 回退拒绝覆盖后来修改的 Nginx 配置或预览目录；首次上线回退隐藏目录，后续回退恢复上一目录，均保留已上传文件。不强制降级已安装的新客户端，修复时使用更高序号。preview.2 自动发现、下载及“可安装”状态单独记录；安装由用户确认，ARM64 真机 VPN 验收不得用模拟器代替。
+
+
+### 同一签名包重试
+
+服务器使用自带 OpenSSL 验证 Ed25519，不需要修改控制服务共享 Python 环境。发布任务支持复用已经成功构建、通过主分支 CI 且仍属于 main 历史的原始产物；发布脚本所在的当前 main 也必须通过完整 CI：
+
+```powershell
+gh workflow run flutter-preview.yml --repo KeepS13/HQIP --ref main -f action=publish -f publication_run=<原始成功构建运行编号>
+```
+
+使用原始构建的签名回执和全部文件摘要，不重新打包，也不改变来源提交。重试回执分别记录 `sourceSHA`、`deploymentSHA` 和 `sourceBuildRun`。重复序号仍只能对应同一份签名回执。该入口需要原始 Actions 产物仍在保留期内；请保存签名发布包。

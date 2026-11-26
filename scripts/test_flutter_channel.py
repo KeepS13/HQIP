@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -72,6 +73,19 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(receipt['sequence'], 3)
         self.assertEqual(len(releases), 6)
         self.assertEqual(len({v['sha256'] for v in releases}), 4)
+
+    @unittest.skipUnless(shutil.which('openssl'), 'OpenSSL-only production verifier runs in Linux CI')
+    def test_complete_bundle_verified_without_python_packages(self):
+        code = ('import sys;sys.path.insert(0,sys.argv[1]);'
+                'from flutter_channel import verify_bundle;'
+                'verify_bundle(sys.argv[2],sys.argv[3],"a"*40)')
+        command = [sys.executable, '-S', '-c', code, str(Path(__file__).resolve().parent), str(self.bundle)]
+        result = subprocess.run([*command, self.public], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        wrong = Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+        result = subprocess.run([*command, wrong], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('signature verification failed', result.stderr)
 
     def test_modified_file_wrong_key_and_source_are_rejected(self):
         with self.assertRaises(Exception):

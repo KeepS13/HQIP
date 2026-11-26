@@ -31,8 +31,30 @@ def checked_main():
     return sha
 
 
-def main(archive, rollback_run=None):
-    sha = checked_main()
+def reusable_source(run_id, deployment_sha):
+    if not re.fullmatch(r'[0-9]+', run_id):
+        raise ValueError('Invalid source build run')
+    repo = os.environ['GITHUB_REPOSITORY']
+    run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/actions/runs/{run_id}'], text=True))
+    if (run['event'] != 'workflow_dispatch' or run['head_branch'] != 'main' or
+            run['path'] != '.github/workflows/flutter-preview.yml' or run['status'] != 'completed'):
+        raise ValueError('Reuse requires a completed trusted main preview build')
+    jobs = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/actions/runs/{run_id}/jobs?per_page=100'], text=True))['jobs']
+    if not any(j['name'] == 'build' and j['conclusion'] == 'success' for j in jobs):
+        raise ValueError('Source preview build did not pass')
+    source = run['head_sha']
+    comparison = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/compare/{source}...{deployment_sha}'], text=True))
+    if comparison['status'] not in ['ahead', 'identical']:
+        raise ValueError('Source build must belong to main history')
+    ci = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/actions/workflows/ci.yml/runs?head_sha={source}&event=push&per_page=20'], text=True))['workflow_runs']
+    if not any(r['head_sha'] == source and r['head_branch'] == 'main' and r['conclusion'] == 'success' for r in ci):
+        raise ValueError('Source commit must have passed main CI')
+    return source
+
+
+def main(archive, rollback_run=None, publication_run=None):
+    deployment_sha = checked_main()
+    sha = reusable_source(publication_run, deployment_sha) if publication_run else deployment_sha
     host, port, user = (os.environ[n] for n in ['DEPLOY_HOST', 'DEPLOY_PORT', 'DEPLOY_USER'])
     if (host, port, user) != ('64.83.17.143', '22', 'root'):
         raise ValueError('Unexpected production target')
@@ -89,7 +111,8 @@ def main(archive, rollback_run=None):
                 if json.loads(remote([*command, 'preflight', *options])) != origin_before:
                     raise ValueError('Control release or process changed during publication')
                 result.update(acceptance)
-            result.update(control=origin_before, run=run_id, sourceSHA=sha)
+            result.update(control=origin_before, run=run_id, sourceSHA=sha, deploymentSHA=deployment_sha,
+                          sourceBuildRun=publication_run or os.environ['GITHUB_RUN_ID'])
             (report_dir / 'receipt.json').write_text(json.dumps(result, indent=2))
             (report_dir / 'official-after.json').write_text(json.dumps(baseline(), indent=2))
             print(json.dumps(result, indent=2))
@@ -109,6 +132,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--archive', type=Path, default=ROOT / 'dist/flutter-preview-publication.tar.gz')
     p.add_argument('--rollback-run')
+    p.add_argument('--publication-run')
     p.add_argument('--check-only', action='store_true')
     a = p.parse_args()
-    print(checked_main()) if a.check_only else main(a.archive, a.rollback_run)
+    print(checked_main()) if a.check_only else main(a.archive, a.rollback_run, a.publication_run)

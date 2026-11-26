@@ -12,6 +12,10 @@ on:
         description: Exact successful publication transaction (run ID-attempt), for rollback only
         required: false
         type: string
+      publication_run:
+        description: Reuse the exact signed artifact from a successful main build run (optional)
+        required: false
+        type: string
   pull_request:
     paths:
       - 'flutter-client/**'
@@ -46,7 +50,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/deploy_flutter_preview.py --check-only
   build:
-    if: inputs.action != 'rollback'
+    if: inputs.action != 'rollback' && inputs.publication_run == ''
     needs: checks
     runs-on: windows-2025
     timeout-minutes: 75
@@ -148,7 +152,7 @@ jobs:
           if root.parent == (Path.cwd() / '.local').resolve() and root.is_dir() and not root.is_symlink():
               shutil.rmtree(root)
   publish:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.action == 'publish'
+    if: always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.action == 'publish' && needs.checks.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.publication_run != ''))
     needs: [checks, build]
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -171,8 +175,10 @@ jobs:
         with:
           name: flutter-preview-publication
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.publication_run || github.run_id }}
       - name: Recover the same-run signed publication
-        if: steps.download.outcome == 'failure'
+        if: steps.download.outcome == 'failure' && inputs.publication_run == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/flutter_preview_transfer.py download
@@ -184,7 +190,13 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: python scripts/deploy_flutter_preview.py
+          PREVIEW_PUBLICATION_RUN: ${{ inputs.publication_run }}
+        run: |
+          if [ -n "$PREVIEW_PUBLICATION_RUN" ]; then
+            python scripts/deploy_flutter_preview.py --publication-run "$PREVIEW_PUBLICATION_RUN"
+          else
+            python scripts/deploy_flutter_preview.py
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true

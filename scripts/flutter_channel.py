@@ -9,9 +9,8 @@ import shutil
 import stat
 import subprocess
 import tarfile
+import tempfile
 import zipfile
-
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_URL = 'https://hqip.sharevps.online'
@@ -44,9 +43,32 @@ def verified(envelope, public):
     raw = base64.b64decode(envelope['payload'], validate=True)
     if len(raw) > 65536:
         raise ValueError('Signed metadata too large')
-    Ed25519PublicKey.from_public_bytes(bytes.fromhex(public)).verify(
-        base64.b64decode(envelope['signature'], validate=True), raw)
+    signature = base64.b64decode(envelope['signature'], validate=True)
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        verify_with_openssl(raw, signature, public)
+    else:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(public)).verify(signature, raw)
     return json.loads(raw)
+
+
+def verify_with_openssl(raw, signature, public):
+    # The production Python runtime has no third-party packages. OpenSSL 3
+    # verifies the same Ed25519 bytes without changing that shared runtime.
+    key = bytes.fromhex(public)
+    if len(key) != 32 or len(signature) != 64:
+        raise ValueError('Invalid Ed25519 key or signature length')
+    with tempfile.TemporaryDirectory(prefix='hqip-verify-') as folder:
+        root = Path(folder)
+        (root / 'key.der').write_bytes(bytes.fromhex('302a300506032b6570032100') + key)
+        (root / 'payload').write_bytes(raw)
+        (root / 'signature').write_bytes(signature)
+        result = subprocess.run(['openssl', 'pkeyutl', '-verify', '-pubin', '-keyform', 'DER',
+                                 '-inkey', str(root / 'key.der'), '-rawin', '-in', str(root / 'payload'),
+                                 '-sigfile', str(root / 'signature')], capture_output=True)
+        if result.returncode:
+            raise ValueError('Ed25519 signature verification failed')
 
 
 def regular(path):
@@ -184,6 +206,7 @@ def extract_bundle(archive, destination):
 
 
 def package(source, output, key_path, expected_public):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=normal'], cwd=ROOT, text=True).strip():
         raise ValueError('Publication requires a clean committed checkout')
