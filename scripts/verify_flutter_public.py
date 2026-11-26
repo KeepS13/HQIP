@@ -51,7 +51,8 @@ def verify_public(bundle, public, before, *, full=True):
         with urllib.request.urlopen(request(path), timeout=60) as r:
             if r.status != 200 or path != '/' and json.load(r).get('ok') is not True:
                 raise ValueError('Public service health failed')
-    with urllib.request.urlopen('https://cms-hqip.sharevps.online/', timeout=60) as r:
+    admin_request = urllib.request.Request('https://cms-hqip.sharevps.online/', headers={'User-Agent': 'Go-http-client/1.1'})
+    with urllib.request.urlopen(admin_request, timeout=60) as r:
         if r.status != 200:
             raise ValueError('Admin website unavailable')
     try:
