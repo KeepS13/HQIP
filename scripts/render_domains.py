@@ -74,6 +74,45 @@ map $uri $hqip_static_cache {{ default "no-store"; ~^/assets/ "public, max-age=3
  return text
 
 
+def preview_routes():
+ # This independently published channel survives normal control-service releases.
+ headers = ''' add_header X-Content-Type-Options nosniff always;
+ add_header Strict-Transport-Security "max-age=31536000" always;
+ add_header Referrer-Policy no-referrer always;
+ add_header X-Frame-Options DENY always;
+'''
+ text=' # BEGIN HQIP Flutter preview\n'
+ for api, filename in [('/api/v3/client/releases','releases.json'),('/api/v1/user/installers','installers.json')]:
+  text+=f''' location = {api} {{
+  if ($arg_client = flutter) {{ rewrite ^ /__hqip_flutter_preview/{filename} last; }}
+  proxy_pass http://127.0.0.1:18091;
+ }}
+ location = /__hqip_flutter_preview/{filename} {{
+  internal;
+  if ($arg_channel != preview) {{ return 404; }}
+  limit_except GET HEAD {{ deny all; }}
+  alias /opt/hqip-flutter-preview/current/{filename};
+  default_type application/json;
+  add_header Cache-Control "no-store" always;
+{headers} }}
+'''
+ text+=''' location ~ "^/downloads/flutter/preview/([a-f0-9]{64})/(HQIP-Preview-(Windows-x64(-Setup\\.exe|\\.zip)|Android-(arm64|x64)\\.apk))$" {
+  limit_except GET HEAD { deny all; }
+  alias /opt/hqip-flutter-preview/objects/$1/$2;
+  disable_symlinks on;
+  default_type application/octet-stream;
+  etag off;
+  add_header ETag '"$1"';
+  add_header Content-Disposition "attachment";
+  add_header Cache-Control "public, max-age=31536000, immutable";
+'''+headers+''' }
+ location ~ ^/downloads/flutter/preview/ { return 404; }
+ location /__hqip_flutter_preview/ { return 404; }
+ # END HQIP Flutter preview
+'''
+ return text
+
+
 def api_proxy():
  text=''.join(' set_real_ip_from '+cidr+';\n' for cidr in CF_RANGES)
  text+=''' real_ip_header CF-Connecting-IP;
@@ -103,7 +142,7 @@ def api_proxy():
  location = /s { return 404; }
  location /s/ { return 404; }
 '''
- return text
+ return preview_routes()+text
 
 if __name__=='__main__':
  (Path(__file__).resolve().parents[1]/'deploy/nginx-hqip.conf').write_text(render(),encoding='utf-8')

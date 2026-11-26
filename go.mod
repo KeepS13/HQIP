@@ -3,6 +3,7 @@ module github.com/KeepS13/HQIP
 go 1.26.10
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/KeepS13/HQIP/runtime/nodepolicy v0.0.0
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/apernet/hysteria/core/v2 v2.0.0

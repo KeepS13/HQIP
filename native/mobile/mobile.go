@@ -50,6 +50,10 @@ type Runtime struct {
 }
 
 func NewRuntime(dir string, callbacks Callbacks) (*Runtime, error) {
+	return newRuntime(dir, callbacks, false)
+}
+
+func newRuntime(dir string, callbacks Callbacks, preview bool) (*Runtime, error) {
 	if callbacks == nil {
 		return nil, errors.New("Android platform is required")
 	}
@@ -81,6 +85,11 @@ func NewRuntime(dir string, callbacks Callbacks) (*Runtime, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &Runtime{controller: controller, server: server, cancel: cancel, platform: platform}
 	runtime.bridge = &clientbridge.Bridge{Controller: controller, OpenURL: callbacks.OpenURL, Mobile: true}
+	if preview {
+		runtime.startPreviewUpdates(ctx, dir, callbacks)
+		go controller.Run(ctx)
+		return runtime, nil
+	}
 	updater := client.NewBundleUpdater(filepath.Join(dir, "updates"), "android-"+goruntime.GOARCH, client.AppVersion, controller.BundleUpdateSource, func(path string, _ clientrelease.Release, _ clientrelease.Envelope) error {
 		runtime.updateMu.Lock()
 		runtime.updatePath = path

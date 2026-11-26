@@ -1,0 +1,10 @@
+HQIP Flutter Preview
+HQIP source and build scripts: https://github.com/KeepS13/HQIP
+Flutter 3.50.1 (BSD-3-Clause): Flutter-LICENSE, https://github.com/flutter/flutter
+Riverpod (MIT): https://github.com/rrousselGit/riverpod
+Material UI (BSD-3-Clause): https://pub.dev/packages/material_ui
+sing-box 1.14.4 (GPL-3.0-or-later): sing-box-LICENSE
+https://github.com/SagerNet/sing-box/tree/v1.14.4
+Go runtime dependencies and license notices: go.mod, native/mobile/go.mod.
+Routing-data attribution is included in authenticated rules bundles.
+Flutter dependency licenses are accessible from Settings > Licenses in the app.

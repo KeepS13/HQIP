@@ -32,3 +32,7 @@ native/android/.gradle/
 native/android/build/
 native/android/local.properties
 native/mobile/build/
+
+# Generated Flutter native runtime and signing stay outside source control.
+flutter-client/android/app/libs/
+/.cache/

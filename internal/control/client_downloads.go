@@ -54,6 +54,10 @@ func (s *Server) clientDeliveries() ([]clientDelivery, error) {
 }
 
 func (s *Server) clientInstallers(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("client") == "flutter" {
+		s.flutterInstallers(w, r)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	releases, err := s.clientDeliveries()
 	if errors.Is(err, os.ErrNotExist) {

@@ -33,6 +33,7 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/user/download", s.portalDownloadInfo)
 	m.HandleFunc("GET /api/v3/client/releases", s.godotReleases)
 	m.HandleFunc("GET /downloads/godot/{sha256}/{filename}", s.godotDownload)
+	m.HandleFunc("GET /downloads/flutter/preview/{sha256}/{filename}", s.flutterDownload)
 	m.HandleFunc("GET /downloads/HQIP-Windows-x64.zip", s.portalDownload)
 	m.HandleFunc("GET /downloads/{sha256}/HQIP-Windows-x64.zip", s.portalDownload)
 	for pattern, handler := range map[string]portalHandler{

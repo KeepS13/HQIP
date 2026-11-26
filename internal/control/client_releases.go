@@ -35,6 +35,10 @@ func (s *Server) godotReleaseCatalog() (clientrelease.Catalog, error) {
 	return catalog, nil
 }
 func (s *Server) godotReleases(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("client") == "flutter" {
+		s.flutterReleases(w, r)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	catalog, err := s.godotReleaseCatalog()
 	if errors.Is(err, os.ErrNotExist) {
