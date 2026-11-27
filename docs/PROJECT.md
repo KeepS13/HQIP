@@ -1,6 +1,6 @@
 # HQIP 项目地图
 
-用户公告（2026-11-28，本地实现，尚未发布）：新增 `user-announcements`，由 store/control、管理站和用户站共同实现；管理端指定用户批量发布、停用，用户网站登录或整页刷新时加载弹窗。`always` 每次加载展示，`until_acknowledged` 按账号确认后隐藏；下一条与关闭不确认。契约见 [用户公告 v1](contracts/user-announcements.md)，检查见 [本地验收](reviews/2026-11-28-user-announcements.md)。SQLite 自动增量建表，PostgreSQL 使用独立迁移命令并接入完整发布流程；不改原生客户端和运维预警。
+用户公告（2026-11-28，已发布 `a9dbbde`）：新增 `user-announcements`，由 store/control、管理站和用户站共同实现；管理端指定用户批量发布、停用，用户网站登录或整页刷新时加载弹窗。`always` 每次加载展示，`until_acknowledged` 按账号确认后隐藏；下一条与关闭不确认。契约见 [用户公告 v1](contracts/user-announcements.md)，检查见 [本地验收](reviews/2026-11-28-user-announcements.md)，完整 CI、备份、公告迁移及两站资源核对见 [上线记录](deployment/2026-11-28-user-announcements.md)。SQLite 自动增量建表，PostgreSQL 使用独立迁移命令并接入完整发布流程；18/18节点健康，不改原生客户端和运维预警。
 
 本轮文件预算：新增生产文件均不超过300行；原网站入口按登录、品牌、授权、下载和主框架拆开，控制端命令入口按运行、初始化、备份、恢复拆开，保留原函数及行为。既有 `internal/store/store.go` 306行、`postgres_migrate.go` 382行、`scripts/upgrade_domains.py` 327行保留为小于400行例外：本轮只增加公告初始化、增量 schema 和发布前迁移，不拆散已有存储初始化/迁移事务及发布回滚流程。
 

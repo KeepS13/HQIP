@@ -1,6 +1,6 @@
 # 用户公告本地验收
 
-2026-11-28。模块 `user-announcements`，契约 [v1](../contracts/user-announcements.md)，使用说明见 [用户公告](../announcements.md)。本轮代码尚未提交、推送或部署；没有向真实用户发布公告。
+2026-11-28。模块 `user-announcements`，契约 [v1](../contracts/user-announcements.md)，使用说明见 [用户公告](../announcements.md)。代码已作为 `a9dbbde` 提交、推送并通过完整 CI 部署；生产证据见 [上线记录](../deployment/2026-11-28-user-announcements.md)。没有向真实用户发布测试公告。
 
 ## 完成范围
 
@@ -20,7 +20,7 @@
 - 用户站26项 Node 测试通过。
 - `admin-web/tests/announcements.browser.cjs` 通过：批量指定用户、丢失发布回执后关闭/重开/重试保持同一 ID、停用、X、Escape、下一条跨页、失败确认重试、刷新持久化、常驻公告再次展示、路由切换不再次请求、HTML转义、焦点、375/812/1440宽度布局。全部请求拦截为测试数据，无公网业务写入。截图在 `.local/announcements-ui/`。
 - 既有 `subscription-apply.browser.cjs` 浏览器回归通过，验证拆分入口后原套餐编辑/应用流程仍正常。
-- 新增公告部署3项 Python 测试通过。全量脚本332项测试有17项错误、20项跳过：16项为当前 Windows 缺少符号链接权限（WinError 1314），另1项为未修改的 Flutter 安装目录检查失败；因此全量 Python 检查不能标记为通过。
+- 新增公告部署3项 Python 测试通过。初次 Windows 全量脚本332项测试有17项错误、20项跳过：16项为当前 Windows 缺少符号链接权限（WinError 1314），另1项为未修改的 Flutter 安装目录检查失败；该次检查未通过。部署前在 WSL Ubuntu 重跑全量332项，结果 `OK (skipped=1)`；随后同一源提交的 Linux CI 检查也通过。
 - `git diff --check` 通过。按 HEAD 对比，搬迁的8个React组件函数体、serve/初始化/备份函数体逐字保持；恢复命令只增加公告增量迁移。
 
 ## 图谱与风险
