@@ -21,6 +21,8 @@ export interface SubscriptionTemplate {
   quotaBytes: number | null;
   maxConnections: number;
   revision: number;
+  /** Server-owned saved revision last applied; absent on older control servers. */
+  appliedRevision?: number;
 }
 export interface UserSubscription {
   activationPending?: boolean;

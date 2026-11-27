@@ -153,6 +153,9 @@ func TestTemplateApplyRollbackDoesNotPartiallyResize(t *testing.T) {
 	if _, err = s.ApplySubscriptionTemplate(p.ID, p.Revision); err == nil {
 		t.Fatal("injected failure committed")
 	}
+	if current, err := s.SubscriptionTemplate(p.ID); err != nil || current.AppliedRevision != 0 {
+		t.Fatal("failed application acknowledged", current, err)
+	}
 	for _, old := range []model.UserSubscription{a, b} {
 		current, err := s.UserSubscription(user.ID, old.ID)
 		if err != nil || current.NodesPerSubscription != 1 || !sameNodeSet(current.NodeIDs, old.NodeIDs) {

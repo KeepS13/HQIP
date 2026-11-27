@@ -1,5 +1,7 @@
 # HQIP 项目地图
 
+套餐应用状态（2026-11-28）：`template-apply v3` 增加服务端持久化的已应用版本；编辑后未应用的按钮使用橙色和「待应用」，确认弹窗固定所确认的保存版本，成功/缺额使用浮动提示，移除卡片下方说明与结果区域。复用模板 JSON，无 schema 迁移、额外读取查询或轮询；应用状态与分配同事务提交。验证见 [应用状态审查](reviews/2026-11-28-template-apply-state.md)。
+
 订阅入口与套餐应用（2026-11-28，已发布 `fa3b13e`）：410位用户的新固定账户链接已准备，旧链接保留原范围；空账户也可复制，动态读取当前订阅，选择器仅列可用单份。套餐新增「立刻应用」，节点数量可大于已选数，实际分配上限与候选池的较小值；NAT探针的xus1-v实机报告与图片均已生成。正式客户端为1.0.0／5000026，18/18节点健康。契约见 [import-links v2](contracts/subscription-import-links.md)、[template-apply v2](contracts/subscription-template-apply.md)，本地验证见 [审查](reviews/2026-11-28-subscriptions-nat-quality.md)，CI、备份及实机结果见 [发布记录](deployment/2026-11-28-subscriptions-nat-quality.md)。
 
 本轮文件预算：原 869 行套餐页面拆分为列表、草稿编辑、选点和商城预览；`TemplateEditor.tsx` 380 行作为小于 400 行的例外，保留同一草稿的校验、影响预览与保存交互，避免跨文件分散状态所有权。其余新增生产文件均不超过 300 行。上游固定版本 `ipquality/ip.sh` 保留供应商脚本结构，以补丁与摘要追踪修改。

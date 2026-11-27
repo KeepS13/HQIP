@@ -125,6 +125,13 @@ func (s *Store) ApplySubscriptionTemplate(id string, expected int64) (TemplateAp
 				return out, err
 			}
 		}
+		// Persist acknowledgement with allocations, even for an empty audience or
+		// a reported shortfall. It means this version was applied, not full stock.
+		// Keep the edit revision stable so applying cannot invalidate an editor.
+		p.AppliedRevision = p.Revision
+		if _, err = tx.Exec("UPDATE portal_templates SET config=? WHERE id=?", jsonString(p), id); err != nil {
+			return out, err
+		}
 		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.template_applied',?)", now.Unix(), id); err != nil {
 			return out, err
 		}

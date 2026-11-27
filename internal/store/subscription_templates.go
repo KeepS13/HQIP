@@ -109,6 +109,9 @@ func (s *Store) SaveSubscriptionTemplate(id string, p model.SubscriptionTemplate
 		}
 		p.ID = id
 		p.Revision = 1
+		// Ignore client-supplied application state, including stale editor copies.
+		// Saving a new revision never acknowledges it as applied to old holders.
+		p.AppliedRevision = previous.AppliedRevision
 		if id == "" {
 			p.ID = NewID()
 		} else {

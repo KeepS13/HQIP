@@ -1,0 +1,10 @@
+/* Pending edits use the shared amber token; text and icon also expose state. */
+.button.button-apply-pending {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, var(--panel));
+}
+.button.button-apply-pending:hover {
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 20%, var(--panel));
+}

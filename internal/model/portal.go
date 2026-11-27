@@ -21,6 +21,9 @@ type SubscriptionTemplate struct {
 	QuotaBytes           *int64                `json:"quotaBytes"`
 	MaxConnections       int                   `json:"maxConnections"` // Concurrent HY2 instances plus distinct VLESS IPs per subscription.
 	Revision             int64                 `json:"revision"`
+	// AppliedRevision is server-owned and advances only with a committed apply.
+	// Zero means no version was recorded; creation alone does not require apply.
+	AppliedRevision int64 `json:"appliedRevision"`
 }
 type AllocationShortfall struct {
 	SubscriptionID string `json:"subscriptionId,omitempty"`

@@ -39,7 +39,10 @@ let mode = 'success', release = null;
         writes.push({ body: req.postDataJSON(), csrf: req.headers()['x-csrf-token'] });
         if (mode === 'hold') await new Promise(resolve => { release = resolve; });
         if (mode === 'error') { status = 409; body = { error: '模板版本已变化' }; }
-        else body = { affectedSubscriptions: 12, updatedSubscriptions: 9, allocationShortfalls: mode === 'shortfall' ? [{ userId: 'user', subscriptionId: 'sub-missing', assigned: 1, required: 2 }] : [] };
+        else {
+          template.appliedRevision = template.revision;
+          body = { affectedSubscriptions: 12, updatedSubscriptions: 9, allocationShortfalls: mode === 'shortfall' ? [{ userId: 'user', subscriptionId: 'sub-missing', assigned: 1, required: 2 }] : [] };
+        }
       } else { unexpected.push(req.method()+' '+p); status = 404; body = { error: 'Unexpected route' }; }
       return route.fulfill({ status, headers, contentType: 'application/json', body: JSON.stringify(body) });
     }
@@ -53,24 +56,55 @@ let mode = 'success', release = null;
   });
   try {
     await page.goto(CMS+'/subscriptions');
-    const apply = page.getByRole('button',{ name:'立刻应用', exact:true });
+    const apply = page.getByRole('button',{ name:/^立刻应用/ });
+    const card = page.locator('.account-plan-card');
+    const confirm = page.getByRole('button',{ name:'确认应用', exact:true });
+    assert.match(await apply.getAttribute('class'), /button-apply-pending/);
+    assert.match(await apply.innerText(), /待应用/);
+    assert.equal(await card.locator('small, .notice, [role="status"]').count(), 0);
+    for (const [name,width,height] of [['desktop',1440,1000],['mobile',375,812],['landscape',812,375]]) {
+      await page.setViewportSize({ width,height });
+      await apply.click();
+      await page.getByText('当前版本尚无立刻应用记录。',{exact:false}).waitFor();
+      assert.equal(writes.length,0,'opening confirmation must not apply');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, name+' overflow');
+      await page.screenshot({ path:path.join(output,name+'-confirm.png'), fullPage:true, animations:'disabled' });
+      await page.keyboard.press('Escape');
+      assert.equal(await apply.evaluate(el => el === document.activeElement), true);
+      await page.screenshot({ path:path.join(output,name+'.png'), fullPage:true, animations:'disabled' });
+    }
+    await page.setViewportSize({width:1440,height:1000});
+    const initialHeight = (await card.boundingBox()).height;
     mode = 'hold';
     await apply.click();
+    await confirm.click();
     for (let i=0; !release && i<100; i++) await page.waitForTimeout(20);
     assert.ok(release, 'apply request not sent');
-    assert.equal(await apply.isDisabled(), true, 'in-flight request must disable duplicate submission');
+    assert.equal(await confirm.isDisabled(), true, 'in-flight request must disable duplicate submission');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.getByRole('dialog').count(),1,'busy dialog must remain open');
     mode = 'success'; release(); release = null;
     await page.getByText('已应用到 12 份订阅', { exact:false }).waitFor();
+    await page.getByRole('dialog').waitFor({state:'hidden'});
     assert.deepEqual(writes[0], { body:{ expectedRevision:7 }, csrf:'fixture-csrf' });
-    mode = 'error'; await apply.click();
+    assert.doesNotMatch(await apply.getAttribute('class'), /button-apply-pending/);
+    assert.equal((await card.boundingBox()).height, initialHeight, 'success must not grow the card');
+    assert.equal(await card.locator('small, .notice, [role="status"]').count(), 0);
+    await page.reload();
+    await apply.waitFor();
+    assert.doesNotMatch(await apply.getAttribute('class'), /button-apply-pending/);
+    template.revision++;
+    await page.reload();
+    await apply.waitFor();
+    assert.match(await apply.getAttribute('class'), /button-apply-pending/);
+    mode = 'error'; await apply.click(); await confirm.click();
     await page.getByText('模板版本已变化', { exact:false }).waitFor();
-    mode = 'shortfall'; await apply.click();
-    await page.getByText('订阅 #sub-missing：1 / 2 个节点', { exact:false }).waitFor();
-    for (const [name,width,height] of [['desktop',1440,1000],['mobile',375,812]]) {
-      await page.setViewportSize({ width,height });
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, name+' overflow');
-      await page.screenshot({ path:path.join(output,name+'.png'), fullPage:true });
-    }
+    assert.match(await apply.getAttribute('class'), /button-apply-pending/);
+    await page.getByRole('button',{name:'取消',exact:true}).click();
+    mode = 'shortfall'; await apply.click(); await confirm.click();
+    await page.getByText('其中 1 份节点不足', { exact:false }).waitFor();
+    await page.getByRole('dialog').waitFor({state:'hidden'});
+    assert.equal(await card.locator('.notice, [role="status"]').count(), 0);
     assert.equal(writes.length,3);
     // The split editor retains its draft through card preview, node filtering,
     // impact preview and save. Apply must subsequently use the new revision.
@@ -89,13 +123,14 @@ let mode = 'success', release = null;
     await dialog.getByRole('button',{ name:'预览影响',exact:true }).click();
     await dialog.getByRole('button',{ name:'确认保存',exact:true }).click();
     await dialog.waitFor({state:'hidden'});
-    mode='success'; await apply.click();
+    assert.match(await apply.getAttribute('class'), /button-apply-pending/);
+    mode='success'; await apply.click(); await confirm.click();
     await page.getByText('已应用到 12 份订阅',{exact:false}).waitFor();
-    assert.deepEqual(writes.at(-1).body,{expectedRevision:8});
+    assert.deepEqual(writes.at(-1).body,{expectedRevision:9});
     assert.deepEqual(template.nodeIds,['a']);
     assert.equal(template.nodesPerSubscription,10);
     await page.getByText('1 个（配置上限 10 个） / 候选池 1 个',{exact:true}).waitFor();
     assert.deepEqual(errors,[]); assert.deepEqual(unexpected,[]);
-    console.log(JSON.stringify({ passed:true, checks:['saved-revision','csrf','busy','success','conflict','shortfall','responsive'], screenshots:output }));
+    console.log(JSON.stringify({ passed:true, checks:['pending-color','persistent-acknowledgement','edit-rehighlights','confirmation-cancel','focus-return','saved-revision','csrf','busy','toast-without-layout-change','conflict','shortfall-toast','responsive'], screenshots:output }));
   } finally { if (release) release(); await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode=1; });
