@@ -15,7 +15,7 @@ func TestPortalAllSubscriptionsPrepareAndRotate(t *testing.T) {
 	s, _, user, template, node, firstPassword := portalFixture(t, 4, nil)
 	first := user.Subscriptions[0]
 	second := grantAnother(t, s, user.ID, template, "combined-second")
-	// A missing member must not result in a silently partial combined link.
+	// GET does not prepare an account capability or mutate child credentials.
 	if link, err := s.PortalAllSubscriptions(user.ID, "get"); err != nil || link != "" {
 		t.Fatal("partial link", err)
 	}
@@ -69,8 +69,8 @@ func TestPortalAllSubscriptionsPrepareAndRotate(t *testing.T) {
 	if _, err = s.PortalSubscription(user.ID, second.ID, "rotate"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.ResolvePortalImport(importToken(rotated)); !errors.Is(err, ErrUnauthorized) {
-		t.Fatal("partially stale envelope accepted")
+	if _, ids, err = s.ResolvePortalImport(importToken(rotated)); err != nil || len(ids) != 2 {
+		t.Fatal("single rotation changed the independent account capability", err)
 	}
 }
 

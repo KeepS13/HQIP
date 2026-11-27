@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowRight, ArrowUpRight, Copy, Download, Package, RefreshCw } from "lucide-react";
-import { Badge, Button, CopyButton, Empty, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Panel, date, useToast } from "../components";
-import { clientImportScheme, importClients, selectedImportSubscription, subscriptionImportURL, type ImportClient, type ImportClientID } from "./client-imports";
+import { ArrowRight, ArrowUpRight, Copy, Download, RefreshCw } from "lucide-react";
+import { Badge, Button, CopyButton, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Panel, date, useToast } from "../components";
+import { availableImportSubscriptions, clientImportScheme, importClients, selectedImportSubscription, subscriptionImportURL, type ImportClient, type ImportClientID } from "./client-imports";
 import { subscriptionLabels, type UserSubscription } from "./types";
 import { useImportLink, type LinkAction } from "./useImportLink";
 import { ClientRecoveryHelp } from "./ClientRecoveryHelp";
 import "./client-imports.css";
 
 function ImportSubscription({ subscription, subscriptions, client, onBusyChange }: { subscription: UserSubscription | null; subscriptions: UserSubscription[]; client: ImportClient; onBusyChange: (busy: boolean) => void }) {
-  // Pending subscriptions can own an import link, but export no proxy nodes
-  // until an administrator activates them. This never authorizes connections.
-  const activeCount = subscriptions.filter((item) => ["active", "pending"].includes(item.status)).length;
-  const active = subscription ? ["active", "pending"].includes(subscription.status) : activeCount > 0;
+  // The account link exists independently of entitlement. Empty exports grant
+  // no proxy access; purchases populate the same URL on the next client refresh.
+  const activeCount = availableImportSubscriptions(subscriptions).length;
+  const active = subscription ? subscription.status === "active" : true;
   const detail = useImportLink(subscription?.id ?? null, active, onBusyChange);
   const [action, setAction] = useState<LinkAction | null>(null);
   const toast = useToast();
@@ -47,7 +47,7 @@ function ImportSubscription({ subscription, subscriptions, client, onBusyChange 
   }
   const scope = subscription ? "这份订阅" : "全部订阅";
   return <>
-    <Panel title={subscription?.templateName || "全部订阅的合并链接"} subtitle={subscription ? `订阅 #${subscription.id.slice(-8)} · ${subscription.activationPending ? "待开通，尚未开始计时" : `有效至 ${date(subscription.expiresAt)}`}` : `包含当前 ${activeCount} 份有效及待开通订阅，节点按所属订阅独立计量。`} action={<Badge tone={active ? "success" : "warning"}>{subscription ? subscriptionLabels[subscription.status] || "暂时不可用" : `${activeCount} 份订阅`}</Badge>}>
+    <Panel title={subscription?.templateName || "全部订阅 · 固定链接"} subtitle={subscription ? `订阅 #${subscription.id.slice(-8)} · 有效至 ${date(subscription.expiresAt)}` : `当前 ${activeCount} 份可用订阅，节点按所属订阅独立计量。`} action={<Badge tone={active ? "success" : "warning"}>{subscription ? subscriptionLabels[subscription.status] || "暂时不可用" : `${activeCount} 份订阅`}</Badge>}>
       <div className="client-import-body">
         <div className="client-import-context">
           <span>当前客户端：<strong>{client.name}</strong></span>
@@ -55,7 +55,7 @@ function ImportSubscription({ subscription, subscriptions, client, onBusyChange 
         </div>
         <ErrorNotice message={detail.error ? `${detail.error}；请刷新后再导入或导出。` : ""} retry={() => void detail.refresh()} />
         <ErrorNotice message={action ? "" : detail.actionError} />
-        {subscription?.status === "pending" && <Notice>订阅链接已可使用，当前配置不含节点。管理员分配节点并正式开通后开始计时，届时刷新同一链接即可获取节点。</Notice>}
+        {!subscription && activeCount === 0 && <Notice>目前没有可用订阅，仍可复制固定链接。购买或开通后，在客户端更新同一订阅即可获取节点。</Notice>}
         {!active && <Notice tone="warning">{subscription ? `这份订阅${subscriptionLabels[subscription.status] || "暂时不可用"}` : "目前没有有效订阅"}，暂时不能复制、轮换、导入或导出配置。</Notice>}
         {detail.loading ? <Loading /> : <>
           {url && <Field label="订阅链接"><input type="password" readOnly value={detail.busy ? "" : url} aria-label="此订阅的导入链接" /></Field>}
@@ -73,7 +73,7 @@ function ImportSubscription({ subscription, subscriptions, client, onBusyChange 
         <ClientRecoveryHelp client={client} />
         <Notice tone="warning">怀疑链接泄露时，请轮换链接。{scope}的旧链接会立即作废，旧配置中的节点凭据也会失效；正在使用这些凭据的连接会被断开，必须重新导入新链接才能继续使用。</Notice>
         <p className="client-import-help">所有客户端格式共用所选订阅的链接和凭据，轮换会同时影响它们。订阅额度与有效期保留，HQIP 官方客户端不受影响。连接断开由节点同步撤销状态后执行，可能有短暂延迟。</p>
-        {!subscription && <p className="client-import-help">合并链接包含本次复制时的有效订阅。购买新订阅后请重新复制合并链接；其中任一订阅轮换或撤销后，也需要重新复制合并链接。</p>}
+        {!subscription && <p className="client-import-help">此链接固定属于您的账户。购买、更换、到期或单份链接轮换均不改变它；在客户端更新订阅即可加载最新可用节点。仅轮换或撤销此账户链接会使它失效。</p>}
         <div className="client-import-actions"><Button variant="ghost" icon={RefreshCw} busy={detail.refreshing} disabled={detail.busy} onClick={() => void detail.refresh()}>刷新链接状态</Button></div>
       </div>
     </Panel>
@@ -96,11 +96,12 @@ export function ClientImports({ subscriptions }: { subscriptions: UserSubscripti
   const [busy, setBusy] = useState(false);
   const requested = params.get("subscription");
   const all = requested === null;
+  const available = availableImportSubscriptions(subscriptions);
   const selected = selectedImportSubscription(subscriptions, requested);
   const client = importClients.find((item) => item.id === clientID)!;
   return <>
-    <PageHeader eyebrow="CLIENT IMPORT & EXPORT" title="复制订阅链接" description="无需手动创建链接。默认复制全部有效订阅的合并链接，也可选择单份订阅。" />
-    {!subscriptions.length ? <Panel title="选择订阅"><Empty icon={Package} title="还没有开通订阅" description="开通订阅后，可在这里为不同设备准备配置。" action={<Link className="button button-primary" to="/catalog">浏览订阅商城 <ArrowRight size={16} /></Link>} /></Panel> : <>
+    <PageHeader eyebrow="CLIENT IMPORT & EXPORT" title="复制订阅链接" description="默认链接长期固定，自动包含全部可用订阅；也可选择单份订阅。" />
+    <>
       <Panel title="1 · 选择订阅" subtitle="合并导入后，每份订阅仍保留独立的流量、期限和连接名额。">
         <div className="client-import-body">
           <Field label="选择订阅"><select aria-label="选择订阅" value={all ? "all" : selected?.id || ""} disabled={busy} onChange={(event) => {
@@ -111,7 +112,7 @@ export function ClientImports({ subscriptions }: { subscriptions: UserSubscripti
           }}>
             <option value="all">全部订阅（默认）</option>
             {!all && !selected && <option value="" disabled>请选择订阅</option>}
-            {subscriptions.map((item) => <option key={item.id} value={item.id}>{item.templateName} · #{item.id.slice(-8)} · {subscriptionLabels[item.status] || item.status}</option>)}
+            {available.map((item) => <option key={item.id} value={item.id}>{item.templateName} · #{item.id.slice(-8)} · {subscriptionLabels[item.status] || item.status}</option>)}
           </select></Field>
           {!all && !selected && <Notice tone="warning">指定的订阅不存在或已不可访问，请重新选择；不会自动使用其他订阅。</Notice>}
         </div>
@@ -124,6 +125,6 @@ export function ClientImports({ subscriptions }: { subscriptions: UserSubscripti
         </div>
       </Panel>
       {(all || selected) && <ImportSubscription key={selected?.id || "all"} subscription={selected} subscriptions={subscriptions} client={client} onBusyChange={setBusy} />}
-    </>}
+    </>
   </>;
 }

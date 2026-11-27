@@ -6,7 +6,7 @@ GNU Affero General Public License version 3. Copyright remains with its
 original contributors. See `LICENSE`. There is no warranty.
 
 Upstream revision: `b4f5c99e37e20411ef6311e90cf1ffb6dbb1c049`.
-HQIP adaptation date: 2026-11-11. The original preferred source is in
+HQIP adaptation date: 2026-11-28. The original preferred source is in
 `upstream/ip.sh`; `hqip.patch` records the modifications. `UPSTREAM.json`
 records upstream provenance and the SHA-256 of every shipped asset.
 The complete corresponding source, including this adaptation, is published
@@ -17,9 +17,10 @@ in the HQIP repository under `internal/provision/ipquality/`.
 - Freeze reference files with the reviewed script. No mutable reference,
   advertisement, counter, report upload or interactive shell is downloaded.
 - Remove dependency installers, remote menu execution and terminal clearing.
-- Require an explicitly selected public IPv4. HTTP requests always bind to
-  that address, use HTTPS, validate TLS and have bounded time/body sizes.
-  The observed public IP must match the selected address.
+- Require an explicitly selected source IPv4 owned by the host. HTTP and DNS
+  bind to that address. HTTPS validates TLS and has bounded time/body sizes.
+  For NAT, HQIP_EXPECTED_IP identifies the independently verified public exit;
+  without it, the observed public IP must match the source address.
 - Use pinned DNSBL domains as positional shell arguments, with validation,
   limited parallelism, explicit source binding and DNS deadlines. Failed DNS
   queries are reported as `Unknown`, never as `Clean`.
@@ -42,6 +43,10 @@ readable working directory, a process-group timeout, and resource limits:
 ```sh
 bash /path/to/ip.sh -i PUBLIC_IPV4 -4 -n -p -f -j -l cn -o /private/report.json
 ```
+
+For NAT, the runner first verifies the owned local source and its public exit,
+then invokes `HQIP_EXPECTED_IP=PUBLIC_IPV4 bash ip.sh -i LOCAL_IPV4 ...`.
+The script independently compares its observed exit to this public identity.
 
 The output file must not already exist. The parent process validates JSON,
 enforces an output size limit, and checks `Head.IP` against the assigned IP.

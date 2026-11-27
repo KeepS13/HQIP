@@ -1,7 +1,7 @@
 #!/bin/bash
-# HQIP adaptation, 2026-11-11. Original: xykt/IPQuality (AGPL-3.0).
+# HQIP adaptation, 2026-11-28. Original: xykt/IPQuality (AGPL-3.0).
 # Source revision, changes, license and hashes: UPSTREAM.json / NOTICE.md.
-script_version="v2026-09-16-hqip2"
+script_version="v2026-09-16-hqip3"
 check_bash(){
 current_bash_version=$(bash --version|head -n 1|awk -F ' ' '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+/) {print $i; exit}}'|cut -d . -f 1)
 if [ "$current_bash_version" = "0" ]||[ "$current_bash_version" = "1" ]||[ "$current_bash_version" = "2" ]||[ "$current_bash_version" = "3" ];then
@@ -1592,6 +1592,9 @@ services=()
 }
 check_dnsbl_parallel(){
 local ip_to_check=$1
+# Query the public identity, but bind DNS subprocesses to the owned local source.
+# They invoke command dig directly and do not inherit the parent dig wrapper.
+local source_ip=${iface:-$ip_to_check}
 local reversed_ip=$(echo "$ip_to_check"|awk -F. '{print $4"."$3"."$2"."$1}')
 # Only pinned, validated hostnames reach a positional argument, never shell text.
 LC_ALL=C grep -E '^[A-Za-z0-9_]([A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$' "$HQIP_REF/dnsbl.list" | sort -u |
@@ -1608,7 +1611,7 @@ xargs -P 10 -I {} bash -c '
   elif grep -qx "127.0.0.2" <<<"$answer"; then echo Blacklisted
   else echo Other; fi
  fi
-' _ "$ip_to_check" '{}' "$reversed_ip" |
+' _ "$source_ip" '{}' "$reversed_ip" |
 awk 'BEGIN{t=0;c=0;m=0;b=0;u=0} {t++;if($1=="Clean")c++;else if($1=="Blacklisted")b++;else if($1=="Unknown")u++;else m++} END{print t,c,m,b,u}'
 }
 check_dnsbl(){
@@ -1986,7 +1989,9 @@ i) iface="$OPTARG"
    CurlARG="$useNIC"
    get_ipv4
    is_valid_ipv4 "$IPV4" || ERRORcode=7
-   [[ "$IPV4" == "$iface" ]] || ERRORcode=7
+   # HQIP passes the public identity separately from the owned NAT source.
+   # Standalone direct-IP use keeps its original source-equals-exit check.
+   [[ "$IPV4" == "${HQIP_EXPECTED_IP:-$iface}" ]] || ERRORcode=7
    ;;
 j) mode_json=1 ;;
 l) YY="$OPTARG" ;;
@@ -1998,7 +2003,7 @@ o) mode_output=1;outputfile="$OPTARG"
 *) ERRORcode=1 ;;
 esac
 done
-[[ "$IPV4work" == 1 && "$IPV4" == "$iface" && "$IPV6check" == 0 ]] || ERRORcode=7
+[[ "$IPV4work" == 1 && "$IPV4" == "${HQIP_EXPECTED_IP:-$iface}" && "$IPV6check" == 0 ]] || ERRORcode=7
 }
 show_help(){
 echo -ne "\r$shelp\n"

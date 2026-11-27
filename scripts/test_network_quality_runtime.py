@@ -31,7 +31,7 @@ class QualityRuntimeTests(unittest.TestCase):
         return {'ip': '203.0.113.8', 'runId': 'a' * 24,
                 'files': {'ip.sh': base64.b64encode(b'# fake diagnostic, never executed').decode()}}
 
-    def execute(self, report_ip='203.0.113.8', result='success', expire=False, source_present=True, ansi=b'\x1b[32mIP quality\x1b[0m\n'):
+    def execute(self, report_ip='203.0.113.8', result='success', expire=False, source_present=True, ansi=b'\x1b[32mIP quality\x1b[0m\n', nat_source=None, nat_exit='203.0.113.8', route_source=None):
         with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
             root = Path(folder) / 'quality'
             original_path = Path
@@ -46,9 +46,13 @@ class QualityRuntimeTests(unittest.TestCase):
 
             def fake_run(command, **kwargs):
                 calls.append((command, kwargs))
+                if command[:5] == ['ip','-j','-4','route','get']:
+                    return SimpleNamespace(returncode=0, stdout=json.dumps([{'prefsrc': route_source or nat_source or ''}]).encode())
                 if command[0] == 'ip':
-                    addresses = [{'addr_info': [{'local': self.payload()['ip']}]}] if source_present else []
+                    addresses = [{'addr_info': [{'local': nat_source or self.payload()['ip']}]}] if source_present else []
                     return SimpleNamespace(returncode=0, stdout=json.dumps(addresses).encode())
+                if command[0] == 'curl':
+                    return SimpleNamespace(returncode=0, stdout=nat_exit)
                 if command[0] == 'systemd-run':
                     output = original_path(command[-1])
                     output.write_text(json.dumps({'Head': {'IP': report_ip}, 'Info': {}, 'Score': {}}))
@@ -110,6 +114,22 @@ class QualityRuntimeTests(unittest.TestCase):
         self.assertEqual(answer, {'error': 'source'})
         self.assertFalse(any(c[0][0] == 'systemd-run' for c in calls))
 
+    def test_nat_binds_owned_private_source_but_preserves_public_report_identity(self):
+        answer, calls = self.execute(nat_source='10.0.186.2')
+        self.assertEqual(answer['report']['Head']['IP'], self.payload()['ip'])
+        command = next(c[0] for c in calls if c[0][0] == 'systemd-run')
+        self.assertEqual(command[command.index('-i', command.index('bash'))+1], '10.0.186.2')
+        self.assertIn('HQIP_EXPECTED_IP='+self.payload()['ip'], command)
+        probe = next(c[0] for c in calls if c[0][0] == 'curl')
+        self.assertEqual(probe[probe.index('--interface')+1], '10.0.186.2')
+        self.assertIn('--noproxy', probe)
+
+    def test_nat_wrong_exit_or_unowned_route_fails_before_launch(self):
+        for kwargs in [{'nat_exit':'203.0.113.9'}, {'nat_exit':''}, {'route_source':'10.0.186.99'}]:
+            answer, calls = self.execute(nat_source='10.0.186.2', **kwargs)
+            self.assertEqual(answer, {'error':'source'})
+            self.assertFalse(any(c[0][0]=='systemd-run' for c in calls))
+
     def test_missing_dependencies_do_not_launch_or_download(self):
         with patch.object(runtime.shutil, 'which', return_value=None), patch.object(runtime.subprocess, 'run') as run:
             self.assertEqual(runtime.run(self.payload()), {'error': 'dependencies'})
@@ -131,7 +151,7 @@ class QualityAssetTests(unittest.TestCase):
             self.assertNotIn(dangerous, script)
         self.assertIn('command curl -q --interface "$iface" --ipv4', script)
         self.assertIn('--proto \'=https\' --proto-redir \'=https\'', script)
-        self.assertIn('[[ "$IPV4" == "$iface" ]] || ERRORcode=7', script)
+        self.assertIn('[[ "$IPV4" == "${HQIP_EXPECTED_IP:-$iface}" ]] || ERRORcode=7', script)
         self.assertIn('smtp-not-tested', script)
 
     def test_browser_definition_survives_removed_installer(self):
@@ -144,6 +164,29 @@ class QualityAssetTests(unittest.TestCase):
         result = subprocess.run([bash, '-c', helper + '\ngenerate_random_user_agent\nprintf "%s" "$UA_Browser"'], capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r'Mozilla/5\.0 .* (Chrome|Firefox)/[0-9]')
+
+    def test_real_script_option_parser_distinguishes_nat_source_and_public_exit(self):
+        bash = shutil.which('bash') if os.name != 'nt' else 'C:/Program Files/Git/bin/bash.exe'
+        if not bash or not Path(bash).is_file():
+            self.skipTest('Bash not installed')
+        script = (ASSETS / 'ip.sh').read_text(encoding='utf-8')
+        helper = script[script.index('get_opts(){'):script.index('show_help(){')]
+        # Execute the actual parser with a fake HTTP observer: this covers both
+        # its per-option and final exit checks without contacting third parties.
+        setup = '''
+is_valid_ipv4(){ [[ "$1" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; }
+get_ipv4(){ IPV4="$2"; IPV4work=1; }
+'''
+        for source, expected, observed, error in [
+            ('10.0.186.2','45.205.28.141','45.205.28.141',0),
+            ('10.0.186.2','45.205.28.141','45.205.28.142',7),
+            ('45.205.28.141','','45.205.28.141',0),
+            ('45.205.28.141','','45.205.28.142',7),
+        ]:
+            command = setup + helper + '\nERRORcode=0; HQIP_EXPECTED_IP="$2"; observed="$3"; get_ipv4(){ IPV4="$observed"; IPV4work=1; }; get_opts -i "$1" -4; printf "%s" "$ERRORcode"'
+            result = subprocess.run([bash,'-c',command,'_',source,expected,observed],capture_output=True,text=True,timeout=5)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout,str(error),(source,expected,observed))
 
     def test_dnsbl_unknown_is_not_clean_and_input_is_not_shell_code(self):
         bash = shutil.which('bash') if os.name != 'nt' else 'C:/Program Files/Git/bin/bash.exe'
@@ -158,7 +201,8 @@ class QualityAssetTests(unittest.TestCase):
             (root / 'ref/dnsbl.list').write_text('clean.test\nblocked.test\nerror.test\nmarked.test\n$(touch injected)\n')
             dig = root / 'bin/dig'
             dig.write_text('''#!/usr/bin/env bash
-[[ "$1" == -b && "$2" == 203.0.113.8 ]] || exit 99
+[[ "$1" == -b && "$2" == "$TEST_SOURCE" ]] || exit 99
+[[ "${@: -2:1}" == 8.113.0.203.* ]] || exit 97
 case "${@: -2:1}" in
  *.clean.test) echo ';; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1' ;;
  *.error.test) echo ';; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 1' ;;
@@ -168,10 +212,11 @@ case "${@: -2:1}" in
 esac
 ''', newline='\n')
             dig.chmod(0o755)
-            setup = '\nroot=$(cd "$1" && pwd); HQIP_REF="$root/ref"; export PATH="$root/bin:$PATH"; check_dnsbl_parallel 203.0.113.8 50'
-            result = subprocess.run([bash, '-c', helper + setup, '_', root.as_posix()], capture_output=True, text=True, timeout=10)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), '4 1 1 1 1')
+            setup = '\nroot=$(cd "$1" && pwd); HQIP_REF="$root/ref"; export PATH="$root/bin:$PATH"; iface="$2"; export TEST_SOURCE="${iface:-203.0.113.8}"; check_dnsbl_parallel 203.0.113.8 50'
+            for source in ['', '10.0.186.2']:
+                result = subprocess.run([bash, '-c', helper + setup, '_', root.as_posix(), source], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), '4 1 1 1 1', source)
             self.assertFalse((root / 'injected').exists())
 
 

@@ -23,10 +23,8 @@ const createSubscription = (id, status = 'active') => ({
 });
 const subscriptions = [createSubscription('fixture-sub-a'), createSubscription('fixture-sub-b'), createSubscription('fixture-expired', 'expired')];
 const tokens = new Map(subscriptions.map((s) => [s.id, `${apiOrigin}/usub/${s.id}-1`]));
-const combinedURL = () => {
-  const current = visibleSubscriptions.filter((s) => s.status === 'active');
-  return !current.length || current.some((s) => !tokens.get(s.id)) ? '' : `${apiOrigin}/usub/${current.map((s) => tokens.get(s.id).split('/').pop()).join('.')}`;
-};
+let accountURL = '';
+const combinedURL = () => accountURL;
 let visibleSubscriptions = subscriptions;
 let authenticated = true;
 let tokenVersion = 1;
@@ -97,6 +95,10 @@ async function main() {
             if (match[3] === 'revoke') tokens.set(item, '');
             else if (match[3] === 'rotate' || !tokens.get(item)) tokens.set(item, `${apiOrigin}/usub/${item}-${++tokenVersion}`);
           }
+          if (id === 'all') {
+            if (match[3] === 'revoke') accountURL = '';
+            else if (match[3] === 'rotate' || !accountURL) accountURL = `${apiOrigin}/usub/all.fixture-user.token-${++tokenVersion}`;
+          }
           body = { url: id === 'all' ? combinedURL() : tokens.get(id) };
         }
       } else if (p.startsWith('/usub/') && url.searchParams.get('download') === '1') {
@@ -141,7 +143,7 @@ async function main() {
     await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true, animations: 'disabled' });
   }
   try {
-    tokens.delete('fixture-sub-b');
+    accountURL = '';
     await page.goto(`${origin}/imports`);
     await select.waitFor();
     assert.equal(await select.inputValue(), 'all', 'default must be all subscriptions');
@@ -273,13 +275,10 @@ async function main() {
     await value(tokens.get('fixture-sub-b'));
     assert.equal(await select.isDisabled(), false);
 
-    await select.selectOption('fixture-expired');
-    await page.getByText('这份订阅已到期', { exact: false }).waitFor();
-    assert.equal(await masked.count(), 0);
-    assert.equal(await page.getByRole('button', { name: '复制链接', exact: true }).isDisabled(), true);
-    assert.equal(await page.getByRole('button', { name: '轮换链接', exact: true }).isDisabled(), true);
-    assert.equal(await page.getByRole('link', { name: '导出配置', exact: true }).count(), 0);
-    assert.equal(await page.getByRole('button', { name: '撤销导入链接', exact: true }).isEnabled(), true);
+    assert.equal(await select.locator('option[value="fixture-expired"]').count(), 0);
+    await page.goto(`${origin}/imports?subscription=fixture-expired`);
+    await page.getByText('指定的订阅不存在或已不可访问', { exact: false }).waitFor();
+    assert.equal(await masked.count(), 0, 'expired deep link cannot silently select the account scope');
 
     await page.goto(`${origin}/imports?subscription=missing`);
     await page.getByText('指定的订阅不存在或已不可访问', { exact: false }).waitFor();
@@ -312,7 +311,7 @@ async function main() {
 
     visibleSubscriptions = [subscriptions[0]];
     await page.goto(`${origin}/imports`);
-    await value(tokens.get('fixture-sub-a'));
+    await value(combinedURL());
     assert.equal(new URL(page.url()).searchParams.get('subscription'), null);
     assert.equal(await select.inputValue(), 'all');
     await page.goto(`${origin}/`);
@@ -324,8 +323,12 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 1100 });
     visibleSubscriptions = [];
     await page.goto(`${origin}/imports`);
-    await page.getByText('还没有开通订阅', { exact: true }).waitFor();
-    assert.equal(await select.count(), 0);
+    await value(combinedURL());
+    await page.getByText('目前没有可用订阅，仍可复制固定链接', { exact: false }).waitFor();
+    assert.equal(await select.locator('option').count(), 1);
+    await page.getByRole('button', { name: '复制链接', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.fixtureClipboard), combinedURL());
+    await snapshot('empty-fixed-link');
 
     visibleSubscriptions = subscriptions;
     authenticated = false;

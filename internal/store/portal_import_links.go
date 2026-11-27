@@ -8,9 +8,8 @@ import (
 	"github.com/KeepS13/HQIP/internal/secure"
 )
 
-// A combined URL carries existing per-subscription capabilities, never a new
-// account-wide credential. Bound its request-line size and export work. Tokens
-// contain no dots, so the envelope is unambiguous and needs no database schema.
+// Bound export work and legacy snapshot URL length. Account URLs have a fixed
+// size regardless of the number of subscriptions owned by the user.
 const maxImportSubscriptions = 100
 
 // PortalSubscription returns or changes one owner's import capability. Create
@@ -24,10 +23,10 @@ func (s *Store) PortalSubscription(user, subscription, action string) (string, e
 	return s.portalImportLink(user, subscription, action)
 }
 
-// PortalAllSubscriptions snapshots all currently active subscriptions in one
-// link. Rotate/revoke also invalidate older, now-inactive third-party links.
+// PortalAllSubscriptions owns a stable account capability, even without a plan.
+// Rotate/revoke also invalidate older, now-inactive third-party credentials.
 func (s *Store) PortalAllSubscriptions(user, action string) (string, error) {
-	return s.portalImportLink(user, "", action)
+	return s.portalAccountImportLink(user, action)
 }
 
 func (s *Store) portalImportLink(user, subscription, action string) (string, error) {
@@ -182,6 +181,9 @@ func revokeImportCredentials(tx *sql.Tx, user, subscription string) error {
 // invalidates an old combined link; it must never silently acquire replacement
 // credentials. Cross-account and duplicate capabilities are rejected.
 func (s *Store) ResolvePortalImport(token string) (string, []string, error) {
+	if strings.HasPrefix(token, "all.") {
+		return s.resolveAccountImport(token)
+	}
 	if len(token) > maxImportSubscriptions*44-1 {
 		return "", nil, ErrUnauthorized
 	}

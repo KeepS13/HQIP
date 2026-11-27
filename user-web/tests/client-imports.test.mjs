@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clientImportScheme, importClients, selectedImportSubscription, subscriptionImportURL } from "../src/portal/client-imports.ts";
+import { availableImportSubscriptions, clientImportScheme, importClients, selectedImportSubscription, subscriptionImportURL } from "../src/portal/client-imports.ts";
 
 test("format and download links retain subscription identity and unrelated query values", () => {
   const base = "https://example.test/usub/token_A-123?source=%E6%B5%8B%E8%AF%95&format=old&download=1";
@@ -74,7 +74,14 @@ test("subscription selection never substitutes another user's intended package",
   assert.equal(selectedImportSubscription([active, other], null), null);
   assert.equal(selectedImportSubscription([expired], null), null);
   assert.equal(selectedImportSubscription([], null), null);
-  assert.equal(selectedImportSubscription([active, expired], "expired"), expired);
+  assert.equal(selectedImportSubscription([active, expired], "expired"), null);
   assert.equal(selectedImportSubscription([active, expired], "missing"), null);
   assert.equal(selectedImportSubscription([active], ""), null);
+});
+
+test("the picker omits every unavailable subscription while keeping all as the default scope", () => {
+  const items = ["active", "expired", "revoked", "disabled", "exhausted", "pending"].map((status) => ({ id: status, status }));
+  assert.deepEqual(availableImportSubscriptions(items).map((item) => item.id), ["active"]);
+  assert.deepEqual(availableImportSubscriptions([]), []);
+  for (const item of items.slice(1)) assert.equal(selectedImportSubscription(items, item.id), null);
 });

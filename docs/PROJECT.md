@@ -1,5 +1,11 @@
 # HQIP 项目地图
 
+订阅入口与套餐应用（2026-11-28，本地实现）：默认账户链接固定，空账户也可复制，动态读取当前订阅；选择器仅列可用单份。套餐新增「立刻应用」，更新现存实例节点目标并协调在线限制；NAT 质量探针区分本机源地址与公网报告身份。契约见 [import-links v2](contracts/subscription-import-links.md)、[template-apply v2](contracts/subscription-template-apply.md)，验证及未发布范围见 [本轮审查](reviews/2026-11-28-subscriptions-nat-quality.md)。
+
+本轮文件预算：原 869 行套餐页面拆分为列表、草稿编辑、选点和商城预览；`TemplateEditor.tsx` 380 行作为小于 400 行的例外，保留同一草稿的校验、影响预览与保存交互，避免跨文件分散状态所有权。其余新增生产文件均不超过 300 行。上游固定版本 `ipquality/ip.sh` 保留供应商脚本结构，以补丁与摘要追踪修改。
+
+节点上限修正：支付创建／结果收尾从订单读取模块拆出，商城库存查询从分配模块拆出，相关 Go 文件均不超过300行。`user-web/src/portal/Commerce.tsx` 344行保留为小于400行的例外，沿用同页商城与购买对话框共享状态，只修正节点数量展示。
+
 NAT 节点部署（2026-11-27，已发布 `216c48e`）：自动分离公网身份和验证过的本机监听地址，支持首次部署、重新部署与兼容 Agent 更新。xus1-v 三阶段验收通过，当前 17/17 节点健康；独立网络质量探针尚不支持 NAT，详见 [生产验收](deployment/2026-11-27-nat-node-deployment.md) 和 [网络契约](contracts/node-network.md)。完整发布客户端序号为 `5000024`。
 
 Clash DNS 与网站恢复（2026-11-27，已发布 `339286d`）：`routing` 修复 HY2 / VLESS 节点引导解析，海外 DoH 经节点；Clash、sing-box、待开通配置及 HQIP 原生官方站点名单统一保留官网、后台和验证码直连。正式客户端为 `1.0.0 / 5000023`。行为边界见 [导入契约](contracts/subscription-import-links.md)，实测见 [验收记录](reviews/2026-11-26-clash-dns-recovery.md)，CI、备份及公网结果见 [发布记录](deployment/2026-11-27-client-compatibility.md)。
@@ -44,7 +50,8 @@ Clash DNS 与网站恢复（2026-11-27，已发布 `339286d`）：`routing` 修�
 | traffic-billing | store、model、runtime billing | 固定点倍率与幂等累计报告 |
 | client-presentation | internal/client、internal/clientbridge、desktop、godot-client、native、user-web | 用户余额与原始链路统计；[client-runtime.commands / updates v1](contracts/client-runtime.md) |
 | routing | internal/rules；internal/control；internal/client；internal/winclient | [大陆直连策略与兼容验证](mainland-routing.md)：统一域名/IP/DNS 分流，旧订阅在导出时应用，节点 URI 的路由由客户端管理 |
-| subscription-admission / 第三方导入 | internal/store/portal_import_links.go、internal/control/portal_import_export.go、user-web | [subscription-admission.import-links v1](contracts/subscription-import-links.md)：默认合并复制、单份复制与凭据轮换 |
+| subscription-admission / 第三方导入 | internal/store/portal_account_import.go、portal_import_links.go、internal/control/portal_import_export.go、user-web | [subscription-admission.import-links v2](contracts/subscription-import-links.md)：固定账户入口、单份复制与凭据轮换 |
+| subscription-admission / 套餐应用 | internal/store/subscription_template_apply.go、internal/control、admin-web | [template-apply v2](contracts/subscription-template-apply.md)：已有实例扩缩容、缺额回执与即时准入校验 |
 | subscription-admission / 管理员赠送 | internal/store/subscription_grants.go、internal/control/subscriptions.go、admin-web/src/pages/GrantSubscription.tsx | [subscription-admission.manual-grant v1](interfaces.md)：提交后读取结果、原请求恢复、明确拒绝后重新确认 |
 | subscription-renewals | internal/store/subscription_renewals.go、subscription_periods.go；internal/control；user-web、admin-web | [按周期续费](subscription-renewals.md)：原订阅延期、周期账本、幂等付款；[node-quota v1](contracts/node-quota.md) 的 periodId 扩展隔离跨期节点预算 |
 | subscription-admission / 人工开通 | internal/store/subscription_activation.go；internal/control/portal_import_pending.go；admin-web、user-web | [activation v1](subscription-activation.md)：空节点购买、待开通链接、首次分配节点起算；周期 schema 2 |

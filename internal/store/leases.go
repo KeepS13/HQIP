@@ -80,7 +80,11 @@ func activeCredentialSession(tx *sql.Tx, user, subscription, scope string, now t
 	var n int
 	var err error
 	if scope == "subscription" {
-		err = tx.QueryRow("SELECT COUNT(*) FROM portal_subscriptions WHERE id=? AND user_id=? AND subscription_hash!='' AND revoked=0", subscription, user).Scan(&n)
+		// Either import scope may own third-party credentials. Account URLs do
+		// not create single-subscription URLs as a side effect. Revocation deletes
+		// passwords and marks leases atomically, so old credentials cannot regain
+		// admission merely because the other import scope remains enabled.
+		err = tx.QueryRow("SELECT COUNT(*) FROM portal_subscriptions WHERE id=? AND user_id=? AND revoked=0 AND (subscription_hash!='' OR EXISTS (SELECT 1 FROM metadata WHERE key=? AND value!=''))", subscription, user, accountImportKey+user).Scan(&n)
 	} else {
 		err = tx.QueryRow("SELECT COUNT(*) FROM portal_sessions WHERE id=? AND user_id=? AND kind='native' AND revoked=0 AND expires>? AND selected_subscription_id=?", scope, user, now.Unix(), subscription).Scan(&n)
 	}

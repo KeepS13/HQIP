@@ -13,6 +13,8 @@
 | `GET/POST /api/v1/subscription-templates` | 管理员列出或创建模板 |
 | `PUT /api/v1/subscription-templates/{id}` | 管理员更新模板并提交 `expectedRevision` |
 | `POST /api/v1/subscription-templates/{id}/preview` | 预览现有实例和连接影响 |
+| `POST /api/v1/subscription-templates/{id}/apply` | 管理员提交 `expectedRevision`，将已保存配置及每份节点数应用到现有实例，返回应用数和缺额；见 [template-apply v2](contracts/subscription-template-apply.md) |
+| `POST /api/v1/subscription-import-links/prepare` | 管理员显式为全部用户补齐新固定账户链接，保留旧链接与现有账户链接，仅返回用户数／新建数／已有数；见 [导入链接](contracts/subscription-import-links.md) |
 | `GET /api/v1/subscription-requests` | 管理员只读查看历史申请；旧审批写接口返回 410 |
 | `GET/POST /api/v1/users/{id}/subscriptions` | 管理员查看或分配实例 |
 | `DELETE /api/v1/users/{id}/subscriptions/{subscriptionId}` | 移除单个实例 |
@@ -31,13 +33,13 @@
 | `GET /api/v1/user/subscriptions/{id}` | 查看单份详情与允许节点 |
 | `POST /api/v1/user/subscriptions/{id}/import-link[/rotate\|/revoke]` | 管理该实例的第三方导入入口 |
 | `GET /api/v1/user/subscriptions/{id}/import-link` | 只读取得单份链接，不生成节点配置 |
-| `GET/POST /api/v1/user/import-link` | 读取／幂等准备当前全部有效订阅的合并链接 |
+| `GET/POST /api/v1/user/import-link` | 读取／幂等准备固定账户链接，无套餐仍可准备；每次导出加载当前有效订阅 |
 | `POST /api/v1/user/import-link/rotate`、`POST /api/v1/user/import-link/revoke` | 原子轮换／撤销账户下全部第三方导入链接及节点凭据 |
 | `/api/v3/client/*` | Windows 客户端授权、同步、订阅选择、状态和连接收尾 |
 | `GET /usub/{token}` | 无浏览器会话的第三方订阅；默认或 `format=clash` 返回 Clash YAML，`format=v2ray` 返回 Base64 节点列表，`format=singbox` 返回完整 sing-box JSON |
 | `GET /usub/{token}?format=…&download=1` | 相同授权及响应内容，成功时附加 `Content-Disposition: attachment`，按格式下载 `.yaml`、`.txt` 或 `.json` |
 
-导入链接接口返回 `{url: string}`；缺失或无有效订阅时 GET 返回空字符串，不产生写入。合并配置使用既有 `/usub/{token}` 格式入口，逐份保留额度；合并链接是当前订阅集合的快照。鉴权、轮换与在途响应保护见 [subscription-admission.import-links v1](contracts/subscription-import-links.md)。
+导入链接接口返回 `{url: string}`；账户入口未准备或已撤销时 GET 返回空字符串，不产生写入；已有固定入口不随套餐变化。默认 `/usub/all.{userId}.{secret}` 动态加载有效成员，无可用套餐返回空配置，单份与旧快照兼容。鉴权、轮换与在途响应保护见 [subscription-admission.import-links v2](contracts/subscription-import-links.md)。
 
 手动分配契约 `subscription-admission.manual-grant v1`：`POST /api/v1/users/{id}/subscriptions` 提交 `{templateId,templateRevision,expectedRevision,requestId}`，其中 `expectedRevision` 是用户版本，`requestId` 为 8–128 字节且不含 CR/LF/NUL。管理员界面提交其确认快照的版本；历史内部调用保留负数用户版本跳过检查的兼容行为。按用户与 `requestId` 幂等，重试必须沿用原模板、请求标识及版本；已提交结果的查找先于版本检查，重复请求返回同一个 `UserSubscription`。换模板必须先确认原请求结果，不能把原请求标识复用于另一模板。一次新分配在事务内创建订阅、节点分配、用量账本、首周期和 `subscription.assigned` 审计，成功重放不重复写审计。
 
@@ -81,7 +83,7 @@ Agent `hourly-usage-v1` 能力增加累计 `hours`、覆盖起点 `hourlySince`�
 
 `GET /api/v1/nodes/{id}/delete-preview` 的 `subscriptionTemplates` 数组列出引用该节点的模板，字段为 `id,name,defaultNode,enabled,listed`；`userSubscriptions` 数组列出未到期、未撤销的用户实例引用，字段为 `id,userId,email,templateId,templateName`，包括停用、耗尽及套餐外手动分配的实例。存在任意引用时，`DELETE /api/v1/nodes/{id}` 返回 HTTP 409、`code: NODE_REFERENCED_BY_SUBSCRIPTIONS` 和这两个数组；不会取消任务、改变授权或停止节点。须先在模板或用户详情解除全部引用，再提交节点删除；提交事务重新校验引用。
 
-单份订阅的节点 `GET` 返回 `{subscription,nodes}`；候选字段为 `id,name,publicIp,domain,inTemplate,selected,selectable,reason`。`PATCH` 必填 `{nodeIds: string[],expectedRevision: number}`，数组不能省略或为 null，不可重复，最多 1000 个，数量必须等于该份订阅已保存的 `nodesPerSubscription`。以实例的分配目标为准，不使用套餐后来修改的默认数量，也不以缺额时的当前节点列表长度为准；不能通过清空、少选或多选改变目标数量。保存成功返回更新后的 `UserSubscription`，`nodesPerSubscription` 保持不变；节点集合未变化（包括仅调整顺序）时不增加版本或审计。无效输入或数量不符返回 400，用户与订阅不匹配返回 404，到期、撤销、陈旧版本或候选失效/被占用返回 409；管理员会话和 CSRF 校验沿用其他订阅写接口。节点变更与旧节点租约撤销、用户及实例版本递增、`subscription.nodes_updated` 审计在同一事务提交，失败全部回滚。流量、待结算预留、计费周期、到期时间及其他套餐权益保持不变；旧节点迟到报告继续结算，新节点继续累计在同一订阅和所属周期内，累计报告重放不重复扣费。
+单份订阅的节点 `GET` 返回 `{subscription,nodes}`；候选字段为 `id,name,publicIp,domain,inTemplate,selected,selectable,reason`。`PATCH` 必填 `{nodeIds: string[],expectedRevision: number}`，数组不能省略或为 null，不可重复，最多 1000 个，数量必须等于该份订阅已保存的 `nodesPerSubscription`。以实例的分配目标为准，不使用套餐后来修改的默认数量，也不以缺额时的当前节点列表长度为准；不能通过清空、少选或多选改变目标数量。自动订阅的新建／应用目标为配置上限与已选池大小的较小值，例如套餐配置10、选3个，实例保存3；套餐本身继续保存10。空池定制数量保持人工开通规则。保存成功返回更新后的 `UserSubscription`，`nodesPerSubscription` 保持不变；节点集合未变化（包括仅调整顺序）时不增加版本或审计。无效输入或数量不符返回 400，用户与订阅不匹配返回 404，到期、撤销、陈旧版本或候选失效/被占用返回 409；管理员会话和 CSRF 校验沿用其他订阅写接口。节点变更与旧节点租约撤销、用户及实例版本递增、`subscription.nodes_updated` 审计在同一事务提交，失败全部回滚。流量、待结算预留、计费周期、到期时间及其他套餐权益保持不变；旧节点迟到报告继续结算，新节点继续累计在同一订阅和所属周期内，累计报告重放不重复扣费。
 
 ### 节点公网 IP 切换
 

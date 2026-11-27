@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS subscription_provisioning(subscription_id TEXT PRIMAR
 // pool always awaits an administrator, even if the template now has nodes. An
 // automatic order with depleted inventory must still fail as out of stock.
 func initialSubscriptionAllocation(tx *sql.Tx, user, key string, p model.SubscriptionTemplate, now time.Time) (int, []string, bool, error) {
-	target, manual := p.NodesPerSubscription, len(p.NodeIDs) == 0
+	target, manual := subscriptionNodeTarget(p), len(p.NodeIDs) == 0
 	if !strings.HasPrefix(key, "payment:") {
 		if manual {
 			return target, []string{}, true, nil
@@ -39,7 +39,7 @@ func initialSubscriptionAllocation(tx *sql.Tx, user, key string, p model.Subscri
 		return 0, nil, false, err
 	}
 	normalizeSubscriptionTemplate(&snapshot)
-	target = snapshot.NodesPerSubscription
+	target = subscriptionNodeTarget(snapshot)
 	if len(snapshot.NodeIDs) == 0 {
 		return target, []string{}, true, nil
 	}

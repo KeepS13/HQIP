@@ -72,7 +72,7 @@ func (s *Server) portalYAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.portalImportProfile(user, subscriptions)
-	if errors.Is(err, errPortalActivationPending) {
+	if errors.Is(err, errPortalActivationPending) || len(subscriptions) == 0 && err == store.ErrEntitlement {
 		body, contentType, configErr := pendingPortalConfig(format, s.opts.PublicURL, s.opts.UserOrigin, s.opts.AdminOrigin)
 		if configErr != nil {
 			portalResult(w, nil, configErr)

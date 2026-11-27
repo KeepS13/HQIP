@@ -58,6 +58,11 @@ export function clientImportScheme(client: ImportClientID, url: string, name: st
 }
 
 export function selectedImportSubscription(subscriptions: readonly UserSubscription[], requested: string | null) {
-  // Missing parameter means all; invalid explicit IDs never widen access.
-  return requested === null ? null : subscriptions.find((item) => item.id === requested) || null;
+  // Only usable subscriptions may be selected. An expired explicit URL never
+  // silently falls back to another subscription or the account-wide scope.
+  return requested === null ? null : subscriptions.find((item) => item.id === requested && item.status === "active") || null;
+}
+
+export function availableImportSubscriptions(subscriptions: readonly UserSubscription[]) {
+  return subscriptions.filter((item) => item.status === "active");
 }

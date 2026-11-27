@@ -82,7 +82,7 @@ func (r *Runner) NetworkQuality(ctx context.Context, in Input, pin PinFunc) (jso
 		return nil, errors.New("检测返回了无效报告")
 	}
 	if result.Error != "" {
-		messages := map[string]string{"dependencies": "缺少检测依赖：需要 bash、curl、jq、dig、ip、timeout 和 systemd-run；安装后可重新检测", "source": "节点 IP 未绑定到本机，无法检测指定出口", "timeout": "网络质量检测超时，可稍后重新检测", "execution": "检测未生成报告，外部查询服务可能暂不可用", "invalid": "检测报告无效或出口 IP 不符", "sandbox": "无法创建受限检测进程", "platform": "系统缺少非特权 nobody 账户"}
+		messages := map[string]string{"dependencies": "缺少检测依赖：需要 bash、curl、jq、dig、ip、timeout 和 systemd-run；安装后可重新检测", "source": "无法确认节点的本机源地址及公网出口，请检查网卡、NAT 映射与出口查询连通性", "timeout": "网络质量检测超时，可稍后重新检测", "execution": "检测未生成报告，外部查询服务可能暂不可用", "invalid": "检测报告无效或出口 IP 不符", "sandbox": "无法创建受限检测进程", "platform": "系统缺少非特权 nobody 账户"}
 		if message, ok := messages[result.Error]; ok {
 			return nil, &QualityError{Message: message}
 		}

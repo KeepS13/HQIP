@@ -33,6 +33,8 @@ import type { CatalogSubscription, SubscriptionTemplate } from "./types";
 import "./commerce.css";
 
 function ProductFacts({ value }: { value: SubscriptionTemplate }) {
+  const configured = value.nodesPerSubscription ?? value.nodeIds.length;
+  const assigned = value.nodeIds.length ? Math.min(configured, value.nodeIds.length) : configured;
   return (
     <dl className="user-sub-facts">
       <div>
@@ -59,7 +61,7 @@ function ProductFacts({ value }: { value: SubscriptionTemplate }) {
       </div>
       <div>
         <dt>每份分配节点</dt>
-        <dd>{value.nodesPerSubscription ?? value.nodeIds.length} 个</dd>
+        <dd>{assigned} 个</dd>
       </div>
     </dl>
   );
