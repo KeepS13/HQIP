@@ -41,6 +41,13 @@ final uiStateProvider = Provider<AppState>((ref) {
             'nodeChoices',
             'updates',
             'autoStart',
+            'coreVersion',
+            'appliedConfigRevision',
+            'rulesVersion',
+            'lastSync',
+            'controlUnavailable',
+            'offlineUntil',
+            'connections',
           ])
             key: app.snapshot.raw[key],
         }),

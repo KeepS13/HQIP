@@ -79,6 +79,9 @@ class _NodePickerState extends ConsumerState<NodePicker> {
       groups.putIfAbsent(node.subscriptionId, () => []).add(node);
     }
     final results = objects(tests['results']);
+    final testPending = tests['pending'] == true;
+    final selectionBusy =
+        app.busy.contains('subscription') || app.snapshot.selectionPending;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -125,6 +128,53 @@ class _NodePickerState extends ConsumerState<NodePicker> {
               padding: EdgeInsets.zero,
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      key: const ValueKey('test-all-nodes'),
+                      onPressed:
+                          !app.ready ||
+                              app.busy.contains('testNodes') ||
+                              app.busy.contains('cancelTest') ||
+                              (!testPending &&
+                                  (selectionBusy ||
+                                      app.draft != null ||
+                                      !app.snapshot.choices.any(
+                                        (n) =>
+                                            n.ready &&
+                                            (app.snapshot
+                                                    .package(n.subscriptionId)
+                                                    ?.valid ??
+                                                false),
+                                      )))
+                          ? null
+                          : () => ref
+                                .read(sessionProvider.notifier)
+                                .command(
+                                  testPending ? 'cancelTest' : 'testNodes',
+                                ),
+                      icon: Icon(
+                        testPending ? Icons.stop_circle_outlined : Icons.speed,
+                        size: 18,
+                      ),
+                      label: Text(testPending ? '取消测试' : '测试全部节点延迟'),
+                    ),
+                    Text(
+                      '${app.snapshot.choices.length} 个可选节点',
+                      style: const TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '检测握手延迟，不会切换当前连接。',
+                    style: TextStyle(color: muted, fontSize: 12),
+                  ),
+                ),
                 if (choices.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 24),
@@ -147,12 +197,14 @@ class _NodePickerState extends ConsumerState<NodePicker> {
                         final selected = app.selected?.key == node.key;
                         final sub = app.snapshot.package(node.subscriptionId);
                         final available = node.ready && (sub?.valid ?? false);
-                        num? latency;
+                        Json? probe;
                         for (final item in results) {
-                          if (tests['subscriptionId'] == node.subscriptionId &&
-                              item['nodeId'] == node.id &&
-                              item['status'] == 'success') {
-                            latency = item['delayMs'] as num?;
+                          if (((tests['subscriptionId'] as String? ?? '')
+                                      .isEmpty ||
+                                  tests['subscriptionId'] ==
+                                      node.subscriptionId) &&
+                              item['nodeId'] == node.id) {
+                            probe = item;
                           }
                         }
                         return Padding(
@@ -166,7 +218,7 @@ class _NodePickerState extends ConsumerState<NodePicker> {
                               child: InkWell(
                                 key: ValueKey('node-${node.key}'),
                                 borderRadius: BorderRadius.circular(12),
-                                onTap: !available
+                                onTap: !available || selectionBusy
                                     ? null
                                     : () {
                                         final session = ref.read(
@@ -227,13 +279,12 @@ class _NodePickerState extends ConsumerState<NodePicker> {
                                                                 sub,
                                                               )
                                                             : '暂不可用')
-                                                      : latency == null
-                                                      ? '尚未检测延迟'
-                                                      : '${latency.toInt()} ms',
+                                                      : nodeProbeLabel(probe),
                                                   style: TextStyle(
                                                     color:
                                                         available &&
-                                                            latency != null
+                                                            probe?['status'] ==
+                                                                'success'
                                                         ? good
                                                         : muted,
                                                     fontSize: 12,
@@ -269,3 +320,16 @@ class _NodePickerState extends ConsumerState<NodePicker> {
     );
   }
 }
+
+String nodeProbeLabel(Json? probe) => switch (probe?['status']) {
+  'success' => '${number(probe?['delayMs']).toInt()} ms',
+  'waiting' => '等待测试',
+  'testing' => '测试中…',
+  'timeout' => '连接超时',
+  'failed' => '连接失败',
+  'unavailable' => '节点未就绪',
+  'direct_unavailable' => '直连不可用',
+  'certificate_error' => '证书验证失败',
+  'cancelled' => '已取消',
+  _ => '尚未检测延迟',
+};

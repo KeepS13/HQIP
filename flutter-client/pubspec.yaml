@@ -1,7 +1,7 @@
 name: hqip_preview
 description: HQIP Preview for Windows and Android.
 publish_to: none
-version: 0.1.0-preview.3+3
+version: 0.1.0-preview.4+4
 environment:
   sdk: ^3.14.0
 dependencies:

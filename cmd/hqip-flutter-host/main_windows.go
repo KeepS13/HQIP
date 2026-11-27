@@ -71,6 +71,7 @@ func run(dir, marker string, background bool) error {
 	}
 	base := filepath.Dir(executable)
 	root := filepath.Dir(filepath.Dir(base))
+	client.SetPreviewAccountProxyFallback(true)
 	if dir == "" {
 		dir = filepath.Join(os.Getenv("LOCALAPPDATA"), "HQIP", "FlutterPreview")
 	}
@@ -121,7 +122,7 @@ func run(dir, marker string, background bool) error {
 			_ = os.WriteFile(marker, []byte("ready"), 0600)
 		}
 	}
-	bridge := &clientbridge.Bridge{Controller: controller, OpenURL: winclient.OpenBrowser, AutoStart: func(enabled *bool) (bool, error) {
+	bridge := &clientbridge.Bridge{Controller: controller, OpenURL: winclient.OpenBrowser, LoginComplete: open, AutoStart: func(enabled *bool) (bool, error) {
 		return winclient.PreviewAutoStart(filepath.Join(root, "HQIP Preview.exe"), enabled)
 	}}
 	updater := client.NewFlutterUpdater(filepath.Join(dir, "updates"), "windows-amd64", controller.BundleUpdateSource, nil, func(path string, r flutterrelease.Release, e flutterrelease.Envelope) error {

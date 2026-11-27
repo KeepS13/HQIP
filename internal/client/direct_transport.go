@@ -36,23 +36,26 @@ func newDirectHTTPTransport() *http.Transport {
 		if config.ServerName == "" {
 			config.ServerName = host
 		}
-		addresses, err := lookupAccountIPs(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		candidates := interleaveAddresses(addresses, port)
-		return raceTLSAddresses(ctx, candidates, 250*time.Millisecond, func(ctx context.Context, address string) (net.Conn, error) {
-			conn, err := directAccountTCP(ctx, network, address)
+		direct := func(ctx context.Context) (net.Conn, error) {
+			addresses, err := lookupAccountIPs(ctx, host)
 			if err != nil {
 				return nil, err
 			}
-			secured := tls.Client(conn, config)
-			if err = secured.HandshakeContext(ctx); err != nil {
-				_ = conn.Close()
-				return nil, err
-			}
-			return secured, nil
-		})
+			candidates := interleaveAddresses(addresses, port)
+			return raceTLSAddresses(ctx, candidates, 250*time.Millisecond, func(ctx context.Context, address string) (net.Conn, error) {
+				conn, err := directAccountTCP(ctx, network, address)
+				if err != nil {
+					return nil, err
+				}
+				secured := tls.Client(conn, config)
+				if err = secured.HandshakeContext(ctx); err != nil {
+					_ = conn.Close()
+					return nil, err
+				}
+				return secured, nil
+			})
+		}
+		return dialAccountTLS(ctx, direct, accountTLSFallback(host, port, config), 2*time.Second)
 	}
 	return transport
 }

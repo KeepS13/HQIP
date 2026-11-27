@@ -62,6 +62,7 @@ public final class MainActivity extends FlutterActivity {
         ThreadPoolExecutor pool = method.equals("disconnect") || method.equals("cancelLogin") || method.equals("quitApp") ? urgent : commands;
         try { pool.execute(() -> {
             String response;
+            boolean loginComplete = false;
             try {
                 NativeHost host = NativeHost.get(this);
                 if (method.equals("connect")) {
@@ -74,6 +75,10 @@ public final class MainActivity extends FlutterActivity {
                     response = reply(request, null);
                 } else {
                     response = host.runtime.call(request.toString());
+                    if (method.equals("login")) {
+                        JSONObject state = new JSONObject(host.runtime.call("{\"id\":1,\"method\":\"state\"}"));
+                        loginComplete = state.getJSONObject("result").optBoolean("loggedIn");
+                    }
                     if (method.equals("disconnect") || method.equals("logout") ||
                         (method.equals("connect") && new JSONObject(response).has("error"))) {
                         stopService(new Intent(this, TunnelService.class));
@@ -81,8 +86,18 @@ public final class MainActivity extends FlutterActivity {
                 }
             } catch (Exception e) { response = reply(request, "操作未完成，请确认 VPN 授权及网络后重试"); }
             final String value = response;
+            final boolean returnFromLogin = loginComplete;
             ui.post(() -> {
-                if (!destroyed) { result.success(value); if (method.equals("quitApp")) finishAndRemoveTask(); }
+                if (!destroyed) {
+                    result.success(value);
+                    if (returnFromLogin) {
+                        // Reuse this task; never start VPN or request its permission here.
+                        try { startActivity(new Intent(this, MainActivity.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP)); }
+                        catch (RuntimeException ignored) { /* User can return manually if Android blocks foregrounding. */ }
+                    }
+                    if (method.equals("quitApp")) finishAndRemoveTask();
+                }
             });
         }); } catch (java.util.concurrent.RejectedExecutionException e) { result.success(reply(request, "操作较多，请稍后重试")); }
     }

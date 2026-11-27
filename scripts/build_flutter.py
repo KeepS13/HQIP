@@ -58,6 +58,8 @@ def build_windows(args, flutter, flags, public):
         # Only this script's generated staging tree is replaced, never installed state.
         shutil.rmtree(install)
     shutil.copytree(APP / 'build/windows/x64/runner/Release', payload)
+    write_json(install / 'install.json', dict(product='hqip-flutter', channel='preview',
+                                             version=META['version'], sequence=META['sequence']))
     env = dict(os.environ, GOOS='windows', GOARCH='amd64', CGO_ENABLED='0')
     for target, output, extra in [
         ('./cmd/hqip-flutter-host', payload / 'hqip-runtime.exe', ''),
@@ -83,7 +85,8 @@ def build_windows(args, flutter, flags, public):
         for p in sorted(payload.rglob('*')):
             if p.is_file(): archive.write(p, p.relative_to(payload).as_posix())
     run([args.iscc, '/DSourceRoot=' + str(install), '/DOutputRoot=' + str(DIST),
-         '/DProductVersion=' + META['version'], ROOT / 'packaging/flutter-preview.iss'])
+         '/DProductVersion=' + META['version'], '/DProductSequence=' + str(META['sequence']),
+         ROOT / 'packaging/flutter-preview.iss'])
     return package, DIST / 'HQIP-Preview-Windows-x64-Setup.exe', manifest
 
 

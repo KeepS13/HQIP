@@ -48,6 +48,7 @@ class Session extends Notifier<AppState> {
   bool _selecting = false;
   int _selectionRevision = 0;
   NodeChoice? _queued;
+  Json _loginParams = const {};
   @override
   AppState build() {
     _transport = ref.watch(transportProvider);
@@ -94,7 +95,13 @@ class Session extends Notifier<AppState> {
 
   Future<void> command(String method, [Json params = const {}]) async {
     if (state.busy.contains(method)) return;
-    if (method == 'connect' && (state.draft != null || _selecting)) return;
+    if (['connect', 'subscription'].contains(method) &&
+        (state.draft != null ||
+            _selecting ||
+            state.busy.contains('subscription'))) {
+      return;
+    }
+    if (method == 'login') _loginParams = Map.of(params);
     state = state.copy(busy: {...state.busy, method}, error: '');
     try {
       final response = await _transport.call(method, params);
@@ -111,14 +118,35 @@ class Session extends Notifier<AppState> {
         _accept(object(response['result']));
       }
     } catch (e) {
-      if (!_disposed) state = state.copy(error: _message(e));
+      // Login can save credentials before an initial profile sync fails. Fetch
+      // that state even while the browser has suspended normal UI polling.
+      if (method == 'login' && !_disposed) {
+        try {
+          final response = await _transport.call('state');
+          _accept(object(response['result']));
+        } catch (_) {}
+      }
+      if (!_disposed) {
+        var message = _message(e);
+        if (method == 'login' && !state.snapshot.loggedIn) {
+          message = message
+              .replaceAll('将自动重试', '请检查网络后重试')
+              .replaceAll('；登录状态已保留', '');
+        }
+        state = state.copy(error: message);
+      }
     } finally {
       if (!_disposed) state = state.copy(busy: {...state.busy}..remove(method));
     }
   }
 
+  Future<void> retryAccount() => state.snapshot.loggedIn
+      ? command('refresh')
+      : command('login', _loginParams);
+
   Future<void> select(NodeChoice choice) async {
     if (!choice.ready ||
+        state.busy.contains('subscription') ||
         !state.snapshot.loggedIn ||
         !(state.snapshot.package(choice.subscriptionId)?.valid ?? false)) {
       return;

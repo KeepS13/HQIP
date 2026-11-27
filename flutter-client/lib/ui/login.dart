@@ -57,7 +57,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               Text('登录 HQIP', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
               const Text(
-                '在浏览器中完成安全授权，返回即可连接。',
+                '从下方按钮打开浏览器，登录并确认授权后自动返回。',
                 style: TextStyle(color: muted, height: 1.7),
               ),
               const SizedBox(height: 24),
@@ -87,7 +87,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               if (waiting) ...[
                 const SizedBox(height: 8),
                 const Text(
-                  '授权完成后将自动返回连接页面。',
+                  '请在网页中点击“授权”。仅登录网站不会完成客户端授权。',
                   style: TextStyle(color: muted, fontSize: 12),
                 ),
                 TextButton(

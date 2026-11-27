@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../runtime/session.dart';
 import 'design.dart';
+import 'connection_options.dart';
+import 'account_sync.dart';
 import 'login.dart';
 import 'node_picker.dart';
 import 'presentation.dart';
@@ -59,6 +61,8 @@ class ConnectionPage extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         const TrafficPanel(),
+        const SizedBox(height: 12),
+        const AccountSync(),
       ],
     );
   }
@@ -162,7 +166,9 @@ class _ConnectionControl extends ConsumerWidget {
             child: InkWell(
               key: const ValueKey('node-selector'),
               borderRadius: BorderRadius.circular(12),
-              onTap: () => showNodePicker(context),
+              onTap: app.busy.contains('subscription') || state.selectionPending
+                  ? null
+                  : () => showNodePicker(context),
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Row(
@@ -211,7 +217,8 @@ class _ConnectionControl extends ConsumerWidget {
                 !app.ready ||
                     app.busy.contains('disconnect') ||
                     (!state.intent &&
-                        (selected == null ||
+                        (app.busy.contains('subscription') ||
+                            selected == null ||
                             !selected.ready ||
                             !(sub?.valid ?? false) ||
                             saving ||
@@ -230,26 +237,7 @@ class _ConnectionControl extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              StatusPill(
-                state.mode == 'global' ? '全局模式' : '规则模式',
-                icon: Icons.route_outlined,
-              ),
-              StatusPill(
-                (Theme.of(context).platform == TargetPlatform.android)
-                    ? 'VPN'
-                    : state.tun
-                    ? 'TUN 虚拟网卡'
-                    : '系统代理',
-                icon: (Theme.of(context).platform == TargetPlatform.android)
-                    ? Icons.vpn_lock_outlined
-                    : Icons.desktop_windows_outlined,
-              ),
-            ],
-          ),
+          const ConnectionOptions(),
           if (switching)
             Padding(
               padding: const EdgeInsets.only(top: 12),

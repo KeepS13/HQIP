@@ -13,6 +13,14 @@ class SubscriptionsPage extends ConsumerWidget {
     final app = ref.watch(uiStateProvider);
     final items = app.snapshot.subscriptions;
     final logged = app.snapshot.loggedIn;
+    final selectionBusy =
+        !app.ready ||
+        app.draft != null ||
+        app.snapshot.selectionPending ||
+        app.busy.contains('subscription') ||
+        app.busy.contains('node') ||
+        app.busy.contains('connect') ||
+        app.busy.contains('disconnect');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -40,7 +48,22 @@ class SubscriptionsPage extends ConsumerWidget {
                     width: bounds.maxWidth >= 680
                         ? (bounds.maxWidth - 16) / 2
                         : bounds.maxWidth,
-                    child: SubscriptionCard(subscription: item),
+                    child: SubscriptionCard(
+                      subscription: item,
+                      selected:
+                          item.id ==
+                          (app.draft?.subscriptionId ??
+                              app.snapshot.selectedSubscription),
+                      pending:
+                          app.snapshot.selectionPending &&
+                          item.id == app.snapshot.selectedSubscription,
+                      onSelect: selectionBusy
+                          ? null
+                          : () => ref.read(sessionProvider.notifier).command(
+                              'subscription',
+                              {'subscriptionId': item.id},
+                            ),
+                    ),
                   ),
               ],
             ),
@@ -52,6 +75,14 @@ class SubscriptionsPage extends ConsumerWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              OutlinedButton.icon(
+                onPressed: app.busy.contains('account')
+                    ? null
+                    : () =>
+                          ref.read(sessionProvider.notifier).command('account'),
+                icon: const Icon(Icons.manage_accounts_outlined, size: 18),
+                label: const Text('网页订阅中心'),
+              ),
               OutlinedButton.icon(
                 onPressed: () =>
                     ref.read(sessionProvider.notifier).command('shop'),

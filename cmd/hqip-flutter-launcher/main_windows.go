@@ -31,6 +31,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "--installer-inspect" {
+		return installerInspect(os.Args[2:])
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	if conn, err := previewhost.Dial(ctx); err == nil {

@@ -56,6 +56,12 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<bool>(sessionProvider.select((s) => s.snapshot.loggedIn), (
+      previous,
+      next,
+    ) {
+      if (previous == false && next && mounted) setState(() => _page = 0);
+    });
     final logged = ref.watch(
       sessionProvider.select((s) => s.snapshot.loggedIn),
     );
@@ -319,6 +325,18 @@ class _RuntimeError extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final error = ref.watch(sessionProvider.select((s) => s.error));
+    final loggedIn = ref.watch(
+      sessionProvider.select((s) => s.snapshot.loggedIn),
+    );
+    final canRetry = ref.watch(
+      sessionProvider.select(
+        (s) =>
+            s.ready &&
+            !s.snapshot.loginPending &&
+            !s.busy.contains('login') &&
+            !s.busy.contains('refresh'),
+      ),
+    );
     if (error.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -334,10 +352,11 @@ class _RuntimeError extends ConsumerWidget {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
             TextButton.icon(
-              onPressed: () =>
-                  ref.read(sessionProvider.notifier).command('refresh'),
+              onPressed: canRetry
+                  ? () => ref.read(sessionProvider.notifier).retryAccount()
+                  : null,
               icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('重试'),
+              label: Text(loggedIn ? '重新同步' : '重新登录'),
             ),
           ],
         ),

@@ -2,7 +2,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../runtime/session.dart';
+import '../runtime/models.dart';
+import 'account_sync.dart';
 import 'design.dart';
+import 'help.dart';
 import 'presentation.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -12,7 +15,13 @@ class SettingsPage extends ConsumerWidget {
     final app = ref.watch(uiStateProvider);
     final state = app.snapshot;
     final session = ref.read(sessionProvider.notifier);
-    final modeBusy = !app.ready || app.busy.contains('mode');
+    final modeBusy =
+        !app.ready ||
+        app.busy.contains('mode') ||
+        app.busy.contains('subscription') ||
+        app.draft != null ||
+        state.selectionPending ||
+        state.runState == 'connecting';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -103,6 +112,14 @@ class SettingsPage extends ConsumerWidget {
                 ),
               ),
               const Divider(height: 32),
+              if ((state.autoStart['error'] as String? ?? '').isNotEmpty)
+                Text(
+                  state.autoStart['error'] as String,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                  ),
+                ),
               const Text(
                 '关闭窗口时释放界面内存，连接与托盘继续运行。',
                 style: TextStyle(color: muted, fontSize: 12),
@@ -124,6 +141,8 @@ class SettingsPage extends ConsumerWidget {
             DetailRow('服务地址', state.server),
             if (state.loggedIn) ...[
               const SizedBox(height: 8),
+              const AccountSync(),
+              const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
                 child: OutlinedButton.icon(
@@ -141,6 +160,27 @@ class SettingsPage extends ConsumerWidget {
           icon: Icons.info_outline,
           children: [
             DetailRow('HQIP Preview', state.version),
+            DetailRow(
+              '连接内核',
+              (state.raw['coreVersion'] as String? ?? '').isEmpty
+                  ? '—'
+                  : 'sing-box ${state.raw['coreVersion']}',
+            ),
+            if (state.loggedIn)
+              DetailRow(
+                '配置 / 规则版本',
+                'v${number(state.raw['appliedConfigRevision']).toInt()} / v${number(state.raw['rulesVersion']).toInt()}',
+              ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const ValueKey('usage-help'),
+                onPressed: () => showUsageHelp(context),
+                icon: const Icon(Icons.help_outline, size: 18),
+                label: const Text('使用帮助'),
+              ),
+            ),
             const SizedBox(height: 8),
             const Text(
               '独立预览版，账户与设置单独保存，不影响已安装的正式客户端。',

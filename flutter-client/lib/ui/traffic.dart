@@ -32,6 +32,8 @@ class TrafficPanel extends ConsumerWidget {
             trailing: StatusPill(
               live
                   ? '实时'
+                  : connected && metrics['stale'] == true
+                  ? '数据已暂停'
                   : connected
                   ? '等待数据'
                   : '未连接',
@@ -98,6 +100,55 @@ class TrafficPanel extends ConsumerWidget {
             style: TextStyle(fontSize: 12, color: muted),
           ),
           const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, bounds) {
+              final columns =
+                  (bounds.maxWidth /
+                          (150 * MediaQuery.textScalerOf(context).scale(1)))
+                      .floor()
+                      .clamp(1, 3);
+              final width = (bounds.maxWidth - (columns - 1) * 16) / columns;
+              final details = <String, String>{
+                '累计上传': bytes(number(metrics['uploadBytes'])),
+                '累计下载': bytes(number(metrics['downloadBytes'])),
+                '应用连接': live
+                    ? '${number(metrics['applicationConnections']).toInt()}'
+                    : '—',
+                '内核内存': live && number(metrics['memoryBytes']) > 0
+                    ? bytes(number(metrics['memoryBytes']))
+                    : '—',
+                '连接时长': connectionDuration(metrics['connectedAt'], connected),
+              };
+              return Wrap(
+                spacing: 16,
+                runSpacing: 12,
+                children: [
+                  for (final entry in details.entries)
+                    SizedBox(
+                      width: width,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.key,
+                            style: const TextStyle(color: muted, fontSize: 12),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.value,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 16),
           const Divider(height: 1),
           const SizedBox(height: 12),
           Wrap(
@@ -116,7 +167,12 @@ class TrafficPanel extends ConsumerWidget {
                 style: const TextStyle(color: muted, fontSize: 12),
               ),
               TextButton(
-                onPressed: !connected || delayPending
+                onPressed:
+                    !connected ||
+                        delayPending ||
+                        app.draft != null ||
+                        app.snapshot.selectionPending ||
+                        app.busy.contains('subscription')
                     ? null
                     : () => ref.read(sessionProvider.notifier).command('delay'),
                 child: Text(delayPending ? '检测中…' : '检测延迟'),
@@ -129,7 +185,11 @@ class TrafficPanel extends ConsumerWidget {
                 )
               else
                 TextButton(
-                  onPressed: current == null || app.draft != null
+                  onPressed:
+                      current == null ||
+                          app.draft != null ||
+                          app.snapshot.selectionPending ||
+                          app.busy.contains('subscription')
                       ? null
                       : () => ref.read(sessionProvider.notifier).command(
                           'testNode',
@@ -166,6 +226,17 @@ class TrafficPanel extends ConsumerWidget {
       ),
     ],
   );
+}
+
+String connectionDuration(dynamic value, bool connected, {DateTime? now}) {
+  final started = value is String ? DateTime.tryParse(value) : null;
+  if (!connected || started == null) return '—';
+  final elapsed = (now ?? DateTime.now())
+      .difference(started)
+      .inSeconds
+      .clamp(0, 999999999);
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(elapsed ~/ 3600)}:${two(elapsed ~/ 60 % 60)}:${two(elapsed % 60)}';
 }
 
 class TrafficPainter extends CustomPainter {

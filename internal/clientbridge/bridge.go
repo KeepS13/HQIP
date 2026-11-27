@@ -37,6 +37,8 @@ type Bridge struct {
 	Mobile     bool
 	Update     func(string) (any, error)
 	AutoStart  func(*bool) (bool, error)
+	// Optional preview UI notification. Authentication never starts a VPN.
+	LoginComplete func()
 
 	// Capture and stamp under one lock; a later-delivered command reply must
 	// not roll back a newer poll. Never hold this lock during a command/network
@@ -138,7 +140,13 @@ func (b *Bridge) dispatch(r Request) (any, error) {
 		if p.Server == "" {
 			p.Server = client.DefaultServerURL
 		}
-		return true, b.Controller.LoginBrowser(p.Server, b.OpenURL)
+		err := b.Controller.LoginBrowser(p.Server, b.OpenURL)
+		// Credentials may be saved even when the initial profile sync fails.
+		// Bring the UI back in that case so it can show the recoverable error.
+		if b.LoginComplete != nil && b.Controller.View().LoggedIn {
+			b.LoginComplete()
+		}
+		return true, err
 	case "cancelLogin":
 		b.Controller.CancelLogin()
 	case "logout":

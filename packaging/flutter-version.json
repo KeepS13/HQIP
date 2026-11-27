@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0-preview.3",
-  "sequence": 3,
+  "version": "0.1.0-preview.4",
+  "sequence": 4,
   "channel": "preview",
   "flutter": "3.50.1",
   "flutterCommit": "ae9b586f34a8443573f82ef57c3bf914a908cbf7"
