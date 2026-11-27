@@ -1,6 +1,6 @@
 # HQIP 项目地图
 
-订阅入口与套餐应用（2026-11-28，本地实现）：默认账户链接固定，空账户也可复制，动态读取当前订阅；选择器仅列可用单份。套餐新增「立刻应用」，更新现存实例节点目标并协调在线限制；NAT 质量探针区分本机源地址与公网报告身份。契约见 [import-links v2](contracts/subscription-import-links.md)、[template-apply v2](contracts/subscription-template-apply.md)，验证及未发布范围见 [本轮审查](reviews/2026-11-28-subscriptions-nat-quality.md)。
+订阅入口与套餐应用（2026-11-28，已发布 `fa3b13e`）：410位用户的新固定账户链接已准备，旧链接保留原范围；空账户也可复制，动态读取当前订阅，选择器仅列可用单份。套餐新增「立刻应用」，节点数量可大于已选数，实际分配上限与候选池的较小值；NAT探针的xus1-v实机报告与图片均已生成。正式客户端为1.0.0／5000026，18/18节点健康。契约见 [import-links v2](contracts/subscription-import-links.md)、[template-apply v2](contracts/subscription-template-apply.md)，本地验证见 [审查](reviews/2026-11-28-subscriptions-nat-quality.md)，CI、备份及实机结果见 [发布记录](deployment/2026-11-28-subscriptions-nat-quality.md)。
 
 本轮文件预算：原 869 行套餐页面拆分为列表、草稿编辑、选点和商城预览；`TemplateEditor.tsx` 380 行作为小于 400 行的例外，保留同一草稿的校验、影响预览与保存交互，避免跨文件分散状态所有权。其余新增生产文件均不超过 300 行。上游固定版本 `ipquality/ip.sh` 保留供应商脚本结构，以补丁与摘要追踪修改。
 
