@@ -42,7 +42,7 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 	// PostgreSQL extended protocol accepts one statement per Parse. Execute
 	// schema statements individually instead of sending the whole migration
 	// script as one multi-command query.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema()+";"+postgresSubscriptionRenewalSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema()+";"+postgresSubscriptionRenewalSchema()+";"+postgresAnnouncementsSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.ExecContext(ctx, statement); err != nil {
 				return err
@@ -68,6 +68,9 @@ func InitializePostgres(ctx context.Context, dsn string) error {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('subscription_renewals_version','2')"); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('announcements_version','1')"); err != nil {
 		return err
 	}
 	return tx.Commit()

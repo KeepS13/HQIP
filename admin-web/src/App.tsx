@@ -1,40 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import {
-  Activity,
-  ArrowRight,
-  BookOpen,
-  Info,
-  Eye,
-  EyeOff,
-  LayoutDashboard,
-  LoaderCircle,
-  LockKeyhole,
-  LogOut,
-  Menu,
-  Monitor,
-  Server,
-  ShieldCheck,
-  Wifi,
-  Globe2,
-  X,
-  UsersRound,
-  Package,
-  BellRing,
-  CreditCard,
-  ReceiptText,
-} from "lucide-react";
-import { api, setCSRF } from "./api";
-import {
-  Button,
-  ErrorNotice,
-  Field,
-  Loading,
-  Modal,
-  Notice,
-  ToastContext,
-} from "./components";
 import type { Session } from "./types";
+import { Megaphone } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Activity, BookOpen, Info, LayoutDashboard, LoaderCircle, LogOut, Menu, Server, ShieldCheck, Globe2, X, UsersRound, Package, BellRing, CreditCard, ReceiptText } from "lucide-react";
+import { api, setCSRF } from "./api";
+import { Button, ErrorNotice, Loading, Modal, ToastContext } from "./components";
 import { Dashboard, Guide, NotFound } from "./pages/Dashboard";
 import { Nodes, NodePage } from "./pages/Nodes";
 import { Users, UserPage } from "./pages/Accounts";
@@ -50,251 +20,10 @@ import { TrafficBilling } from "./pages/TrafficBilling";
 import { Orders, OrderDetail } from "./pages/Orders";
 import { HostResources } from "./HostResources";
 import { AlertUnreadBadge } from "./AlertUnread";
-
-function Brand() {
-  return (
-    <div className="brand">
-      <span className="brand-symbol">
-        <span>H</span>
-        <i />
-      </span>
-      <div>
-        <strong>
-          HQIP<span> / </span>
-        </strong>
-        <small>PRIVATE NETWORK</small>
-      </div>
-    </div>
-  );
-}
-function PasswordForm({
-  onDone,
-  forced = false,
-}: {
-  onDone: () => Promise<void>;
-  forced?: boolean;
-}) {
-  const [current, setCurrent] = useState(""),
-    [password, setPassword] = useState(""),
-    [confirm, setConfirm] = useState(""),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (password !== confirm) {
-      setError("两次输入的新密码不一致");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await api("/password", "POST", {
-        currentPassword: current,
-        newPassword: password,
-      });
-      await onDone();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <form className="form-stack" onSubmit={submit}>
-      {forced && (
-        <Notice>首次登录需要设置新的管理密码，完成后即可进入控制台。</Notice>
-      )}
-      <Field label="当前密码">
-        <input
-          type="password"
-          autoComplete="current-password"
-          required
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          placeholder="输入当前管理密码"
-        />
-      </Field>
-      <Field label="新密码" hint="至少 12 位，建议使用字母、数字与符号的组合。">
-        <input
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={12}
-          maxLength={128}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="设置新的管理密码"
-        />
-      </Field>
-      <Field label="确认新密码">
-        <input
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={12}
-          maxLength={128}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          placeholder="再次输入新密码"
-        />
-      </Field>
-      <ErrorNotice message={error} />
-      <Button
-        type="submit"
-        busy={busy}
-        icon={LockKeyhole}
-        className="full-width"
-      >
-        {forced ? "保存并进入控制台" : "保存新密码"}
-      </Button>
-    </form>
-  );
-}
-function Login({
-  session,
-  onSession,
-}: {
-  session: Session;
-  onSession: (session: Session) => void;
-}) {
-  const [username, setUsername] = useState("admin"),
-    [password, setPassword] = useState(""),
-    [visible, setVisible] = useState(false),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  async function login(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const value = await api<Session>("/login", "POST", {
-        username,
-        password,
-      });
-      setCSRF(value.csrfToken || "");
-      onSession(value);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="login-page">
-      <div className="login-art">
-        <Brand />
-        <div className="login-art-copy">
-          <span className="eyebrow">YOUR NETWORK, IN YOUR HANDS</span>
-          <h1>
-            连接世界。
-            <br />
-            <span>从自己的网络开始。</span>
-          </h1>
-          <p>部署节点，连接设备，让每一份流量清晰可见。</p>
-        </div>
-        <div className="network-art" aria-hidden="true">
-          <div className="orbit orbit-1" />
-          <div className="orbit orbit-2" />
-          <div className="orbit orbit-3" />
-          <div className="network-center">
-            <ShieldCheck size={45} strokeWidth={1.3} />
-          </div>
-          <span className="orbit-node node-a">
-            <Server size={21} />
-          </span>
-          <span className="orbit-node node-b">
-            <Monitor size={21} />
-          </span>
-          <span className="orbit-node node-c">
-            <Wifi size={21} />
-          </span>
-          <span className="network-label">ENCRYPTED CONNECTION</span>
-        </div>
-        <div className="login-art-footer">
-          <span className="live-dot" /> 为私人网络而设计{" "}
-          <span>HYSTERIA 2 · TLS</span>
-        </div>
-      </div>
-      <main className="login-main">
-        <div className="login-mobile-brand">
-          <Brand />
-        </div>
-        <div className="login-card">
-          <span className="login-icon">
-            <LockKeyhole size={23} />
-          </span>
-          <h2>
-            {session.mustChangePassword ? "设置新的管理密码" : "欢迎回来"}
-          </h2>
-          <p>
-            {session.mustChangePassword
-              ? "为你的私人网络设置一道新的保护。"
-              : "登录 HQIP，查看你的网络运行状态。"}
-          </p>
-          {session.mustChangePassword ? (
-            <PasswordForm
-              forced
-              onDone={async () => {
-                const value = await api<Session>("/session");
-                setCSRF(value.csrfToken || "");
-                onSession(value);
-              }}
-            />
-          ) : (
-            <form className="form-stack" onSubmit={login}>
-              <Field label="管理员账号">
-                <input
-                  value={username}
-                  autoComplete="username"
-                  required
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="输入管理员账号"
-                />
-              </Field>
-              <Field label="密码">
-                <div className="password-input">
-                  <input
-                    value={password}
-                    type={visible ? "text" : "password"}
-                    autoComplete="current-password"
-                    required
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="输入管理密码"
-                  />
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={visible ? "隐藏密码" : "显示密码"}
-                    onClick={() => setVisible(!visible)}
-                  >
-                    {visible ? <EyeOff size={17} /> : <Eye size={17} />}
-                  </button>
-                </div>
-              </Field>
-              <ErrorNotice message={error} />
-              <Button
-                busy={busy}
-                type="submit"
-                icon={ArrowRight}
-                className="full-width"
-              >
-                登录控制台
-              </Button>
-            </form>
-          )}
-          <div className="login-note">
-            <ShieldCheck size={14} />
-            仅限管理员访问 · 用户请前往网站首页
-          </div>
-        </div>
-        <div className="login-footer">
-          HQIP CONSOLE <span>个人专属，始终可控。</span>
-        </div>
-      </main>
-    </div>
-  );
-}
-
+import { Brand } from "./Brand";
+import { Login } from "./Login";
+import { PasswordForm } from "./PasswordForm";
+import { Announcements } from "./pages/Announcements";
 export default function App() {
   const [session, setSession] = useState<Session | null>(null),
     [error, setError] = useState(""),
@@ -364,6 +93,7 @@ export default function App() {
     "/traffic-billing": "流量计费",
     "/turnstile": "注册与安全验证",
     "/notifications": "预警中心",
+    "/announcements": "用户公告",
     "/operation-logs": "操作日志",
     "/guide": "使用指南",
   };
@@ -425,6 +155,7 @@ export default function App() {
                 <span>预警中心</span>
                 <AlertUnreadBadge />
               </NavLink>
+              <NavLink to="/announcements"><Megaphone size={19} /><span>用户公告</span></NavLink>
             </nav>
             <div className="nav-caption nav-caption-second">系统设置</div>
             <nav>
@@ -477,7 +208,7 @@ export default function App() {
             </div>
             <div className="topbar-right">
               <span className="update-label">
-                <Activity size={13} /> {location.pathname === "/operation-logs" ? "手动刷新" : "每 5 秒刷新"}
+                <Activity size={13} /> {["/operation-logs", "/announcements"].includes(location.pathname) ? "手动刷新" : "每 5 秒刷新"}
               </span>
               <span className="topbar-divider" />
               <button
@@ -531,6 +262,7 @@ export default function App() {
               <Route path="/traffic-billing" element={<TrafficBilling />} />
               <Route path="/turnstile" element={<TurnstileSettingsPage />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/announcements" element={<Announcements />} />
               <Route path="/operation-logs" element={<OperationLogs />} />
               <Route path="/devices/*" element={<Navigate to="/users" replace />} />
               <Route path="/guide" element={<Guide />} />

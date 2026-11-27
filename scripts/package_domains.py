@@ -84,6 +84,7 @@ def package_release(root, sha, previous_sha=None):
     manifest['nodeQuotaVersion'] = nodes.get('nodeQuotaVersion', 0)
     manifest['connectionSlotsVersion'] = nodes.get('connectionSlotsVersion', 0)
     manifest['subscriptionRenewalsVersion'] = 2
+    manifest['announcementsVersion'] = 1
     manifest['clientUpdatesVersion'] = 1
     if previous_sha:
         manifest['previousSourceSHA'] = previous_sha  # Deployment guard, never a source of files.

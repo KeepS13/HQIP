@@ -223,6 +223,8 @@ def upgrade(release,state,defer_protection=False):
  billing_env=prepare_billing(sys.modules[__name__],manifest)
  from subscription_renewal_deployment import prepare as prepare_renewals, migrate as migrate_renewals
  renewal_env=prepare_renewals(sys.modules[__name__],manifest)
+ from announcements_deployment import prepare as prepare_announcements, migrate as migrate_announcements
+ announcements_env=prepare_announcements(sys.modules[__name__],manifest)
  if SITE.is_symlink() or UNIT.is_symlink():raise ValueError('Unexpected configuration symlink')
  state.mkdir(mode=0o700,exist_ok=False)
  shutil.copyfile(SITE,state/'nginx.before.conf');shutil.copyfile(UNIT,state/'unit.before.service')
@@ -246,6 +248,7 @@ def upgrade(release,state,defer_protection=False):
   migrate_offline(release,offline_env)
   migrate_billing(release,billing_env)
   migrate_operations(release,operations_env)
+  migrate_announcements(release,announcements_env)
   if logs_env is not None:
    info['operationLogsMigrationAttempted']=True
    (state/'domains-state.json').write_text(json.dumps(info,indent=2))

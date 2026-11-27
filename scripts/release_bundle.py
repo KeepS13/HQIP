@@ -13,7 +13,7 @@ NODE_ASSETS = ('agent-linux-amd64', 'agent-linux-arm64',
 RELEASE_SCRIPTS = ('upgrade_control.py', 'upgrade_domains.py', 'release_bundle.py', 'client_bundle.py',
                    'fresh_deploy.py', 'prepare_storage.py', 'restore_postgres.py', 'install_ci_release.py',
                    'operations_deployment.py', 'upgrade_node_agent.py', 'upgrade_node_admission.py',
-                   'automatic_backup.py', 'commercial_protection.py', 'offline_deployment.py', 'traffic_billing_deployment.py', 'subscription_renewal_deployment.py', 'render_domains.py')
+                   'automatic_backup.py', 'commercial_protection.py', 'offline_deployment.py', 'traffic_billing_deployment.py', 'subscription_renewal_deployment.py', 'announcements_deployment.py', 'render_domains.py')
 PROTECTION_FILES = {'scripts/automatic_backup.py', 'scripts/commercial_protection.py', 'scripts/render_domains.py',
                     'deploy/hqip-backup.service', 'deploy/hqip-backup.timer',
                     'deploy/hqip-backup-retry.service', 'deploy/hqip-backup-retry.timer'}
@@ -58,6 +58,11 @@ def validate_manifest(manifest, *, allow_legacy=False):
     if type(recovery) is not int or recovery not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require postgresRecoveryVersion 1')
     required = REQUIRED if recovery == 1 else REQUIRED - {'scripts/restore_postgres.py'}
+    announcements = manifest.get('announcementsVersion', 0)
+    if type(announcements) is not int or announcements not in (0, 1):
+        raise ValueError('Unsupported announcements capability')
+    if announcements == 0:
+        required = required - {'scripts/announcements_deployment.py'}
     updates = manifest.get('clientUpdatesVersion', 0)
     if type(updates) is not int or updates not in ((0, 1) if allow_legacy else (1,)):
         raise ValueError('New releases require clientUpdatesVersion 1')

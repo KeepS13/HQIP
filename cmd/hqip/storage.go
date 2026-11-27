@@ -64,7 +64,11 @@ func storageInfo(args []string) error {
 	if err = s.DB.QueryRow("SELECT COUNT(*) FROM metadata WHERE key='connection_slots_version' AND value='1'").Scan(&connectionSlotsVersion); err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"connectionSlotsVersion": connectionSlotsVersion, "nodeQuotaVersion": nodeQuotaVersion, "backend": backend, "schemaVersion": version, "postgresSchemaVersion": pgVersion, "serverBillingVersion": 2, "paymentsVersion": 1, "subscriptionAllocationsVersion": 1, "subscriptionRenewalsVersion": 2, "operationsVersion": 1, "operationLogsVersion": 1, "offlineAdmissionVersion": 1, "trafficBillingVersion": 1, "vlessRealityVersion": realityVersion, "paymentsRequired": paymentOrders > 0 || paymentEnabled != 0, "masterSHA256": hex.EncodeToString(h[:])})
+	var announcementsVersion int
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM metadata WHERE key='announcements_version' AND value='1'").Scan(&announcementsVersion); err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"announcementsVersion": announcementsVersion, "connectionSlotsVersion": connectionSlotsVersion, "nodeQuotaVersion": nodeQuotaVersion, "backend": backend, "schemaVersion": version, "postgresSchemaVersion": pgVersion, "serverBillingVersion": 2, "paymentsVersion": 1, "subscriptionAllocationsVersion": 1, "subscriptionRenewalsVersion": 2, "operationsVersion": 1, "operationLogsVersion": 1, "offlineAdmissionVersion": 1, "trafficBillingVersion": 1, "vlessRealityVersion": realityVersion, "paymentsRequired": paymentOrders > 0 || paymentEnabled != 0, "masterSHA256": hex.EncodeToString(h[:])})
 }
 
 func migrateSubscriptionRenewals(args []string) error {

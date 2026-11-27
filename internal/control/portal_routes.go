@@ -6,6 +6,8 @@ import "net/http"
 func (s *Server) registerPortalAdmin(m *http.ServeMux) {
 	s.registerPaymentAdmin(m)
 	for pattern, handler := range map[string]http.HandlerFunc{
+		"GET /api/v1/announcements": s.adminAnnouncements, "POST /api/v1/announcements": s.adminAnnouncements,
+		"GET /api/v1/announcements/{id}": s.adminAnnouncement, "DELETE /api/v1/announcements/{id}": s.adminAnnouncement,
 		"POST /api/v1/subscription-import-links/prepare": s.prepareAccountImportLinks,
 		"POST /api/v1/subscription-templates/{id}/apply": s.applySubscriptionTemplate,
 		"GET /api/v1/settings/traffic-billing":           s.trafficBillingSettings, "PUT /api/v1/settings/traffic-billing": s.trafficBillingSettings,
@@ -39,7 +41,9 @@ func (s *Server) registerPortalPublic(m *http.ServeMux) {
 	m.HandleFunc("GET /downloads/HQIP-Windows-x64.zip", s.portalDownload)
 	m.HandleFunc("GET /downloads/{sha256}/HQIP-Windows-x64.zip", s.portalDownload)
 	for pattern, handler := range map[string]portalHandler{
-		"GET /api/v1/user/profile": s.portalProfile, "POST /api/v1/user/logout": s.portalLogout, "POST /api/v1/user/password": s.portalPassword,
+		"GET /api/v1/user/announcements":                   s.userAnnouncements,
+		"POST /api/v1/user/announcements/{id}/acknowledge": s.acknowledgeAnnouncement,
+		"GET /api/v1/user/profile":                         s.portalProfile, "POST /api/v1/user/logout": s.portalLogout, "POST /api/v1/user/password": s.portalPassword,
 		"GET /api/v1/user/catalog": s.userCatalog, "GET /api/v1/user/subscription-requests": s.userSubscriptionRequests,
 		"GET /api/v1/user/import-link": s.portalSubscription, "POST /api/v1/user/import-link": s.portalSubscription, "POST /api/v1/user/import-link/rotate": s.portalSubscription, "POST /api/v1/user/import-link/revoke": s.portalSubscription,
 		"GET /api/v1/user/subscriptions/{id}/import-link": s.portalSubscription,

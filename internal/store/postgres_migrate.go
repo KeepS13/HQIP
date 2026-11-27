@@ -120,7 +120,7 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	}
 	// pgx extended protocol parses one statement at a time; split the static
 	// schema script before executing it in the migration transaction.
-	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema()+";"+onlineIPSchema+";"+postgresSubscriptionRenewalSchema(), ";") {
+	for _, statement := range strings.Split(pgstore.Schema+";"+postgresPaymentSchema()+";"+postgresAllocationSchema()+";"+postgresOperationsSchema()+";"+postgresOperationLogsSchema()+";"+postgresOfflineSchema()+";"+postgresTrafficBillingSchema()+";"+onlineIPSchema+";"+postgresSubscriptionRenewalSchema()+";"+postgresAnnouncementsSchema(), ";") {
 		if statement = strings.TrimSpace(statement); statement != "" {
 			if _, err = tx.Exec(ctx, statement); err != nil {
 				return report, err
@@ -175,6 +175,9 @@ func MigratePostgres(ctx context.Context, sourceDir, targetDir, dsn string) (Mig
 	}
 	// Older snapshots have no operations tables. Their empty additive tables
 	// were created above, so mark them ready without changing existing data.
+	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('announcements_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
+		return report, err
+	}
 	if _, err = tx.Exec(ctx, "INSERT INTO metadata(key,value) VALUES('operations_schema_version','1') ON CONFLICT(key) DO NOTHING"); err != nil {
 		return report, err
 	}

@@ -1,0 +1,7 @@
+.announcement-content { min-width: 0; }
+.announcement-meta { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+.announcement-content h3 { font-size: 21px; line-height: 1.5; margin: 16px 0; overflow-wrap: anywhere; }
+.announcement-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; max-height: 48vh; overflow-y: auto; padding-right: 8px; }
+.announcement-hint { color: var(--muted); font-size: 12px; margin: 20px 0 0; }
+.announcement-load-error { position: fixed; z-index: 90; right: 20px; bottom: 20px; max-width: min(440px, calc(100vw - 40px)); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+@media (max-width: 520px) { .announcement-content + .modal-actions { flex-wrap: wrap; } .announcement-body { max-height: 42vh; } }

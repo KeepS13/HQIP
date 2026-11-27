@@ -92,6 +92,10 @@ func Open(dataDir, baseURL string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = EnsureAnnouncementsSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = EnsureNetworkQualitySchema(db); err != nil {
 		db.Close()
 		return nil, err
