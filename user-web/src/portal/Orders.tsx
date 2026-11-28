@@ -280,7 +280,7 @@ export function UserOrderDetail() {
           </h2>
           <p>
             {fulfilled
-              ? order.orderType === "renewal" ? "总到期时间已延长，本期流量不变，下一期开始时重置。原节点与导入链接继续使用。" : "前往订阅详情获取链接并查看开通状态。定制订阅由管理员分配节点并正式开通后开始计时。"
+              ? order.orderType === "renewal" ? "总到期时间已延长，本期流量不变，下一期开始时重置。更新原导入链接即可获取续费后的节点。" : "前往订阅详情获取链接并查看开通状态。定制订阅由管理员分配节点并正式开通后开始计时。"
               : paid
                 ? order.orderType === "renewal" ? "续费付款已确认，请查看处理结果，勿再次付款。" : "订阅从实际开通时开始计时，请勿再次付款。"
                 : order.status === "unknown"

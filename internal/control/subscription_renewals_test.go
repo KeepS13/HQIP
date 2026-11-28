@@ -121,4 +121,19 @@ func TestRenewalRoutesRequireOwnerCSRFAndReturnOriginalSubscription(t *testing.T
 	if err != nil || len(subs) != 1 || len(subs[0].Periods) != 2 {
 		t.Fatal(subs, err)
 	}
+	// Once the sole server actually expires, explain the shortage before a
+	// second order can reach the payment provider.
+	node, err := s.Store.Node(sub.NodeIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := s.Store.Now().Unix()
+	if _, err = s.Store.DB.Exec("INSERT INTO server_billing(server_id,epoch,started_at,anchor,expires_at) VALUES(?,?,?,?,?)", node.ServerID, "route-test", at-86400, at, at); err != nil {
+		t.Fatal(err)
+	}
+	body.RequestID, body.ExpectedSubscriptionRevision = "expired-node-checkout", subs[0].Revision
+	w = portalRequest(pub, "POST", "/api/v1/user/orders", body, cookie, userCSRF, s.opts.UserOrigin)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "可替换节点不足") || calls != 1 {
+		t.Fatal("missing shortage before dispatch", w.Code, w.Body.String(), calls)
+	}
 }

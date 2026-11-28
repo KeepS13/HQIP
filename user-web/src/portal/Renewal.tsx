@@ -54,13 +54,13 @@ function RenewalDialog({ value, onClose }: { value: UserSubscription; onClose: (
           <div><dt>续费天数</dt><dd>{draft.template.validityDays} 天</dd></div>
           <div><dt>每期流量</dt><dd>{draft.template.quotaBytes === null ? "不限量" : bytes(draft.template.quotaBytes)}</dd></div>
           {/* Renewal targets the instance, never the template's candidate node pool. */}
-          <div><dt>保留原节点</dt><dd>{detail.data?.nodes.map(node => node.name).join("、") || "暂无分配节点"}</dd></div>
+          <div><dt>当前分配节点</dt><dd>{detail.data?.nodes.map(node => node.name).join("、") || "暂无分配节点"}</dd></div>
           <div><dt>同时在线</dt><dd>{current?.occupied} / {current?.maxConnections}</dd></div>
           <div><dt>本期结束</dt><dd>{date(draft.currentPeriodEndsAt)}</dd></div>
           <div><dt>目前总到期</dt><dd>{date(draft.expiresAt)}</dd></div>
           <div><dt>预计续费后到期</dt><dd>{date(renewalExpiry(draft.expiresAt, draft.template.validityDays))}</dd></div>
         </dl>
-        <Notice>付款核验成功后延长原订阅期限，保留原节点和导入链接，不重新分配节点。续费不增加设备名额，也不清空当前在线数。本期流量不变，下一期开始时重置；剩余流量不结转，也不能提前使用下一期额度。</Notice>
+        <Notice>付款核验时仍未到期的原节点会保留，即使服务器早于订阅到期。原节点已到期或已移除时，自动分配套餐只替换这些节点，定制套餐由管理员更换。原导入链接继续有效。续费不增加设备名额，也不清空当前在线数。本期流量不变，下一期开始时重置，剩余流量不结转，也不能提前使用下一期额度。</Notice>
         <p className="commerce-hint">价格与天数在下单时锁定，使用限额跟随套餐设置。请在付款期限内完成支付；若核验通知到达时订阅已过期，收款将转人工处理，不会恢复过期订阅。</p>
         <ErrorNotice message={error} />
         {draft.attempted && !discard && <Button type="button" variant="ghost" disabled={busy} onClick={() => setDiscard(true)}>需要另建一笔续费订单？</Button>}

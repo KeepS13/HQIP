@@ -117,6 +117,9 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 			if err != nil {
 				return out, err
 			}
+			if _, err = renewalReplacementNodes(tx, userID, subscription.ID, template, now); err != nil {
+				return out, err
+			}
 			if expires.After(subscription.ExpiresAt) {
 				expires = subscription.ExpiresAt
 			}
@@ -139,7 +142,7 @@ func (s *Store) CreatePaymentOrder(ctx context.Context, userID string, in model.
 		message := "订单已创建，节点已预留，正在获取支付链接"
 		if in.RenewalSubscriptionID != "" {
 			_, e = tx.Exec("INSERT INTO payment_renewals(order_id,subscription_id,expected_revision) VALUES(?,?,?)", out.id, in.RenewalSubscriptionID, in.ExpectedSubscriptionRevision)
-			message = "续费订单已创建，保留原订阅与节点；付款后延期，下期开始时重置流量"
+			message = "续费订单已创建，付款核验时确认原节点并延长订阅，下期开始时重置流量"
 		} else if len(template.NodeIDs) == 0 {
 			message = "定制订阅订单已创建，付款后提供订阅链接；管理员分配节点并开通后开始计时"
 		} else {

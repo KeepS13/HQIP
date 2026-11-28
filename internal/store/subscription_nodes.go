@@ -30,6 +30,15 @@ type SubscriptionNodeOptions struct {
 	Nodes        []SubscriptionNodeOption `json:"nodes"`
 }
 
+// Historical zero-count grants may already have assigned nodes. The editor
+// must allow a one-for-one repair without clearing them or resizing the grant.
+func subscriptionNodeEditCount(current *model.UserSubscription) int {
+	if current.NodesPerSubscription == 0 {
+		return len(current.NodeIDs)
+	}
+	return current.NodesPerSubscription
+}
+
 // Preview and save use the same snapshot policy. Existing active, capable
 // nodes may be retained through a temporary health/capacity outage.
 func subscriptionNodeOptions(tx *sql.Tx, current *model.UserSubscription, now time.Time) ([]SubscriptionNodeOption, error) {
@@ -159,6 +168,7 @@ func (s *Store) SubscriptionNodes(user, id string) (SubscriptionNodeOptions, err
 			return out, err
 		}
 		out.Subscription = *current
+		out.Subscription.NodesPerSubscription = subscriptionNodeEditCount(current)
 		out.Nodes, err = subscriptionNodeOptions(tx, current, now)
 		if err != nil {
 			return out, err
@@ -211,8 +221,9 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 		if current.Revision != expected {
 			return empty, ErrConflict
 		}
-		if len(ids) != current.NodesPerSubscription {
-			return empty, fmt.Errorf("%w：此订阅须选择 %d 个节点，不能增减分配数量", ErrSubscriptionNodes, current.NodesPerSubscription)
+		required := subscriptionNodeEditCount(current)
+		if len(ids) != required {
+			return empty, fmt.Errorf("%w：此订阅须选择 %d 个节点，不能增减分配数量", ErrSubscriptionNodes, required)
 		}
 		if sameNodeSet(current.NodeIDs, ids) {
 			return *current, nil
@@ -270,7 +281,7 @@ func (s *Store) UpdateSubscriptionNodes(user, id string, ids []string, expected 
 		if err = reconcileSubscriptionLeases(tx, updated, s.Now()); err != nil {
 			return empty, err
 		}
-		audit := jsonString(map[string]any{"userId": user, "subscriptionId": id, "previousNodeIds": current.NodeIDs, "nodeIds": ids, "previousTargetCount": current.NodesPerSubscription, "targetCount": len(ids), "revision": updated.Revision})
+		audit := jsonString(map[string]any{"userId": user, "subscriptionId": id, "previousNodeIds": current.NodeIDs, "nodeIds": ids, "previousTargetCount": current.NodesPerSubscription, "targetCount": updated.NodesPerSubscription, "revision": updated.Revision})
 		if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.nodes_updated',?)", s.Now().Unix(), audit); err != nil {
 			return empty, err
 		}

@@ -30,9 +30,9 @@ func validateRenewalOrder(tx *sql.Tx, user string, in model.PaymentOrderInput, n
 // handling. Receipt, extension and fulfillment commit atomically; no provider
 // request is made here. A delayed worker cannot turn a timely receipt into an
 // expired renewal, and a late receipt can never resurrect the subscription.
-// Only append a period and extend the same instance. Keep its original grant
-// key (including manual-grant replay identity), allocations, credentials and
-// online leases; the template's candidate pool is never allocated here.
+// Retain the original grant key and every surviving node. Any replacements
+// and lease revocations commit with the new period; a shortage only records
+// the blocked payment and leaves the existing entitlement intact.
 func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time.Time) (bool, error) {
 	o := r.Order
 	claimed, err := tx.Exec("UPDATE payment_orders SET revision=revision WHERE id=? AND payment_state='paid' AND fulfillment_state!='fulfilled'", o.ID)
@@ -65,6 +65,15 @@ func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time
 		message = "付款核验时订阅已到期，不能续费；已收款，等待管理员处理"
 	case !enabled || !t.Enabled:
 		message = "用户或套餐已停用，已付款续费订单等待管理员处理"
+	}
+	var replacements []string
+	if message == "" {
+		replacements, err = renewalReplacementNodes(tx, user, o.RenewalSubscriptionID, t, now)
+		if errors.Is(err, ErrRenewalNodes) {
+			message = err.Error() + "。已收到付款，请勿重复支付"
+		} else if err != nil {
+			return false, err
+		}
 	}
 	if message != "" {
 		if _, err = tx.Exec("UPDATE payment_orders SET fulfillment_state='blocked',last_error=?,revision=revision+1 WHERE id=?", message, o.ID); err != nil {
@@ -104,6 +113,18 @@ func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time
 	} else if n != 1 {
 		return false, ErrConflict
 	}
+	if replacements != nil {
+		if _, err = tx.Exec("UPDATE subscription_allocations SET node_ids=? WHERE subscription_id=?", jsonString(replacements), o.RenewalSubscriptionID); err != nil {
+			return false, err
+		}
+		updated, err := userSubscription(tx, user, o.RenewalSubscriptionID, now)
+		if err != nil {
+			return false, err
+		}
+		if err = reconcileSubscriptionLeases(tx, updated, now); err != nil {
+			return false, err
+		}
+	}
 	if _, err = tx.Exec("UPDATE payment_renewals SET period_id=? WHERE order_id=?", period, o.ID); err != nil {
 		return false, err
 	}
@@ -117,6 +138,9 @@ func (s *Store) fulfillPaymentRenewal(tx *sql.Tx, r paymentOrderRecord, now time
 		return false, err
 	}
 	details := map[string]any{"subscriptionId": o.RenewalSubscriptionID, "periodId": period, "startsAt": time.Unix(expires, 0).UTC(), "endsAt": next}
+	if replacements != nil {
+		details["nodeIds"] = replacements
+	}
 	if _, err = tx.Exec("INSERT INTO audit(at,action,subject) VALUES(?,'subscription.renewed',?)", now.Unix(), jsonString(details)); err != nil {
 		return false, err
 	}

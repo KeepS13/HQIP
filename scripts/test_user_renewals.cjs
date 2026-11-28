@@ -50,6 +50,7 @@ async function main() {
         const p = url.pathname;
         let body, status = 200;
         if (p === '/api/v1/user/session') body = { authenticated: true, user, csrfToken: 'fixture-csrf' };
+        else if (p === '/api/v1/user/announcements' && request.method() === 'GET') body = { items: [], nextCursor: '' };
         else if (p === '/api/v1/user/config') body = { portalEnabled: true, registrationEnabled: true };
         else if (p === '/api/v1/user/profile') body = { user, subscriptions, sessions: [] };
         else if (p === '/api/v1/user/subscriptions') body = subscriptions;
@@ -118,6 +119,8 @@ async function main() {
     await expect(dialog.getByRole('button', { name: '创建续费订单' })).toBeEnabled();
     assert.equal(catalogReads, 0, 'renewal depends on the public shop catalog');
     await expect(dialog).toContainText('原节点 B');
+    await expect(dialog).toContainText('付款核验时仍未到期的原节点会保留');
+    await expect(dialog).toContainText('定制套餐由管理员更换');
     await expect(dialog).not.toContainText('原节点 A');
     await expect(dialog).not.toContainText('candidate-only');
     await expect(dialog).toContainText('3 / 3');

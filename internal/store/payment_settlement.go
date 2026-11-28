@@ -120,7 +120,7 @@ func recordVerifiedPayment(s *Store, tx *sql.Tx, r paymentOrderRecord, p payment
 		return err
 	}
 	if r.Order.RenewalSubscriptionID != "" {
-		_, err = s.fulfillPaymentRenewal(tx, r, s.Now())
+		_, err = s.fulfillPaymentRenewal(tx, r, now)
 	}
 	return err
 }
